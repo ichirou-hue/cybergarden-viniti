@@ -5,8 +5,8 @@ import pdfplumber
 
 
 MAX_PAGES = 150
-CAPTION = re.compile(r"^(?:fig(?:ure)?\.?|table|рис(?:унок)?\.?|таблица)\s+\d+", re.I)
-EQUATION = re.compile(r"^(?=.{3,180}$)[\w(][\w\s@()./+\-–×∑]*\s*=\s*\S")
+CAPTION = re.compile(r"^(?:fig(?:ure)?\.?|table|рис(?:унок)?\.?|таблица)\s+\d+\s*[.:–—]", re.I)
+EQUATION = re.compile(r"^\w+(?:\([^)]{1,30}\))?\s*=\s*(?![+-]?\d+\s*%?\s*$)\S")
 
 
 def bounds(words):
@@ -52,17 +52,18 @@ def extract(data):
             raise ValueError(f"Поддерживаются PDF от 1 до {MAX_PAGES} страниц.")
         metadata = {key.lower(): str(value) for key, value in pdf.metadata.items() if value}
         for page in pdf.pages:
-            words = page.dedupe_chars().extract_words()
+            deduped = page.dedupe_chars()
+            words = deduped.extract_words()
             if not words:
                 warnings.append(f"Страница {page.page_number}: текстовый слой пуст или отсутствует.")
                 continue
             tables = page.find_tables()
             sources.extend(table_rows(tables, words, page))
             # Extract lines after excluding words belonging to detected tables.
-            text = page.filter(
+            text = deduped.filter(
                 lambda obj: obj.get("object_type") != "char"
                 or not any(is_inside(obj, table.bbox) for table in tables)
-            ).dedupe_chars()
+            )
             for line in text.extract_text_lines(return_chars=True):
                 chars = [char for char in line["chars"] if char["text"].strip()]
                 if not chars:

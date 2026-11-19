@@ -19,7 +19,7 @@ METRIC = re.compile(
     r"(?<![\w@])(?P<name>" + "|".join(f"(?:{alias})" for alias in ALIASES.values())
     + r")(?:\s*(?:@|at\s+)\s*(?P<cutoff>[1-9]\d{0,4}))?(?!\w)", re.I,
 )
-NUMBER = r"[−+\-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)"
+NUMBER = r"[−+\-]?(?:\d{1,8}(?:[.,]\d{1,12})?|[.,]\d{1,12})"
 MEASURE = re.compile(rf"(?P<number>{NUMBER})\s*(?P<percent>%)?")
 PROSE = re.compile(
     METRIC.pattern + rf"\s*(?P<header_unit>\(%\))?"
@@ -27,7 +27,12 @@ PROSE = re.compile(
     rf"(?P<number>{NUMBER})\s*(?P<percent>%)?(?![\w.,+−%-])"
     r"(?!\s*(?:±|to\b|→|–|−|\+/-))", re.I,
 )
-CONTEXT = re.compile(r"\b(?:using|evaluated on|on)\s+([\w.-]+)", re.I)
+REVERSE_PROSE = re.compile(
+    rf"(?<![\w.,+−%/-])(?P<number>{NUMBER})\s*(?P<percent>%)\s+"
+    rf"(?:label\s+)?{METRIC.pattern}", re.I,
+)
+DATASET = re.compile(r"\b(?:evaluated on|on|for)\s+([\w.-]+)\b", re.I)
+METHOD = re.compile(r"\busing\s+([\w.-]+)\b", re.I)
 
 
 def clean(text):
@@ -55,7 +60,8 @@ def finding(match, raw_value, source, evidence, group, context, header_percent=F
     return {
         "metric": metric_name(raw_value["name"]),
         "cutoff": int(raw_value["cutoff"]) if raw_value["cutoff"] else None,
-        "value": float(value), "unit": unit, "raw_value": match[0].strip(),
+        "value": float(value), "unit": unit,
+        "raw_value": match["number"] + ("%" if match["percent"] else ""),
         "source_id": source["id"], "evidence": evidence, "header": header,
         "group": group, "context": context, "issues": issues,
     }
@@ -95,14 +101,20 @@ def extract_facts(sources):
         if source["kind"] not in {"text", "caption"}:
             continue
         quote = clean(source["quote"])
-        for match in PROSE.finditer(quote):
-            if match.start() and quote[match.start() - 1] in {"Δ", "δ"}:
+        matches = sorted([*PROSE.finditer(quote), *REVERSE_PROSE.finditer(quote)],
+                         key=lambda match: match.start())
+        previous_end = 0
+        for match in matches:
+            if match.start() < previous_end:
                 continue
-            context = CONTEXT.search(quote)
-            # Prose mentions do not establish comparable experimental conditions.
-            facts.append(finding(match, match, source, source, None,
-                                 context[1].rstrip(".") if context else "",
-                                 bool(match["header_unit"])))
+            previous_end = match.end()
+            # Compare table rows only. Nearby prose may describe other experiments.
+            context = " · ".join(
+                found[1] for regex in (METHOD, DATASET)
+                if (found := regex.search(quote))
+            )
+            facts.append(finding(match, match, source, source, None, context,
+                                 bool(match.groupdict().get("header_unit"))))
     facts.sort(key=lambda fact: (fact["source_id"], fact["evidence"]["bbox"][0]))
     for index, fact in enumerate(facts, 1):
         fact["id"] = index
