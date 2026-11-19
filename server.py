@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlsplit
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 
+from demo import demo_pdf
 from library import Library, MAX_BYTES
 from pdf_source import render
 
@@ -74,6 +75,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_data(render(data, anchor["page"], anchor["bbox"]), "image/png")
 
     def do_POST(self):
+        if self.path == "/api/demo":
+            result = self.server.library.ingest("retrieval-demo.pdf", demo_pdf())
+            self.send_json(result, 201)
+            return
         if self.path != "/api/papers":
             self.send_json({"error": "Маршрут не найден."}, 404)
             return
