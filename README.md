@@ -4,7 +4,21 @@
 
 ## Запуск
 
-Нужен Python 3.12 с pip. В корне этого репозитория выполните:
+Нужен Python 3.12 с модулями `pip` и `venv`. На Linux их можно установить через пакетный менеджер своего дистрибутива, если они отсутствуют.
+
+### Linux и macOS
+
+```bash
+git clone https://github.com/ichirou-hue/cybergarden-viniti.git
+cd cybergarden-viniti
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python server.py
+```
+
+Для клонирования нужен доступ к приватному репозиторию. Если Python 3.12 установлен под именем `python3`, проверьте версию через `python3 --version` и используйте этот исполняемый файл.
+
+### Windows (PowerShell)
 
 ```powershell
 python -m venv .venv
@@ -12,7 +26,16 @@ python -m venv .venv
 .\.venv\Scripts\python.exe server.py
 ```
 
-Для macOS и Linux замените `.\.venv\Scripts\python.exe` на `.venv/bin/python`. Откройте [http://127.0.0.1:8765](http://127.0.0.1:8765). После установки пакетов приложение работает офлайн. База по умолчанию создаётся в `data/papers.sqlite3`. Параметры `--port` и `--db` меняют порт и путь к базе.
+Откройте [http://127.0.0.1:8765](http://127.0.0.1:8765). После установки пакетов приложение работает офлайн. База по умолчанию создаётся в `data/papers.sqlite3`. Параметры `--port` и `--db` меняют порт и путь к базе.
+
+### Пакетный разбор
+
+```bash
+.venv/bin/python analyze_pdfs.py articles/*.pdf -o results.jsonl
+.venv/bin/python -m unittest -v
+```
+
+В PowerShell используйте `.\.venv\Scripts\python.exe` и укажите PDF отдельными аргументами. Пакетный разбор работает без сервера. Он записывает по одному JSON-объекту на успешно разобранный PDF в новый файл. Ошибки выводятся в stderr, а итоговый код 1 означает, что часть входных файлов обработать не удалось. В новых результатах есть SHA-256 исходного PDF и версия извлечения в `extraction`.
 
 ## Сценарий демонстрации
 
