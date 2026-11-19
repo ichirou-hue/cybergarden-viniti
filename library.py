@@ -1,6 +1,7 @@
 from contextlib import closing
 from hashlib import sha256
 import json
+from importlib.metadata import version
 from pathlib import Path
 import sqlite3
 
@@ -9,6 +10,19 @@ from rag_facts import analyze
 
 
 MAX_BYTES = 20 * 1024 * 1024
+EXTRACTOR_REVISION = 1
+
+
+def analyze_pdf(name, data):
+    if len(data) > MAX_BYTES or not data.startswith(b"%PDF-"):
+        raise ValueError("Нужен PDF размером до 20 МиБ.")
+    name = Path(name.replace("\\", "/")).name[:240] or "article.pdf"
+    result = analyze(extract(data))
+    result.update(
+        id=sha256(data).hexdigest(), name=name, title=result["title"] or name,
+        extraction={"revision": EXTRACTOR_REVISION, "pdfplumber": version("pdfplumber")},
+    )
+    return result
 
 
 class Library:
@@ -57,12 +71,11 @@ class Library:
             return self.get(paper_id)
         except KeyError:
             pass
-        name = Path(name.replace("\\", "/")).name[:240] or "article.pdf"
-        result = analyze(extract(data))
-        result.update(id=paper_id, name=name, title=result["title"] or name)
+        result = analyze_pdf(name, data)
         with closing(self.connect()) as db, db:
             db.execute(
                 "INSERT OR IGNORE INTO papers VALUES (?, ?, ?, ?)",
-                (paper_id, name, data, json.dumps(result, ensure_ascii=False, allow_nan=False)),
+                (paper_id, result["name"], data,
+                 json.dumps(result, ensure_ascii=False, allow_nan=False)),
             )
         return self.get(paper_id)
