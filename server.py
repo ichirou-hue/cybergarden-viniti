@@ -126,6 +126,10 @@ class Handler(BaseHTTPRequestHandler):
             self.jobs(single)
             return
 
+        if path == "/api/papers":
+            self.send_json(self.server.library.list())
+            return
+
         if path.startswith("/api/papers/"):
             self.legacy_paper(path, parts.query)
             return
