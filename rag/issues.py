@@ -84,10 +84,13 @@ def add_issues(builder: "Builder") -> None:
             record_ids=";".join(row["result_id"] for row in group[:20]),
         )
 
-    # 2. Одна и та же метрика одной конфигурации имеет разные значения.
-    by_key: dict[tuple[str, str, str, str], list[dict[str, str]]] = defaultdict(list)
+    # 2. Внутри одного эксперимента одна и та же ячейка имеет разные значения.
+    # Разные эксперименты законно дают разные числа, поэтому experiment_id
+    # входит в ключ: иначе замечание срабатывает на нормальных данных.
+    by_key: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         key = (
+            row.get("experiment_id", ""),
             row.get("config_id", ""),
             row.get("dataset_id", ""),
             row.get("metric_name", ""),
@@ -100,9 +103,9 @@ def add_issues(builder: "Builder") -> None:
             builder.issue(
                 check_name="conflicting_values_for_same_measurement",
                 description=(
-                    "Одна и та же метрика одной конфигурации и набора встречается "
-                    "с разными значениями. Возможны разные эксперименты или разные "
-                    "единицы; строки сохранены без усреднения."
+                    "В одном эксперименте одна и та же ячейка (конфигурация, набор, "
+                    "метрика, k) встречается с разными значениями. Возможны разные "
+                    "единицы или разные срезы; строки сохранены без усреднения."
                 ),
                 source_page=group[0].get("source_page", ""),
                 source_fragment=group[0].get("source_fragment", ""),

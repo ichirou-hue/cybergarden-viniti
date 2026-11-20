@@ -82,9 +82,17 @@ def _clean_token(text: str) -> str:
     return token
 
 
-def _numeric_words(line: Line) -> list[Word]:
+def _numeric_words(
+    line: Line,
+    x0: float | None = None,
+    x1: float | None = None,
+) -> list[Word]:
     found: list[Word] = []
     for word in line.words:
+        if x0 is not None and x1 is not None:
+            center = (word.x0 + word.x1) / 2
+            if not x0 <= center <= x1:
+                continue
         token = _clean_token(word.text)
         if token and is_number(token):
             found.append(Word(token, word.x0, word.y0, word.x1, word.y1))
@@ -170,7 +178,13 @@ def _label_column_start(
     return start
 
 
-def _row_label(line: Line, numbers: list[Word], label_start: float | None = None) -> str:
+def _row_label(
+    line: Line,
+    numbers: list[Word],
+    label_start: float | None = None,
+    x0: float | None = None,
+    x1: float | None = None,
+) -> str:
     if not numbers:
         return ""
     first = numbers[0].x0
@@ -178,16 +192,34 @@ def _row_label(line: Line, numbers: list[Word], label_start: float | None = None
     label = " ".join(
         w.text
         for w in line.words
-        if w.x1 <= first + 0.5 and (left is None or w.x0 >= left)
+        if w.x1 <= first + 0.5
+        and (left is None or w.x0 >= left)
+        and (
+            x0 is None
+            or x1 is None
+            or x0 <= (w.x0 + w.x1) / 2 <= x1
+        )
     )
     for mark in "✓✗✔✘×✕":
         label = label.replace(mark, " ")
     return re.sub(r"\s+", " ", label).strip(" .:|-")
 
 
-def _cells(line: Line, gap: float = 6.0) -> list[tuple[str, float, float]]:
+def _cells(
+    line: Line,
+    gap: float = 6.0,
+    x0: float | None = None,
+    x1: float | None = None,
+) -> list[tuple[str, float, float]]:
     """Разбить строку шапки на ячейки по горизонтальным разрывам."""
-    words = sorted(line.words, key=lambda w: w.x0)
+    words = sorted(
+        (
+            w
+            for w in line.words
+            if x0 is None or x1 is None or x0 <= (w.x0 + w.x1) / 2 <= x1
+        ),
+        key=lambda w: w.x0,
+    )
     if not words:
         return []
     cells: list[list[Word]] = [[words[0]]]
@@ -230,9 +262,20 @@ def _cell_for(center: float, cells: list[tuple[str, float, float]], bounds: list
     return ""
 
 
-def _caption(page: Page, band_top: float, band_bottom: float) -> tuple[str, str, float]:
+def _caption(
+    page: Page,
+    band_top: float,
+    band_bottom: float,
+    x0: float = 0.0,
+    x1: float = 0.0,
+) -> tuple[str, str, float]:
     """Найти подпись таблицы рядом с полосой. Возвращает (номер, текст, y)."""
     candidates = [line for line in page.lines if _CAPTION_ANY.match(line.text)]
+    if x1 > x0:
+        # Подпись соседней колонки к этой таблице не относится.
+        candidates = [
+            line for line in candidates if min(line.x1, x1) - max(line.x0, x0) > 0
+        ]
     best: tuple[str, str, float] | None = None
     for line in candidates:
         distance = min(abs(line.y0 - band_top), abs(line.y0 - band_bottom))
@@ -278,21 +321,87 @@ def find_tables(page: Page) -> list[Table]:
 
     tables: list[Table] = []
     for band in bands:
-        if len(band) < 2:
-            continue
-        table = _parse_band(page, band, height)
-        if table is not None and table.rows:
-            tables.append(table)
+        for x0, x1, group in _x_groups(band):
+            if len(group) < 2:
+                continue
+            table = _parse_band(page, group, height, x0, x1)
+            if table is not None and table.rows:
+                tables.append(table)
     return tables
 
 
-def _parse_band(page: Page, band: list[Line], height: float) -> Table | None:
+def _x_groups(band: list[Line]) -> list[tuple[float, float, list[Line]]]:
+    """Разделить полосу на таблицы, стоящие рядом по горизонтали.
+
+    Две колонки страницы дают две таблицы с непересекающимися x-диапазонами.
+    Склеенные визуальные строки (левая и правая колонка на одной высоте)
+    попадают в обе группы, но при разборе каждая группа берёт только свои
+    слова — см. ``_parse_band(..., x0, x1)``.
+    """
+    band_x0 = min(line.x0 for line in band)
+    band_x1 = max(line.x1 for line in band)
+    band_width = max(band_x1 - band_x0, 1.0)
+    seeds = [line for line in band if line.x1 - line.x0 <= 0.6 * band_width] or band
+
+    clusters: list[list[Line]] = []
+    for line in seeds:
+        for cluster in clusters:
+            cx0 = min(item.x0 for item in cluster)
+            cx1 = max(item.x1 for item in cluster)
+            overlap = min(cx1, line.x1) - max(cx0, line.x0)
+            narrow = min(cx1 - cx0, line.x1 - line.x0)
+            if narrow > 0 and overlap > 0.4 * narrow:
+                cluster.append(line)
+                break
+        else:
+            clusters.append([line])
+
+    if len(clusters) <= 1:
+        # Одна колонка: фильтровать по x нельзя, иначе узкие строки (подписи,
+        # графики) обрежут широкую таблицу.
+        return [(min(line.x0 for line in band), max(line.x1 for line in band), band)]
+
+    groups: list[tuple[float, float, list[Line]]] = []
+    for cluster in clusters:
+        cx0 = min(line.x0 for line in cluster)
+        cx1 = max(line.x1 for line in cluster)
+        # Границы таблицы — по строкам, которые целиком лежат в этой колонке.
+        # Склеенные строки (обе колонки сразу) сюда не входят, иначе граница
+        # растянулась бы на всю страницу.
+        tight = [
+            line
+            for line in band
+            if (line.x1 - line.x0) > 0
+            and (min(line.x1, cx1) - max(line.x0, cx0)) >= 0.8 * (line.x1 - line.x0)
+        ]
+        gx0 = min(line.x0 for line in tight) if tight else cx0
+        gx1 = max(line.x1 for line in tight) if tight else cx1
+        members = [line for line in band if min(line.x1, gx1) - max(line.x0, gx0) > 0]
+        groups.append((gx0, gx1, members))
+    return groups
+
+
+def _parse_band(
+    page: Page,
+    band: list[Line],
+    height: float,
+    x0: float = 0.0,
+    x1: float = 0.0,
+) -> Table | None:
     top = band[0].y0
     bottom = band[-1].y1
+    band_x0 = x0 or min(line.x0 for line in band)
+    band_x1 = x1 or max(line.x1 for line in band)
 
     header_lines: list[Line] = []
     cursor = top
-    for line in reversed([l for l in page.lines if l.y1 <= top + 1]):
+    above = [
+        l
+        for l in page.lines
+        if l.y1 <= top + 1
+        and min(l.x1, band_x1) - max(l.x0, band_x0) > 0  # шапка своей колонки
+    ]
+    for line in reversed(above):
         if cursor - line.y1 > max(1.7 * height, 12.0):
             break
         if _CAPTION_ANY.match(line.text):
@@ -310,7 +419,7 @@ def _parse_band(page: Page, band: list[Line], height: float) -> Table | None:
     counts: list[int] = []
     row_numbers: dict[int, list[Word]] = {}
     for index, line in enumerate(band):
-        numbers = _numeric_words(line)
+        numbers = _numeric_words(line, band_x0, band_x1)
         row_numbers[index] = numbers
         counts.append(len(numbers))
         centers.extend((word.x0 + word.x1) / 2 for word in numbers)
@@ -327,7 +436,7 @@ def _parse_band(page: Page, band: list[Line], height: float) -> Table | None:
     width = max(x1 - x0, 1.0)
     levels: list[list[tuple[str, float, float]]] = []
     for line in header_lines:
-        cells = _cells(line)
+        cells = _cells(line, x0=band_x0, x1=band_x1)
         if not cells:
             continue
         span = max(c[2] for c in cells) - min(c[1] for c in cells)
@@ -373,7 +482,7 @@ def _parse_band(page: Page, band: list[Line], height: float) -> Table | None:
         numbers = row_numbers[index]
         if len(numbers) < 2:
             continue
-        label = _row_label(line, numbers, label_start)
+        label = _row_label(line, numbers, label_start, band_x0, band_x1)
         if not label:
             continue
         row = Row(label=label, fragment=line.text, y=line.y0)
@@ -414,7 +523,7 @@ def _parse_band(page: Page, band: list[Line], height: float) -> Table | None:
             row.generator = generator
             row.dataset = dataset
 
-    caption, caption_text, _ = _caption(page, top, bottom)
+    caption, caption_text, _ = _caption(page, top, bottom, band_x0, band_x1)
     if caption_text.lower().startswith("figure"):
         return None
     table = Table(

@@ -542,6 +542,11 @@ def report_to_dict(report: Report) -> dict:
             if "results" in report.by_table_value_mode
             else None
         ),
+        "results_cell_mode": (
+            table_dict(report.by_table_cell_mode["results"])
+            if "results" in report.by_table_cell_mode
+            else None
+        ),
         "publications": {
             publication_id: {name: table_dict(score) for name, score in tables.items()}
             for publication_id, tables in report.by_publication.items()

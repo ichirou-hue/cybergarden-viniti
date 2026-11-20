@@ -46,6 +46,12 @@ _ID_WIDTH = {"configurations": 2, "datasets": 2, "tasks": 2, "experiments": 2, "
 _UNSPECIFIED_DATASET = "Unspecified"
 _UNSPECIFIED_TASK = "unspecified"
 
+#: Колонки разницы: значение в них — дельта, а не метрика.
+_DELTA_COLUMN = re.compile(
+    r"(^|[\s|(])(?:Δ|∆|delta|diff|difference|improvement|gain)(?=$|[\s|)])",
+    re.I,
+)
+
 _PROPOSED = re.compile(
     r"(?:we\s+(?:propose|present|introduce|develop)|our\s+(?:approach|method|system))\s+"
     r"([A-Z][A-Za-z0-9\-]{2,30})"
@@ -358,6 +364,47 @@ def generator_from_text(prose: str) -> str:
     return normalize_generator(name)
 
 
+_GPU_MODEL = re.compile(
+    r"\b(A100|A800|A6000|H100|H800|H20|V100|L40S|L4|RTX\s*\d{4}|TPU\s*v\d[\w.]*)\b",
+    re.I,
+)
+_GPU_LEAD = re.compile(r"((?:\d{1,2}\s*(?:[x×]\s*)?)?(?:(?:NVIDIA|AMD|Intel)\s+)?)$", re.I)
+_GPU_TAIL = re.compile(r"(?:\s*\d{2}\s*GB)?(?:\s*(?:GPUs?|TPUs?))?", re.I)
+
+
+def hardware_from_text(prose: str) -> str:
+    """Железо из прозы: «4 NVIDIA A6000 GPUs» и подобные упоминания.
+
+    Берётся только явно названная модель ускорителя, чтобы не выдумывать
+    конфигурацию. Строка приводится к виду «<кол-во> <вендор> <модель> <юнит>».
+    """
+    flat = re.sub(r"\s+", " ", prose)
+    for match in _GPU_MODEL.finditer(flat):
+        head = _GPU_LEAD.search(flat[: match.start()])
+        tail = _GPU_TAIL.match(flat, match.end())
+        span = flat[(head.start(1) if head else match.start()): (tail.end() if tail else match.end())]
+        span = span.strip(" ,.;:")
+        lowered = span.casefold()
+        if not re.search(r"nvidia|amd|intel|gpu|tpu", lowered):
+            continue
+        return span
+    return ""
+
+
+def sample_size_from_text(prose: str) -> str:
+    """Единственное явное число сэмплов в прозе; иначе пусто."""
+    counts = {
+        m.group(1)
+        for m in re.finditer(
+            r"(\d{2,6})\s+(?:randomly\s+sampled|sampled|held-?out|test|evaluation)\s+"
+            r"(?:queries|questions|samples|examples|instances|prompts)\b",
+            prose,
+            re.I,
+        )
+    }
+    return counts.pop() if len(counts) == 1 else ""
+
+
 def dataset_in_text(text: str) -> str:
     best = ""
     position = len(text) + 1
@@ -500,18 +547,32 @@ def _extract_table(
     task_id: str,
     default_config: dict[str, str],
     default_dataset: str,
+    hardware: str = "",
+    sample_size: str = "",
 ) -> int:
     if not table.columns:
         return 0
     caption = table.caption or "unnumbered table"
+    metrics = sorted({metric_display(c.metric) for c in table.columns if c.metric})
+    datasets = sorted({c.dataset for c in table.columns if c.dataset})
+    details = ""
+    if datasets:
+        details += f" Datasets in columns: {', '.join(datasets[:8])}."
+    if metrics:
+        details += f" Metrics: {', '.join(metrics[:8])}."
     protocol = (
-        f"{caption} evaluation: one row per configuration, one column per "
-        f"dataset/metric; values read from the table as printed."
+        f"{caption}: one row per configuration, one column per dataset/metric;"
+        f" values read from the table as printed.{details}"
     )
     if table.caption_text:
         protocol = f"{table.caption_text} {protocol}"
+    # Число сэмплов ищем рядом с таблицей, а не по всей статье: иначе один
+    # и тот же счётчик приписывается всем экспериментам подряд.
+    local_sample = sample_size_from_text(f"{table.caption_text} {table.page_text}")
     experiment_id = builder.experiment(
         evaluation_protocol=protocol,
+        hardware=hardware,
+        sample_size=local_sample,
         note=f"PDF p. {table.page}, {caption}.",
     )
 
@@ -531,6 +592,13 @@ def _extract_table(
             column = table.columns[column_index]
             metric = column.metric
             if metric is None:
+                continue
+            if _DELTA_COLUMN.search(column.text):
+                # Колонка разницы (Δ) — это не значение метрики.
+                continue
+            if value < 0:
+                # В таблицах отрицательные числа — это дельты (Δ, «improvement»),
+                # а не значения метрики. Как результат их не выдаём.
                 continue
 
             if rows_are_datasets:
@@ -629,6 +697,8 @@ def extract_document(publication_id: str, document: Document) -> Extraction:
         default_config["generator_model"] = generator
 
     default_dataset = dataset_in_text(prose)
+    hardware = hardware_from_text(prose)
+    sample_size = sample_size_from_text(prose)
 
     tables: list[Table] = []
     for page in document.pages:
@@ -641,6 +711,8 @@ def extract_document(publication_id: str, document: Document) -> Extraction:
             task_id=task_id,
             default_config=default_config,
             default_dataset=default_dataset,
+            hardware=hardware,
+            sample_size=sample_size,
         )
 
     # Прозаические результаты — только если таблицы не дали ни одной строки.
@@ -648,6 +720,8 @@ def extract_document(publication_id: str, document: Document) -> Extraction:
         config_id = builder.config(**default_config)
         experiment_id = builder.experiment(
             evaluation_protocol="Values stated in prose; no numeric table extracted.",
+            hardware=hardware,
+            sample_size=sample_size,
             note="Prose-only extraction.",
         )
         _prose_results(builder, document, experiment_id, task_id, config_id)
