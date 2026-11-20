@@ -247,6 +247,8 @@ input[type=search]::placeholder { color: #7d9296; }
   background: #10191c; border: 1px solid var(--line); border-radius: 12px;
 }
 .results table { min-width: 720px; }
+table.passport-table.no-context th:nth-child(3),
+table.passport-table.no-context td:nth-child(3) { display: none; }
 table { width: 100%; border-collapse: collapse; text-align: left; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th {
@@ -326,6 +328,7 @@ table.compact { width: 100%; min-width: 0; }
 .workspace > .panel { padding-bottom: 12px; }
 .workspace > .panel > .filters { padding: 14px 18px 6px; }
 .workspace > .panel > .count { padding: 0 18px; }
+.workspace > .panel > .bar.more { padding: 0 18px 8px; }
 .workspace > .panel > .results { margin: 0 18px; }
 .workspace > .panel .results { max-height: min(60vh, 640px); }
 .results td.empty { padding: 24px 12px; text-align: center; color: var(--muted); }
@@ -341,6 +344,7 @@ td.metric strong { white-space: nowrap; }
 .row-button {
   background: none; border: 0; padding: 3px 0; font: inherit; font-weight: 700;
   color: var(--accent); text-align: left; white-space: normal;
+  justify-content: flex-start;
 }
 .row-button:hover:not(:disabled) { background: none; border-color: transparent; text-decoration: underline; }
 .table-wrap { overflow-x: auto; }
@@ -443,7 +447,17 @@ dialog img {
   table.passport-table th:nth-child(3) { width: 21%; }
   table.passport-table th:nth-child(4) { width: 26%; }
   table.passport-table .row-button { width: 100%; }
-  table.passport-table .badge { white-space: normal; font-size: .7rem; padding: 2px 6px; }
+  table.passport-table .badge { white-space: normal; hyphens: none; font-size: .7rem; padding: 2px 6px; }
+  table.passport-table.no-context th:nth-child(1) { width: 46%; }
+  table.passport-table.no-context th:nth-child(2) { width: 26%; }
+  table.passport-table.no-context th:nth-child(4) { width: 28%; }
+  table.passport-table.no-context th:nth-child(3),
+  table.passport-table.no-context td:nth-child(3) { display: none; }
+  table.sources-table { table-layout: fixed; min-width: 0; }
+  table.sources-table th { white-space: normal; }
+  table.sources-table th:nth-child(1) { width: 28%; }
+  table.sources-table th:nth-child(3) { width: 92px; }
+  table.sources-table .quote { min-width: 0; }
   .toolbar { gap: 8px; }
   .upload { margin-left: 0; width: 100%; }
   .upload .file { max-width: none; }

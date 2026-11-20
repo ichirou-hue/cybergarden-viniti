@@ -255,6 +255,19 @@ export function renderPassport(root, ctx) {
 
   let selected = null;
   let shown = PAGE_SIZE;
+  let moreButton = null;
+  const moreHost = el("div", {class: "bar more"});
+  const hasContext = rows.some(row => row.context);
+  const table = el("table", {class: "passport-table" + (hasContext ? "" : " no-context")},
+    el("caption", {class: "sr-only", text: "Результаты паспорта"}),
+    el("thead", {}, el("tr", {},
+      el("th", {scope: "col", text: "Метрика"}),
+      el("th", {scope: "col", text: "Значение"}),
+      el("th", {scope: "col", text: "Контекст"}),
+      el("th", {scope: "col", text: "Проверка"}),
+    )),
+    body,
+  );
 
   function drawDetail() {
     detail.replaceChildren();
@@ -352,25 +365,24 @@ export function renderPassport(root, ctx) {
         colspan: 4, class: "empty",
         text: rows.length ? "Результаты не найдены" : "В паспорте нет результатов",
       })));
-    } else if (filtered.length > visible.length) {
+    }
+    moreHost.replaceChildren();
+    moreButton = null;
+    if (filtered.length > visible.length) {
       const next = Math.min(PAGE_SIZE, filtered.length - visible.length);
-      body.append(el("tr", {class: "more"}, el("td", {colspan: 4},
-        el("button", {
-          type: "button", class: "secondary", text: `Показать ещё ${number(next)}`,
-          onclick: () => {
-            const firstNew = visible.length;
-            shown += PAGE_SIZE;
-            drawRows();
-            const buttons = body.querySelectorAll("button.row-button");
-            if (!buttons[firstNew]) return;
-            try {
-              buttons[firstNew].focus({preventScroll: true});
-            } catch {
-              buttons[firstNew].focus();
-            }
-          },
-        }),
-      )));
+      moreButton = el("button", {
+        type: "button", class: "secondary", text: `Показать ещё ${number(next)}`,
+        onclick: () => {
+          shown += PAGE_SIZE;
+          drawRows();
+          try {
+            moreButton?.focus({preventScroll: true});
+          } catch {
+            moreButton?.focus();
+          }
+        },
+      });
+      moreHost.append(moreButton);
     }
     count.textContent = filtered.length
       ? `Показано ${number(Math.min(shown, filtered.length))} из ${number(filtered.length)}`
@@ -440,17 +452,9 @@ export function renderPassport(root, ctx) {
           el("label", {}, "Проверка", status),
         ),
         count,
+        moreHost,
         el("div", {class: "results", tabindex: "0", role: "region", "aria-label": "Результаты паспорта"},
-          el("table", {class: "passport-table"},
-            el("caption", {class: "sr-only", text: "Результаты паспорта"}),
-            el("thead", {}, el("tr", {},
-              el("th", {scope: "col", text: "Метрика"}),
-              el("th", {scope: "col", text: "Значение"}),
-              el("th", {scope: "col", text: "Контекст"}),
-              el("th", {scope: "col", text: "Проверка"}),
-            )),
-            body,
-          ),
+          table,
         ),
       ),
       el("aside", {class: "panel detail", "aria-labelledby": "passport-detail-title"},
@@ -466,4 +470,16 @@ export function renderPassport(root, ctx) {
   );
 
   paint();
+  if (notice?.tone === "good") {
+    const frame = typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame : (task => setTimeout(task, 0));
+    frame(() => {
+      const workspace = root.querySelector(".workspace");
+      if (!workspace || typeof workspace.scrollIntoView !== "function") return;
+      const box = workspace.getBoundingClientRect();
+      if (box.top > window.innerHeight - 120) {
+        workspace.scrollIntoView({block: "start", behavior: "smooth"});
+      }
+    });
+  }
 }

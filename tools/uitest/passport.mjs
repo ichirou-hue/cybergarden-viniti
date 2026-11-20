@@ -295,9 +295,16 @@ await step("паспорт: окно строк", async () => {
     await page.locator("#view .count").innerText());
   const more = page.locator('#view button:has-text("Показать ещё")');
   check("окно: кнопка «Показать ещё»", await more.count() === 1);
-  await more.click();
-  await page.waitForTimeout(300);
+  const moreBox = await more.boundingBox();
+  const tableBox = await page.locator("#view .workspace .results").boundingBox();
+  check("окно: кнопка над таблицей", moreBox && tableBox && moreBox.y + moreBox.height <= tableBox.y,
+    `${JSON.stringify(moreBox)} / ${JSON.stringify(tableBox)}`);
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(350);
   check("окно: после клика 400 строк", await buttons() === 400, String(await buttons()));
+  const focusText = await page.evaluate(() => document.activeElement?.innerText?.trim() || "");
+  check("окно: фокус остаётся на кнопке", focusText.startsWith("Показать ещё"), focusText);
   await page.locator("#view tbody button.row-button").nth(250).click();
   await page.selectOption('#view select[aria-label="Проверка"]', "passed");
   await page.waitForTimeout(300);
@@ -529,6 +536,26 @@ await step("мобильная ширина", async () => {
   await mp.waitForTimeout(500);
   const catalog = await mp.locator("#view .results").evaluate(el => ({scrollWidth: el.scrollWidth, clientWidth: el.clientWidth}));
   check("мобилка: каталог скроллится внутри", catalog.scrollWidth > catalog.clientWidth, JSON.stringify(catalog));
+
+  const exportData = await (await context.request.get(`${base}/api/documents/rag:d020/export.json`)).json();
+  await mp.goto(`${base}/#/passport`, {waitUntil: "networkidle"});
+  await mp.setInputFiles("#passport", {name: "export.json", mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(exportData))});
+  await mp.waitForTimeout(800);
+  check("мобилка: «Контекст» скрыт, если его нет",
+    !(await mp.locator("#view .passport-table th", {hasText: "Контекст"}).isVisible()));
+  const exportBox = await mp.locator("#view .workspace .results").evaluate(el => ({sw: el.scrollWidth, cw: el.clientWidth}));
+  check("мобилка: экспорт без скролла", exportBox.sw <= exportBox.cw + 1, JSON.stringify(exportBox));
+  const justify = await mp.locator("#view .row-button").first().evaluate(node => getComputedStyle(node).justifyContent);
+  check("мобилка: метрика по левому краю", ["flex-start", "flow-start", "start"].includes(justify), justify);
+
+  await mp.goto(`${base}/#/doc/rag:d020?track=rag&tab=sources`, {waitUntil: "networkidle"});
+  await mp.waitForTimeout(700);
+  const frag = await mp.locator("#view .results").evaluate(el => ({sw: el.scrollWidth, cw: el.clientWidth}));
+  check("мобилка: фрагменты без скролла", frag.sw <= frag.cw + 1, JSON.stringify(frag));
+  const fragButton = await mp.locator("#view .sources-table tbody button").first().boundingBox();
+  check("мобилка: «Стр.» в экране", fragButton && fragButton.x + fragButton.width <= 390,
+    JSON.stringify(fragButton));
   await mobile.close();
 });
 
