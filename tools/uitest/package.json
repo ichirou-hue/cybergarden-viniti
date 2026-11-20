@@ -2,7 +2,7 @@
   "name": "viniti-uitest",
   "private": true,
   "type": "module",
-  "description": "jsdom- и e2e-проверки каталога RAG (dev only)",
+  "description": "jsdom- и e2e-проверки каталога RAG и паспорта (dev only)",
   "scripts": {
     "test": "node harness.mjs",
     "e2e": "node e2e.mjs",

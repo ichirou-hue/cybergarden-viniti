@@ -386,7 +386,7 @@ export function renderPassport(root, ctx) {
         ),
         count,
         el("div", {class: "results", tabindex: "0", role: "region", "aria-label": "Результаты паспорта"},
-          el("table", {},
+          el("table", {class: "passport-table"},
             el("caption", {class: "sr-only", text: "Результаты паспорта"}),
             el("thead", {}, el("tr", {},
               el("th", {scope: "col", text: "Метрика"}),
