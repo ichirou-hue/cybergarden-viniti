@@ -763,6 +763,7 @@ async function renderSources(body, ctx, summary) {
     if (id !== request || ctx.signal.aborted) return;
     count.textContent = data.items.length < data.total
       ? `Фрагментов: ${number(data.total)} · показаны первые ${number(data.items.length)}`
+        + " · уточните поиск, чтобы сузить выборку"
       : `Фрагментов: ${number(data.total)}`;
     if (!data.items.length) {
       fill(wrap, emptyState("Фрагменты не найдены."));

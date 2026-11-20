@@ -65,11 +65,10 @@ function setContext(text) {
 }
 
 function renderTracks(active = app.track) {
-  fill(trackBar, app.descriptors.map(item => el("button", {
-    type: "button",
-    class: "track" + (item.track === active ? " active" : ""),
-    "aria-pressed": item.track === active ? "true" : "false",
-    onclick: () => { location.hash = buildHash("/", {track: item.track}).slice(1); },
+  fill(trackBar, app.descriptors.map(item => el("a", {
+    class: "track",
+    href: buildHash("/", {track: item.track}),
+    "aria-current": item.track === active ? "page" : null,
     text: item.label || item.track,
   })));
 }

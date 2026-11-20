@@ -144,7 +144,7 @@ await step("демо", async () => {
     (await heroActions()).some(text => text.includes("Привязать исходный PDF")), (await heroActions()).join(" | "));
   check("демо: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
   check("демо: вкладка RAG на месте и не активна", await page.locator("#tracks .track").isVisible() &&
-    await page.locator("#tracks .track.active").count() === 0);
+    await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
   check("демо: «Паспорт» отмечен aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   check("демо: таблица в .results", await page.locator("#view .workspace .results table").count() === 1);
   check("демо: .table-wrap больше нет", await page.locator("#view .table-wrap").count() === 0);
@@ -472,7 +472,7 @@ await step("навигация", async () => {
   check("паспорт: H1", (await h1()) === "Паспорт публикации.");
   check("паспорт: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
   check("паспорт: вкладка RAG осталась", await page.locator("#tracks .track").isVisible() &&
-    await page.locator("#tracks .track.active").count() === 0);
+    await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
   check("паспорт: aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   await page.goBack();
   await page.waitForTimeout(500);
@@ -499,7 +499,7 @@ await step("навигация", async () => {
   await page.click('#tracks .track:has-text("RAG")');
   await page.waitForTimeout(400);
   check("паспорт → каталог по вкладке RAG", page.url().includes("#/?track=rag"), page.url());
-  check("каталог: RAG снова активен", (await page.locator("#tracks .track.active").innerText()).trim() === "RAG");
+  check("каталог: RAG снова активен", (await page.locator("#tracks .track[aria-current=\"page\"]").innerText()).trim() === "RAG");
   await open("#/nope");
   check("навигация: неизвестный путь", (await page.locator("#view").innerText()).includes("Страница не найдена"));
 });

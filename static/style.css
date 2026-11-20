@@ -78,7 +78,7 @@ body[data-view="passport"] .upload { display: none; }
   font: inherit; font-weight: 600; line-height: 1.2; text-decoration: none;
   cursor: pointer;
 }
-.track:hover:not(:disabled) { background: transparent; color: #fff; border-color: transparent; }
+.track:hover:not(:disabled) { background: #1b2a2f; color: #fff; border-color: transparent; }
 .track.active, .track.active:hover:not(:disabled),
 .track[aria-current="page"], .track[aria-current="page"]:hover {
   background: var(--accent); color: var(--accent-ink);
@@ -447,6 +447,10 @@ dialog img {
   table.passport-table th:nth-child(3) { width: 21%; }
   table.passport-table th:nth-child(4) { width: 26%; }
   table.passport-table .row-button { width: 100%; }
+  .detail .value {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+    overflow: hidden;
+  }
   table.passport-table .badge { white-space: normal; hyphens: none; font-size: .7rem; padding: 2px 6px; }
   table.passport-table.no-context th:nth-child(1) { width: 46%; }
   table.passport-table.no-context th:nth-child(2) { width: 26%; }
