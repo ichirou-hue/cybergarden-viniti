@@ -51,3 +51,33 @@ export function solarCatalog(tables) {
     };
   });
 }
+
+function comparable(value) {
+  return String(value ?? "").normalize("NFKC").trim().toLowerCase();
+}
+
+export function filterSolarCatalog(rows, {
+  query = "", metric = "", materialClass = "", architecture = "",
+  scanDirection = "", status = "", issuesOnly = false,
+} = {}) {
+  const terms = comparable(query).split(/\s+/).filter(Boolean);
+  return rows.filter(row => {
+    const { result, publication, device, material, measurement, source, issues } = row;
+    const facets = [
+      [metric, result.metric_name], [materialClass, material?.material_class],
+      [architecture, device?.architecture], [scanDirection, measurement?.scan_direction],
+      [status, result.extraction_status],
+    ];
+    if (facets.some(([selected, value]) => selected && comparable(selected) !== comparable(value))) {
+      return false;
+    }
+    if (issuesOnly && !issues.length) return false;
+    const searchText = comparable([
+      result.publication_id, publication?.title, publication?.DOI, result.metric_name,
+      result.raw_value, result.raw_unit, result.normalized_value, result.normalized_unit,
+      device?.device_label, material?.material_name_raw, material?.formula_normalized,
+      measurement?.spectrum, source.quote, ...issues.map(issue => issue.description),
+    ].join(" "));
+    return terms.every(term => searchText.includes(term));
+  });
+}
