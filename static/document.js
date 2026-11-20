@@ -452,22 +452,16 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
     load();
   });
 
-  async function locateResult() {
+  async function locateResult(targetId) {
     const chunkSize = 200;
     for (let offset = 0; offset < LOCATE_LIMIT; offset += chunkSize) {
-      let chunk;
-      try {
-        chunk = await getJSON(`${base}/results`, {
-          q: state.q, metric: state.metric, k: state.k, dataset: state.dataset,
-          config: state.config, status: state.status, issues: state.issues ? "1" : "",
-          limit: chunkSize, offset,
-        }, ctx.signal);
-      } catch (error) {
-        if (error.name === "AbortError") throw error;
-        return 0;
-      }
+      const chunk = await getJSON(`${base}/results`, {
+        q: state.q, metric: state.metric, k: state.k, dataset: state.dataset,
+        config: state.config, status: state.status, issues: state.issues ? "1" : "",
+        limit: chunkSize, offset,
+      }, ctx.signal);
       if (ctx.signal.aborted) return 0;
-      const index = chunk.items.findIndex(item => item.result_id === state.result);
+      const index = chunk.items.findIndex(item => item.result_id === targetId);
       if (index >= 0) return Math.floor((offset + index) / PAGE) + 1;
       if (offset + chunkSize >= chunk.total) break;
     }
@@ -563,20 +557,28 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
       }
     }
     let target = rows.querySelector("tr.target");
-    if (!target && state.result && !locating) {
+    const targetId = state.result;
+    if (!target && targetId && !locating) {
       locating = true;
       let found = 0;
+      let failed = false;
       try {
-        found = await locateResult();
+        found = await locateResult(targetId);
+      } catch (error) {
+        if (error.name === "AbortError") throw error;
+        failed = true;
       } finally {
         locating = false;
       }
+      if (id !== request || ctx.signal.aborted) return;
       if (found && found !== state.page) {
         state.page = found;
         return load();
       }
       if (!found) {
-        ctx.say(`Запись ${state.result} не найдена среди первых ${number(LOCATE_LIMIT)} результатов.`);
+        ctx.say(failed
+          ? `Не удалось найти страницу записи ${targetId}.`
+          : `Запись ${targetId} не найдена среди первых ${number(LOCATE_LIMIT)} результатов.`);
       }
     }
     if (target) {
@@ -688,7 +690,9 @@ async function renderIssues(body, ctx, summary) {
   const data = await getJSON(
     `/api/documents/${encodeURIComponent(ctx.docId)}/issues`, {limit: 200}, ctx.signal);
   if (ctx.signal.aborted) return;
-  fill(body, el("p", {class: "count", text: `Замечаний: ${number(data.total)}`}));
+  fill(body, el("p", {class: "count", text: data.items.length < data.total
+    ? `Замечаний: ${number(data.total)} · показаны первые ${number(data.items.length)}`
+    : `Замечаний: ${number(data.total)}`}));
   if (!data.items.length) {
     body.append(emptyState("Замечаний нет.", `Проверки пройдены для ${summary.counts?.results || 0} записей.`));
     return;

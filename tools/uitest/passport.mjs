@@ -165,7 +165,7 @@ await step("фильтры", async () => {
   check("фильтр по статусу: замечание в карточке", (await page.locator("#detail").innerText()).includes("не может быть отрицательным"));
   await page.fill('#view input[aria-label="Поиск по паспорту"]', "Эксперимент B");
   await page.waitForTimeout(300);
-  check("поиск по контексту", (await page.locator("#view").innerText()).includes("Показано 1 из 2"));
+  check("поиск по контексту", (await page.locator("#view").innerText()).includes("Показано 1 из 1 · всего 2"));
   await page.fill('#view input[aria-label="Поиск по паспорту"]', "нет такого");
   await page.waitForTimeout(300);
   check("пустой поиск: сообщение", (await page.locator("#view").innerText()).includes("Результаты не найдены"));
@@ -298,6 +298,16 @@ await step("паспорт: окно строк", async () => {
   await more.click();
   await page.waitForTimeout(300);
   check("окно: после клика 400 строк", await buttons() === 400, String(await buttons()));
+  await page.locator("#view tbody button.row-button").nth(250).click();
+  await page.selectOption('#view select[aria-label="Проверка"]', "passed");
+  await page.waitForTimeout(300);
+  check("окно: фильтр сбрасывает окно", await buttons() === 200 &&
+    (await page.locator("#view .count").innerText()).includes("Показано 200 из 403"), await page.locator("#view .count").innerText());
+  const selectedIndex = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#view tbody tr")];
+    return rows.findIndex(row => row.classList.contains("selected"));
+  });
+  check("окно: выбранная строка внутри окна", selectedIndex >= 0 && selectedIndex < 200, String(selectedIndex));
 });
 
 await step("CSV: формула после пробела", async () => {
@@ -322,6 +332,9 @@ await step("solar", async () => {
   check("solar: замечание в статусе", (await page.locator("#view tbody").innerText()).includes("На разборе"));
   check("solar: сводка 3 / 2 / 1", (await stats()).includes("Прошли проверку 2") &&
     (await stats()).includes("Требуют разбора 1"), await stats());
+  check("solar: заголовок публикации в .lede", (await title()) === "Solar paper", await title());
+  check("solar: публикация в eyebrow", (await topic()) === "Solar paper", await topic());
+  check("solar: полный набор без предупреждений", !(await page.locator("#view").innerText()).includes("Набор Solar неполный"));
   const csv = await csvText();
   check("solar: CSV с BOM", csv.text.charCodeAt(0) === 0xFEFF);
   const parsed = parseCSV(csv.text);
@@ -349,6 +362,36 @@ await step("solar без validation_status", async () => {
   check("inferred solar: notice", (await page.locator("#view").innerText()).includes("Проверка не запускалась") &&
     (await page.locator("#view").innerText()).includes("для 1 записи"), await inferredNotice());
   check("inferred solar: CSV доступен", !(await csvButton().isDisabled()));
+});
+
+/* 6c. Неполный набор Solar и строки CSV */
+await step("solar: неполный набор", async () => {
+  await open("#/passport");
+  const partial = {...solar};
+  delete partial.issues;
+  await importJSON(partial);
+  check("неполный solar: 3 строки", await rows() === 3, String(await rows()));
+  check("неполный solar: контекст сохранён", (await page.locator("#view tbody").innerText()).includes("Device A") &&
+    (await page.locator("#detail").innerText()).includes("MAPbI3"),
+    (await page.locator("#detail").innerText()).slice(0, 180));
+  check("неполный solar: предупреждение", (await page.locator("#view .notice.warn").innerText()).includes("нет таблиц issues"),
+    await page.locator("#view .notice.warn").innerText().catch(() => "нет"));
+  check("неполный solar: заголовок на месте", (await title()) === "Solar paper", await title());
+});
+
+await step("CSV: только строки со значением", async () => {
+  await open("#/passport");
+  await importJSON({title: "CSV", results: [
+    {id: "P1", metric: "NoExtract", value: 0.5, unit: "u", validation_status: "passed", extraction_status: "present_not_extractable"},
+    {id: "P2", metric: "Ok", value: 1.5, unit: "u", validation_status: "passed", extraction_status: "extracted"},
+    {id: "P3", metric: "NoValue", validation_status: "passed", extraction_status: "extracted"},
+  ]});
+  check("CSV: явный passed не скрывается в статусе", (await stats()).includes("Прошли проверку 3"), await stats());
+  check("CSV: подсказка кнопки", ((await csvButton().getAttribute("title")) || "").includes("извлечённым значением"));
+  const csv = await csvText();
+  const parsed = parseCSV(csv.text);
+  const ids = parsed.rows.map(row => row[parsed.header.indexOf("result_id")]);
+  check("CSV: только извлечённые строки", ids.length === 1 && ids[0] === "P2", ids.join(","));
 });
 
 /* 7. Повторный импорт и локальный PDF */
@@ -480,7 +523,6 @@ await step("мобильная ширина", async () => {
   const csv = await mp.locator('#view .panel-head button:has-text("Скачать CSV")').boundingBox();
   check("мобилка: CSV в экране", csv && csv.x + csv.width <= overflow.viewport, JSON.stringify(csv));
   // Дизайн-решение: на 390px таблица паспорта сжимается по колонкам.
-  // Сейчас проверка падает: .results table { min-width: 720px } перебивает mobile-правило table { min-width: 0 }.
   const table = await mp.locator("#view .workspace .results").evaluate(el => ({scrollWidth: el.scrollWidth, clientWidth: el.clientWidth}));
   check("мобилка: паспортная таблица не скроллится внутри", table.scrollWidth <= table.clientWidth + 1, JSON.stringify(table));
   await mp.goto(`${base}/#/`, {waitUntil: "networkidle"});

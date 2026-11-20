@@ -45,9 +45,15 @@ function issueList(issues) {
     .filter(issue => issue && typeof issue === "object");
 }
 
+function isSolar(data) {
+  return Array.isArray(data.publications) && Array.isArray(data.results);
+}
+
 function passportRows(data) {
-  if (TABLES.every(key => Array.isArray(data[key]))) {
-    return solarCatalog(data).map(row => ({
+  if (isSolar(data)) {
+    const tables = Object.fromEntries(
+      TABLES.map(key => [key, Array.isArray(data[key]) ? data[key] : []]));
+    return solarCatalog(tables).map(row => ({
       ...row,
       context: row.device?.device_label,
       fields: {
@@ -73,8 +79,8 @@ function passportRows(data) {
       result_id: entry.result_id ?? entry.id,
       metric_name: entry.metric_name ?? [entry.metric, entry.cutoff ? "@" + entry.cutoff : ""].join(""),
       normalized_value: entry.normalized_value ?? entry.value,
-      normalized_unit: entry.normalized_unit
-        ?? (entry.unit === "unspecified" ? undefined : entry.unit),
+      normalized_unit: entry.normalized_unit === "unspecified" ? undefined
+        : (entry.normalized_unit ?? (entry.unit === "unspecified" ? undefined : entry.unit)),
       extraction_status: entry.extraction_status ?? (rag ? "extracted" : undefined),
       source_page: entry.source_page ?? nested.page ?? legacy.page,
       source_fragment: entry.source_fragment ?? nested.fragment ?? nested.quote ?? legacy.quote,
@@ -100,7 +106,7 @@ function demoState() {
   if (!demoCache) {
     demoCache = {
       rows: passportRows(SAMPLE), demo: true, source: SAMPLE.topic,
-      title: SAMPLE.title, columns: [...COLUMNS, "context", "fields"],
+      title: SAMPLE.title, columns: [...COLUMNS, "context", "fields"], warnings: [],
     };
   }
   return demoCache;
@@ -110,14 +116,22 @@ function demoState() {
 export function setPassport(data) {
   if (!data || typeof data !== "object") throw new Error("Ожидается объект JSON.");
   const rows = passportRows(data);
+  const solar = isSolar(data);
+  const publication = solar ? (data.publications[0] || {}) : {};
+  const missing = solar ? TABLES.filter(key => !Array.isArray(data[key])) : [];
   for (const url of pdfs.values()) URL.revokeObjectURL(url);
   pdfs = new Map();
   current = {
     rows,
     demo: false,
-    source: data.topic || data.title || "Импортированный паспорт",
-    title: data.title || data.topic || "Паспорт статьи",
-    columns: TABLES.every(key => Array.isArray(data[key])) ? COLUMNS : [...COLUMNS, "context", "fields"],
+    source: data.topic || publication.topic || data.title || publication.title
+      || "Импортированный паспорт",
+    title: data.title || publication.title || data.topic || "Паспорт статьи",
+    columns: solar ? COLUMNS : [...COLUMNS, "context", "fields"],
+    warnings: missing.length
+      ? [`Набор Solar неполный: нет таблиц ${missing.join(", ")}. `
+        + "Контекст прибора, материала и слоёв может быть неполным."]
+      : [],
   };
   return rows.length;
 }
@@ -128,6 +142,17 @@ function validation(row) {
   if (explicit === "passed") return "passed";
   if (!explicit && row.result.extraction_status === "extracted") return "passed";
   return "pending";
+}
+
+function hasValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+function exportable(row) {
+  if (validation(row) !== "passed") return false;
+  const status = row.result.extraction_status;
+  if (status === "present_not_extractable" || status === "absent") return false;
+  return hasValue(row.result.normalized_value) || hasValue(row.result.raw_value);
 }
 
 function inferred(row) {
@@ -157,7 +182,7 @@ function csvCell(cellValue) {
 }
 
 function download(rows, columns) {
-  const accepted = rows.filter(row => validation(row) === "passed");
+  const accepted = rows.filter(exportable);
   if (!accepted.length) return;
   const lines = [columns.join(","), ...accepted.map(({result, context, fields}) => {
     const record = {...result, context, fields: JSON.stringify(fields)};
@@ -206,6 +231,7 @@ export function renderPassport(root, ctx) {
 
   const csvButton = el("button", {
     type: "button", class: "secondary", text: "Скачать CSV",
+    title: "Строки со статусом «Пройдена» и извлечённым значением",
     onclick: () => download(rows, source.columns),
   });
 
@@ -293,8 +319,8 @@ export function renderPassport(root, ctx) {
       ].join(" ").toLocaleLowerCase();
       return terms.every(term => text.includes(term));
     });
-    if (!filtered.includes(selected)) selected = filtered[0] || null;
     const visible = filtered.slice(0, shown);
+    if (!visible.includes(selected)) selected = visible[0] || null;
     body.replaceChildren();
     for (const row of visible) {
       const button = el("button", {
@@ -331,18 +357,30 @@ export function renderPassport(root, ctx) {
       body.append(el("tr", {class: "more"}, el("td", {colspan: 4},
         el("button", {
           type: "button", class: "secondary", text: `Показать ещё ${number(next)}`,
-          onclick: () => { shown += PAGE_SIZE; drawRows(); },
+          onclick: () => {
+            const firstNew = visible.length;
+            shown += PAGE_SIZE;
+            drawRows();
+            const buttons = body.querySelectorAll("button.row-button");
+            if (!buttons[firstNew]) return;
+            try {
+              buttons[firstNew].focus({preventScroll: true});
+            } catch {
+              buttons[firstNew].focus();
+            }
+          },
         }),
       )));
     }
     count.textContent = filtered.length
-      ? `Показано ${number(Math.min(shown, filtered.length))} из ${number(rows.length)}`
+      ? `Показано ${number(Math.min(shown, filtered.length))} из ${number(filtered.length)}`
+        + (filtered.length < rows.length ? ` · всего ${number(rows.length)}` : "")
         + (filtered.length > shown ? ` · ещё ${number(filtered.length - shown)}` : "")
       : rows.length ? "Результаты не найдены" : "Результатов нет";
   }
 
   function syncActions() {
-    csvButton.disabled = source.demo || !rows.some(row => validation(row) === "passed");
+    csvButton.disabled = source.demo || !rows.some(exportable);
     pdfInput.disabled = source.demo || !selected;
     pdfLabel.classList.toggle("disabled", pdfInput.disabled);
   }
@@ -382,6 +420,7 @@ export function renderPassport(root, ctx) {
     ),
     source.demo ? el("p", {class: "notice warn", text:
       "Демонстрационные значения. Импортируйте паспорт, чтобы работать со своими данными."}) : null,
+    ...(source.warnings || []).map(text => el("p", {class: "notice warn", text})),
     inferredCount ? el("p", {class: "notice", text:
       `Проверка не запускалась: для ${number(inferredCount)} `
       + `${plural(inferredCount, "записи", "записей", "записей")} статус «Пройдена» выведен `

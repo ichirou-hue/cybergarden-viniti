@@ -96,12 +96,25 @@ await page.evaluate(() => { location.hash = "#/doc/rag:d020/source/999999?track=
 await page.waitForTimeout(1400);
 check("битый source: диалог закрыт", !(await page.locator("#evidence").evaluate(dialog => dialog.open)));
 check("битый source: сообщение", (await page.locator("#status").textContent()).includes("Не удалось открыть источник"));
+check("битый source: URL очищен", !page.url().includes("/source/999999"), page.url());
 
 // Документ без префикса области
 await page.goto(`${base}/#/doc/foo`, {waitUntil: "networkidle"});
 await page.waitForTimeout(700);
 const docFoo = (await page.locator("#view").textContent()).replace(/\s+/g, " ");
 check("#/doc/foo: документ не найден", docFoo.includes("Документ не найден") && !docFoo.includes("Раздел"), docFoo.slice(0, 120));
+
+await page.goto(`${base}/#/doc/foo?track=solar`, {waitUntil: "networkidle"});
+await page.waitForTimeout(700);
+const docFooSolar = (await page.locator("#view").textContent()).replace(/\s+/g, " ");
+check("#/doc/foo?track=solar: область нормализована", docFooSolar.includes("Документ не найден") &&
+  !docFooSolar.includes("Раздел Solar"), docFooSolar.slice(0, 120));
+
+// result= не найден
+await page.goto(`${base}/#/doc/rag:d020?track=rag&result=R99999`, {waitUntil: "networkidle"});
+await page.waitForTimeout(1500);
+check("result=: сообщение о ненайденной записи",
+  (await page.locator("#status").textContent()).includes("не найдена среди первых"), await page.locator("#status").textContent());
 
 // Загрузка PDF
 const response = await context.request.get(`${base}/api/documents/rag%3Ad020/pdf`);
