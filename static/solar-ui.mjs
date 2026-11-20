@@ -1,4 +1,4 @@
-import { solarCatalog, filterSolarCatalog } from "/solar.mjs";
+import { solarCatalog } from "/solar.mjs";
 
 const ui = Object.fromEntries([...document.querySelectorAll("[id]")].map(el => [el.id, el]));
 const tables = ["publications", "materials", "devices", "layers", "measurements", "results", "issues"];
@@ -9,24 +9,62 @@ const columns = ("publication_id result_id device_id measurement_id material_id 
 const labels = {passed: "Пройдена", review: "На разборе", pending: "Ожидает"};
 
 const sample = {
-  publications: [{publication_id: "DEMO", title: "Синтетический паспорт перовскитного элемента"}],
-  materials: [{publication_id: "DEMO", material_id: "M1", material_name_raw: "Перовскит"}],
-  devices: [{publication_id: "DEMO", device_id: "D1", device_label: "Образец A", architecture: "p-i-n", absorber_material_id: "M1"}],
-  layers: [],
-  measurements: [{publication_id: "DEMO", measurement_id: "E1", spectrum: "AM1.5G", scan_direction: "reverse"}],
+  topic: "Демонстрационный пример",
+  title: "Оценка воспроизводимости измерений",
   results: [
-    ["PCE", "18.2", "%", "passed", "Power conversion efficiency was 18.2%."],
-    ["Voc", "1.08", "V", "passed", "Open-circuit voltage was 1.08 V."],
-    ["FF", "112", "%", "review", "Fill factor was 112%."],
-    ["Jsc", "22.4", "mA/cm²", "pending", "Short-circuit current density was 22.4 mA/cm²."],
-  ].map(([metric_name, value, unit, validation_status, source_fragment], index) => ({
-    publication_id: "DEMO", result_id: "R" + (index + 1), device_id: "D1", measurement_id: "E1",
-    metric_name, raw_value: value, raw_unit: unit, normalized_value: value, normalized_unit: unit,
-    extraction_status: "extracted", validation_status, source_fragment, source_page: 1,
-  })),
-  issues: [{publication_id: "DEMO", record_ids: "R3", check_name: "FF",
-    description: "Коэффициент заполнения превышает 100%. Сверьте число и единицу с источником."}],
+    {result_id: "R1", metric_name: "Среднее время", raw_value: "1200", raw_unit: "мс",
+      normalized_value: "1.2", normalized_unit: "с", context: "Эксперимент A",
+      extraction_status: "extracted", validation_status: "passed",
+      source_page: 2, source_fragment: "Mean elapsed time was 1200 ms."},
+    {result_id: "R2", metric_name: "Число наблюдений", raw_value: "-5",
+      context: "Эксперимент B", extraction_status: "extracted",
+      source_page: 3, source_fragment: "The number of observations was -5.",
+      issues: ["Число наблюдений не может быть отрицательным. Сверьте запись с источником."]},
+  ],
 };
+
+function issueList(issues) {
+  if (!Array.isArray(issues)) return [];
+  return issues.map(issue => typeof issue === "string" ? {description: issue} : issue)
+    .filter(issue => issue && typeof issue === "object");
+}
+
+function passportRows(data) {
+  if (tables.every(key => Array.isArray(data[key]))) {
+    return solarCatalog(data).map(row => ({
+      ...row, context: row.device?.device_label, fields: {
+        "Прибор": [row.device?.device_label, row.device?.architecture].filter(Boolean).join(" · "),
+        "Материал": row.material?.material_name_raw,
+        "Измерение": [row.measurement?.spectrum, row.measurement?.scan_direction].filter(Boolean).join(" · "),
+        "Слои": row.layers.map(layer => layer.layer_material).filter(Boolean).join(" / "),
+      },
+    }));
+  }
+  const entries = data.results ?? data.facts;
+  if (!Array.isArray(entries) || entries.some(row => !row || typeof row !== "object" || Array.isArray(row))) {
+    throw new Error("В паспорте нужен массив results или facts.");
+  }
+  return entries.map(entry => {
+    const id = entry.publication_id || data.publication_id || data.id || data.title || "article";
+    const rag = entries === data.facts;
+    const result = {
+      ...entry, publication_id: id, result_id: entry.result_id ?? entry.id,
+      metric_name: entry.metric_name ?? [entry.metric, entry.cutoff ? "@" + entry.cutoff : ""].join(""),
+      normalized_value: entry.normalized_value ?? (rag && entry.unit !== "unspecified" ? entry.value : undefined),
+      normalized_unit: entry.normalized_unit ?? (rag && entry.unit !== "unspecified" ? entry.unit : undefined),
+      extraction_status: entry.extraction_status ?? (rag ? "extracted" : undefined),
+      source_page: entry.source_page ?? entry.evidence?.page,
+      source_fragment: entry.source_fragment ?? entry.evidence?.quote,
+    };
+    return {
+      result, context: entry.context, fields: entry.fields ?? {},
+      publication: {title: data.title, topic: data.topic ?? data.track},
+      source: {page: result.source_page, quote: result.source_fragment,
+        section: entry.source_section, table: entry.source_table, figure: entry.source_figure},
+      issues: issueList(entry.issues),
+    };
+  });
+}
 
 let rows = [];
 let selected;
@@ -57,20 +95,19 @@ function detail() {
     ui.detail.textContent = "Выберите результат в таблице.";
     return;
   }
-  const { result, source, device, material, measurement, publication, issues, layers } = selected;
+  const { result, source, publication, issues, fields } = selected;
   const status = validation(selected);
   ui.detail.append(node("p", result.metric_name + " · " + value(result, "normalized"), "value"),
     node("p", labels[status], "status " + status));
-  const fields = document.createElement("dl");
+  const description = document.createElement("dl");
   for (const [label, text] of [
     ["Публикация", publication?.title || result.publication_id],
     ["Исходное значение", value(result, "raw")],
-    ["Прибор", [device?.device_label, device?.architecture].filter(Boolean).join(" · ")],
-    ["Материал", material?.material_name_raw],
-    ["Измерение", [measurement?.spectrum, measurement?.scan_direction].filter(Boolean).join(" · ")],
-    ["Слои", layers.map(layer => layer.layer_material).filter(Boolean).join(" / ")],
-  ]) fields.append(node("dt", label), node("dd", text || "—"));
-  ui.detail.append(fields);
+    ["Тема", publication?.topic],
+    ["Контекст", selected.context],
+    ...Object.entries(fields).filter(([, field]) => ["string", "number", "boolean"].includes(typeof field)),
+  ]) description.append(node("dt", label), node("dd", text || "—"));
+  ui.detail.append(description);
   const location = [source.page ? "стр. " + source.page : "", source.section, source.table, source.figure]
     .filter(Boolean).join(" · ");
   if (location) ui.detail.append(node("p", location));
@@ -88,8 +125,15 @@ function detail() {
 }
 
 function render() {
-  const filtered = filterSolarCatalog(rows, {query: ui.query.value, metric: ui.metric.value})
-    .filter(row => !ui.status.value || validation(row) === ui.status.value);
+  const terms = ui.query.value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+  const filtered = rows.filter(row => {
+    if (ui.metric.value && row.result.metric_name !== ui.metric.value) return false;
+    if (ui.status.value && validation(row) !== ui.status.value) return false;
+    const text = [row.publication?.title, row.publication?.topic, row.context,
+      row.result.metric_name, row.result.raw_value, row.result.normalized_value,
+      row.source.quote, ...Object.values(row.fields)].join(" ").toLocaleLowerCase();
+    return terms.every(term => text.includes(term));
+  });
   if (!filtered.includes(selected)) selected = filtered[0];
   ui.results.replaceChildren();
   for (const row of filtered) {
@@ -107,7 +151,7 @@ function render() {
     };
     tr.insertCell().append(button);
     tr.insertCell().textContent = value(row.result, "normalized");
-    tr.insertCell().textContent = row.device?.device_label || "—";
+    tr.insertCell().textContent = row.context || "—";
     const status = validation(row);
     tr.insertCell().append(node("span", labels[status], "status " + status));
   }
@@ -117,11 +161,8 @@ function render() {
 }
 
 function load(tablesData, isDemo) {
-  if (!tablesData || !tables.every(key => Array.isArray(tablesData[key])
-      && tablesData[key].every(record => record && typeof record === "object" && !Array.isArray(record)))) {
-    throw new Error("В JSON нужны массивы publications, materials, devices, layers, measurements, results и issues.");
-  }
-  rows = solarCatalog(tablesData);
+  if (!tablesData || typeof tablesData !== "object") throw new Error("Ожидается объект JSON.");
+  rows = passportRows(tablesData);
   demo = isDemo;
   for (const url of pdfs.values()) URL.revokeObjectURL(url);
   pdfs = new Map();
@@ -135,7 +176,7 @@ function load(tablesData, isDemo) {
   ui.passed.textContent = passed;
   ui.review.textContent = rows.filter(row => validation(row) === "review").length;
   ui.export.disabled = demo || !passed;
-  ui.dataset.textContent = demo ? "Синтетический пример" : "Импортированный паспорт";
+  ui.dataset.textContent = tablesData.topic || tablesData.title || "Импортированный паспорт";
   ui.notice.textContent = demo ? "Демонстрационные значения. Импортируйте паспорт, чтобы работать со своими данными." : "Паспорт загружен. CSV включает только прошедшие проверку записи.";
   render();
 }
