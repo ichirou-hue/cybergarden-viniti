@@ -364,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def static_file(self, path):
         relative = "index.html" if path == "/" else path.lstrip("/")
+        if relative == "solar":
+            relative = "solar.html"
         if relative.startswith("static/"):
             relative = relative[len("static/"):]
         target = (STATIC / relative).resolve()
