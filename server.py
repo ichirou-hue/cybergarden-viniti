@@ -16,7 +16,8 @@ from pdf_source import render
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = {
-    "/": ("index.html", "text/html; charset=utf-8"),
+    "/": ("solar.html", "text/html; charset=utf-8"),
+    "/rag": ("index.html", "text/html; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/solar": ("solar.html", "text/html; charset=utf-8"),

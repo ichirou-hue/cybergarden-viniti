@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solar Lab · Паспорта публикаций</title>
+<title>Паспорт статьи · Паспорта публикаций</title>
 <link rel="stylesheet" href="/solar.css">
 <script type="module" src="/solar-ui.mjs"></script>
 </head>
 <body>
-<header class="top"><div class="shell masthead"><a class="brand" href="/solar"><span class="mark" aria-hidden="true">✳</span> Solar Lab</a><span class="context">ВИНИТИ РАН / CyberGarden</span></div></header>
+<header class="top"><div class="shell masthead"><a class="brand" href="/"><span class="mark" aria-hidden="true">✳</span> Паспорт статьи</a><span class="context">ВИНИТИ РАН / CyberGarden</span></div></header>
 <main class="shell">
 <section class="hero">
-  <div><p class="eyebrow">Тонкоплёночные солнечные элементы</p><h1>Паспорта<br>публикаций<span>.</span></h1>
+  <div><p class="eyebrow">Проверка научных данных</p><h1>Паспорт<br>публикации<span>.</span></h1>
   <p class="lede">Результаты измерений, проверка значений и доказательства из статьи.</p></div>
   <div class="actions">
     <label class="button primary" for="passport">Импорт паспорта JSON</label><input id="passport" class="file" type="file" accept=".json,application/json">
@@ -27,10 +27,10 @@
 <div class="workspace">
 <section class="panel catalog" aria-labelledby="catalog-title">
  <header class="panel-head"><div><p class="eyebrow" id="dataset"></p><h2 id="catalog-title">Результаты</h2></div><button id="export" class="button">Скачать CSV</button></header>
- <div class="filters"><label>Поиск<input id="query" type="search" placeholder="PCE, перовскит, образец…"></label>
+ <div class="filters"><label>Поиск<input id="query" type="search" placeholder="Показатель, контекст, цитата…"></label>
  <label>Метрика<select id="metric"></select></label>
  <label>Проверка<select id="status"><option value="">Все</option><option value="passed">Пройдена</option><option value="review">На разборе</option><option value="pending">Ожидает</option></select></label></div>
- <div class="table-wrap"><table><thead><tr><th scope="col">Метрика</th><th scope="col">Значение</th><th scope="col">Прибор</th><th scope="col">Проверка</th></tr></thead><tbody id="results"></tbody></table></div>
+ <div class="table-wrap"><table><thead><tr><th scope="col">Метрика</th><th scope="col">Значение</th><th scope="col">Контекст</th><th scope="col">Проверка</th></tr></thead><tbody id="results"></tbody></table></div>
  <p id="count" class="foot" aria-live="polite"></p>
 </section>
 <aside class="panel detail" aria-labelledby="detail-title">
