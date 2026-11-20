@@ -722,8 +722,13 @@ def filter_results(
         if query:
             source = row.get("source") or {}
             header = row.get("header_source") or {}
+            metric_at_k = (
+                f"{row.get('metric_name')}@{row.get('metric_k')}"
+                if row.get("metric_k") else row.get("metric_name", "")
+            )
             haystack = " ".join(str(value) for value in (
-                row.get("result_id"), row.get("metric_name"), row.get("metric_group"),
+                row.get("result_id"), row.get("metric_name"), metric_at_k,
+                row.get("metric_group"),
                 row.get("metric_value"), row.get("raw_value"), row.get("raw_unit"),
                 row.get("metric_unit"), row.get("normalized_value"), row.get("config_id"),
                 row.get("dataset_id"), row.get("task_id"), row.get("experiment_id"),
