@@ -20,10 +20,34 @@ TEXT_LAYER_MIN_CHARS = 40
 
 
 @dataclass(frozen=True)
+class Word:
+    """Слово текстового слоя с координатами."""
+
+    text: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+
+
+@dataclass(frozen=True)
+class Line:
+    """Строка текстового слоя с координатами — основа разбора таблиц."""
+
+    text: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    words: tuple[Word, ...] = ()
+
+
+@dataclass(frozen=True)
 class Page:
     number: int  # нумерация с единицы, как в CSV сдачи
     text: str
     source: str = "text"  # text | ocr | empty
+    lines: tuple[Line, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -59,12 +83,58 @@ class Document:
         return [p.number for p in self.pages if target in norm(p.text)]
 
 
+def _page_lines(page) -> tuple[Line, ...]:
+    """Строки с координатами: слова группируются по вертикали, затем по x."""
+    words = [
+        (float(x0), float(y0), float(x1), float(y1), text)
+        for x0, y0, x1, y1, text, _block_no, _line_no, _word_no in page.get_text("words")
+        if text.strip()
+    ]
+    if not words:
+        return ()
+    words.sort(key=lambda item: ((item[1] + item[3]) / 2, item[0]))
+
+    rows: list[dict] = []
+    for x0, y0, x1, y1, text in words:
+        center = (y0 + y1) / 2
+        height = max(y1 - y0, 1.0)
+        if rows and abs(center - rows[-1]["center"]) <= max(2.5, 0.45 * height):
+            row = rows[-1]
+            row["words"].append((x0, y0, x1, y1, text))
+            row["center"] = (row["center"] * (len(row["words"]) - 1) + center) / len(row["words"])
+        else:
+            rows.append({"center": center, "words": [(x0, y0, x1, y1, text)]})
+
+    lines: list[Line] = []
+    for row in rows:
+        items = tuple(
+            Word(text=text, x0=x0, y0=y0, x1=x1, y1=y1)
+            for x0, y0, x1, y1, text in sorted(row["words"], key=lambda item: item[0])
+        )
+        lines.append(
+            Line(
+                text=" ".join(item.text for item in items),
+                x0=min(item.x0 for item in items),
+                y0=min(item.y0 for item in items),
+                x1=max(item.x1 for item in items),
+                y1=max(item.y1 for item in items),
+                words=items,
+            )
+        )
+    lines.sort(key=lambda line: (round(line.y0, 1), line.x0))
+    return tuple(lines)
+
+
 def _load_pymupdf(path: Path) -> Document:
     import pymupdf  # PyMuPDF
 
     with pymupdf.open(path) as document:
         pages = tuple(
-            Page(number=i + 1, text=page.get_text("text") or "")
+            Page(
+                number=i + 1,
+                text=page.get_text("text") or "",
+                lines=_page_lines(page),
+            )
             for i, page in enumerate(document)
         )
     return Document(path=path, pages=pages, parser="pymupdf")

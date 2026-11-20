@@ -1,8 +1,16 @@
 """Извлечение RAG-сущностей из публикации.
 
-Версия 0.1 покрывает табличные результаты (Table 1 в D001): строки вида
-``Метод .204 .330 ...`` разбираются детерминированно, без LLM.
-Всё, что не подтверждено текстом страницы, остаётся пустым.
+Конвейер детерминированный:
+
+1. метаданные первой страницы;
+2. проза: задача, наборы, конфигурация по умолчанию;
+3. таблицы: ``grid.find_tables`` восстанавливает сетку по координатам слов,
+   ``vocab`` узнаёт метрики и наборы;
+4. прозаические результаты (осторожно, только при явном числе и наборе);
+5. проверки согласованности (``issues``).
+
+Всё, что не подтверждено текстом страницы, остаётся пустым. Графики не
+оцифровываются: это отдельная CV-задача, а не текстовое извлечение.
 """
 
 from __future__ import annotations
@@ -11,30 +19,19 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
+from .grid import Table, find_tables
 from .kit import TABLE_ORDER
-from .pdf import Document
+from .metadata import extract_metadata
+from .pdf import Document, Page
 from .text import norm
-
-#: Строка, состоящая из одного числа: ``.204``, ``0.33``, ``-1.2``.
-_NUMBER_LINE = re.compile(r"^[+\-]?(?:\d+(?:\.\d*)?|\.\d+)$")
-#: Строка таблицы: имя метода и ровно N чисел.
-_ROW = re.compile(
-    r"^(?P<name>[A-Za-z][A-Za-z0-9\-\.\+_/ ]*?)\s+(?P<nums>(?:[+\-]?(?:\d+(?:\.\d*)?|\.\d+)\s*)+)$"
+from .vocab import (
+    Metric,
+    canonical_dataset,
+    detect_tasks,
+    normalize_generator,
+    number_value,
+    parse_metric,
 )
-
-#: Как в статье сокращают названия наборов данных и что писать в CSV.
-DATASET_ALIASES = {
-    "2wiki": "2WikiMultihopQA",
-    "2wikimultihopqa": "2WikiMultihopQA",
-    "hotpotqa": "HotpotQA",
-    "musique": "MuSiQue",
-}
-
-#: Определения метрик из раздела 4.1 (проверяются глазами один раз).
-METRIC_DEFINITIONS = {
-    "EM": ("answer quality", "exact match after standard text normalization", "higher_is_better"),
-    "F1": ("answer quality", "token-level overlap after standard text normalization", "higher_is_better"),
-}
 
 _ID_PREFIX = {
     "configurations": "C",
@@ -45,6 +42,23 @@ _ID_PREFIX = {
     "issues": "I",
 }
 _ID_WIDTH = {"configurations": 2, "datasets": 2, "tasks": 2, "experiments": 2, "results": 3, "issues": 2}
+
+_UNSPECIFIED_DATASET = "Unspecified"
+_UNSPECIFIED_TASK = "unspecified"
+
+_PROPOSED = re.compile(
+    r"(?:we\s+(?:propose|present|introduce|develop)|our\s+(?:approach|method|system))\s+"
+    r"([A-Z][A-Za-z0-9\-]{2,30})"
+)
+_GENERATOR_IN_TEXT = re.compile(
+    r"\b(GPT-4o(?:\s+mini)?|GPT-4|GPT-3\.5|Llama[\s\-]?\d[\w.\-]*|LLaMA[\s\-]?\d[\w.\-]*|"
+    r"Qwen[\w.\-]*|Mistral[\w.\-]*|Mixtral[\w.\-]*|Claude[\w.\-]*|Gemini[\w.\-]*|"
+    r"DeepSeek[\w.\-]*|Vicuna[\w.\-]*|Flan-T5[\w.\-]*|Gemma[\w.\-]*|Phi-\d[\w.\-]*)"
+)
+_MODEL_ID = re.compile(
+    r"\b((?:gpt|llama|qwen|mistral|mixtral|claude|gemini|deepseek)[a-z0-9.\-]*(?:-[a-z0-9.\-]+)+)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -124,6 +138,7 @@ class Builder:
 
     def result(self, **fields: str) -> str:
         signature = [
+            fields.get("experiment_id", ""),
             fields.get("config_id", ""),
             fields.get("dataset_id", ""),
             fields.get("task_id", ""),
@@ -165,194 +180,414 @@ def fold_part(value: str) -> str:
     return norm(value).casefold().replace(" ", "")
 
 
-# --- разбор Table 1 --------------------------------------------------------
+# --- значения --------------------------------------------------------------
 
 
-@dataclass
-class GridTable:
-    """Числовая таблица: строки-методы и координатная сетка условий."""
+def metric_value_text(raw: str) -> str:
+    """Число в том же масштабе, но без единиц и с ведущим нулём."""
+    token = raw.strip().replace("\u2212", "-").replace("\u00a0", "").replace(" ", "")
+    if token.endswith("%"):
+        token = token[:-1]
+    elif token.endswith("ms"):
+        token = token[:-2]
+    elif token.endswith("s") and not token.endswith("ss"):
+        token = token[:-1]
+    if token.startswith("."):
+        token = "0" + token
+    elif token.startswith("-."):
+        token = "-0" + token[1:]
+    if re.fullmatch(r"[+\-]?0,\d+", token):
+        token = token.replace(",", ".")
+    elif re.fullmatch(r"[+\-]?\d{1,3}(?:,\d{3})+", token):
+        token = token.replace(",", "")
+    elif "," in token and "." not in token:
+        token = token.replace(",", ".")
+    return token
 
-    page: int
-    caption: str
-    methods: list[tuple[str, list[float]]]
-    row_fragments: dict[str, str]
-    generators: list[str]
-    datasets: list[str]
-    metrics: list[str]
 
-    @property
-    def shape(self) -> tuple[int, int]:
-        return len(self.methods), len(self.generators) * len(self.datasets) * len(self.metrics)
-
-
-def _is_number_line(line: str) -> bool:
-    return bool(_NUMBER_LINE.match(line.strip()))
+def raw_unit_text(raw: str) -> str:
+    """Единица, напечатанная прямо в ячейке (если есть)."""
+    token = raw.strip()
+    if token.endswith("%"):
+        return "%"
+    if token.endswith("ms"):
+        return "ms"
+    if token.endswith("s") and not token.endswith("ss"):
+        return "s"
+    return ""
 
 
-def parse_numeric_grid(page_text: str, page_number: int) -> GridTable | None:
-    """Разобрать таблицу, где каждая ячейка вынесена на отдельную строку.
-
-    Так PyMuPDF отдаёт ячейки PDF-таблиц: заголовок, затем имя метода и
-    подряд все числа строки. Строки-разделители (``GraphRAG``) отбрасываются.
-    """
-    lines = [line.strip() for line in page_text.splitlines() if line.strip()]
-    try:
-        start = lines.index("Methods")
-    except ValueError:
-        return None
-
-    generators = lines[start + 1 : start + 4]
-    dataset_tokens = lines[start + 4 : start + 13]
-    metric_tokens = lines[start + 13 : start + 31]
-    if len(generators) != 3 or len(dataset_tokens) != 9 or len(metric_tokens) != 18:
-        return None
-    if not all(token and not token[0].isdigit() for token in metric_tokens):
-        return None
-
-    datasets = _unique(dataset_tokens[:3])
-    metrics = _unique(metric_tokens[:2])
-
-    methods: list[tuple[str, list[float]]] = []
-    fragments: dict[str, str] = {}
-    name: str | None = None
-    numbers: list[float] = []
-
-    def flush() -> None:
-        nonlocal name, numbers
-        if name and len(numbers) == len(generators) * len(datasets) * len(metrics):
-            methods.append((name, numbers))
-            fragments[name] = "\n".join([name] + [format_number(v) for v in numbers])
-        name, numbers = None, []
-
-    for line in lines[start + 31 :]:
-        if _is_number_line(line):
-            if name is None:
+def quote_from_page(page_text: str, label: str, raw: str, fallback: str) -> str:
+    """Непрерывный кусок текста страницы: подпись строки и значение рядом."""
+    if not page_text:
+        return fallback
+    text = re.sub(r"(?<=\w)-\s*\r?\n\s*(?=\w)", "", page_text)
+    flat = re.sub(r"\s+", " ", text).strip()
+    label_flat = re.sub(r"(?<=\w)-\s+", "", re.sub(r"\s+", " ", label).strip())
+    if not label_flat:
+        return fallback
+    position = -1
+    for candidate in (
+        label_flat,
+        label_flat.rstrip(" .:|-"),
+        label_flat[:12].strip(),
+        label_flat[:6].strip(),
+    ):
+        if candidate:
+            position = flat.find(candidate)
+            if position >= 0:
                 break
-            numbers.append(float(line))
-            continue
-        flush()
-        if line.lower().startswith("table"):
+    if position < 0:
+        value_position = flat.find(raw)
+        if value_position < 0:
+            return fallback
+        return flat[max(0, value_position - 60) : value_position + len(raw)].strip()
+    end = flat.find(raw, position)
+    if 0 <= end - position <= 220:
+        return flat[position : end + len(raw)]
+    return flat[position : position + 120].strip()
+
+
+_BOUNDED_METRICS = {
+    "EM",
+    "F1",
+    "Accuracy",
+    "Precision",
+    "Recall",
+    "NDCG",
+    "MRR",
+    "MAP",
+    "Hit Rate",
+    "AUC",
+    "ROUGE-L",
+    "ROUGE-1",
+    "ROUGE-2",
+    "BLEU",
+    "BERTScore",
+    "Faithfulness",
+    "Answer relevance",
+    "Context precision",
+    "Context recall",
+    "Answer correctness",
+    "Answer semantic similarity",
+    "Context relevance",
+    "Noise robustness",
+    "Completeness",
+    "Correctness",
+    "Fluency",
+    "Coherence",
+    "Relevance",
+    "Groundedness",
+    "Win rate",
+}
+
+
+def metric_unit(metric: Metric, raw: str, value: float, header: str = "") -> str:
+    if "%" in raw or metric.unit_hint == "%" or "%" in header:
+        return "%"
+    if metric.name == "Latency":
+        return "ms" if raw.rstrip().endswith("ms") else "s"
+    if 0.0 <= value <= 1.0:
+        return "fraction"
+    if metric.name in _BOUNDED_METRICS and value <= 100.0:
+        return "%"
+    return "score"
+
+
+def clean_variant(label: str) -> str:
+    """Убрать групповые приставки и пометки авторства из метки метода."""
+    text = re.sub(r"\s*[∗*†‡]+$", "", (label or "").strip())
+    for prefix in ("Simple ", "Complex ", "Oracle "):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
             break
-        name = line
-    flush()
-
-    if not methods:
-        return None
-    return GridTable(
-        page=page_number,
-        caption="Table 1",
-        methods=methods,
-        row_fragments=fragments,
-        generators=generators,
-        datasets=datasets,
-        metrics=metrics,
-    )
+    text = re.sub(r"\s*\((?:Ours|ours|Our method)\)\s*$", "", text)
+    text = text.replace("Adaptive Self-RAG", "Self-RAG")
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def format_number(value: float) -> str:
-    """Вернуть число так, как оно напечатано: без лишних нулей."""
-    text = f"{value:.6f}".rstrip("0").rstrip(".")
-    return text if text else "0"
+def metric_display(metric: Metric) -> str:
+    if metric.k and not metric.name.endswith("@" + metric.k):
+        return f"{metric.name}@{metric.k}"
+    return metric.name
 
 
-def _unique(items: Iterable[str]) -> list[str]:
-    seen: list[str] = []
-    for item in items:
-        if item not in seen:
-            seen.append(item)
-    return seen
+# --- проза -----------------------------------------------------------------
 
 
-# --- сборка строк ----------------------------------------------------------
+def choose_task(prose: str) -> str:
+    tasks = detect_tasks(prose)
+    if "multi-hop question answering" in tasks and re.search(r"open[\s\-]?domain", prose, re.I):
+        return "open-domain multi-hop question answering"
+    return tasks[0] if tasks else ""
 
 
-def extract_table_one(
+def proposed_variant(prose: str) -> str:
+    match = _PROPOSED.search(prose)
+    return match.group(1) if match else ""
+
+
+def resolve_generator(name: str, fallback: str) -> str:
+    """Дополнить короткое имя модели точным идентификатором из текста."""
+    if not name:
+        return fallback
+    if not fallback:
+        return name
+    short = name.casefold().replace(" ", "")
+    long = fallback.casefold().replace(" ", "")
+    if long.startswith(short) and len(long) > len(short):
+        return fallback
+    return name
+
+
+def generator_from_text(prose: str) -> str:
+    # Точный API-идентификатор в прозе информативнее заголовка таблицы.
+    identifiers = [m.group(1) for m in _MODEL_ID.finditer(prose)]
+    if identifiers:
+        best = max(identifiers, key=len)
+        if len(best) >= 8:
+            return best
+    match = _GENERATOR_IN_TEXT.search(prose)
+    if not match:
+        return ""
+    name = match.group(1)
+    tail = prose[match.end(): match.end() + 12]
+    size = re.match(r"\s*\((\d+(?:\.\d+)?\s*[BMK])\)", tail)
+    if size:
+        name = f"{name} {size.group(1)}"
+    return normalize_generator(name)
+
+
+def dataset_in_text(text: str) -> str:
+    best = ""
+    position = len(text) + 1
+    for name in _DATASET_NAMES:
+        index = text.casefold().find(name.casefold())
+        if index >= 0 and index < position:
+            best, position = name, index
+    return best
+
+
+_DATASET_NAMES: tuple[str, ...] = (
+    "HotpotQA",
+    "2WikiMultihopQA",
+    "2Wiki",
+    "MuSiQue",
+    "Natural Questions",
+    "TriviaQA",
+    "WebQuestions",
+    "SQuAD",
+    "MS MARCO",
+    "BEIR",
+    "FEVER",
+    "SciFact",
+    "NFCorpus",
+    "SciDocs",
+    "TREC-COVID",
+    "DBpedia-Entity",
+    "PubMedQA",
+    "BioASQ",
+    "MedQA",
+    "MedMCQA",
+    "MMLU",
+    "MIRAGE",
+    "FeB4RAG",
+    "CRAG",
+    "CovidQA",
+    "DelucionQA",
+    "Emanual",
+    "ExpertQA",
+    "FinQA",
+    "HAGRID",
+    "SimpleQA",
+    "TAT-QA",
+    "TechQA",
+    "FinanceBench",
+    "LongHealth",
+    "QuaLITY",
+    "PopQA",
+    "Bamboogle",
+    "DROP",
+    "WoW",
+    "RAGTruth",
+    "NewsQA",
+    "SearchQA",
+    "Dolly",
+    "ASQA",
+    "ELI5",
+    "QAMPARI",
+    "DocBench",
+    "MMLongBench-Doc",
+)
+
+
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+
+_PROSE_RESULT = re.compile(
+    r"\b(EM|exact\s+match|F1|accuracy|precision|recall|nDCG@?\d*|MRR@?\d*|"
+    r"ROUGE-L|BLEU|hit\s+rate)\b[^.;%]{0,40}?"
+    r"([+\-]?(?:\d{1,3}(?:\.\d+)?|\.\d+)\s*%?)",
+    re.I,
+)
+
+
+def _prose_results(
     builder: Builder,
-    table: GridTable,
-    section: str = "4.1; 4.2",
-    hardware: str = "4 NVIDIA A6000 GPUs",
+    document: Document,
+    experiment_id: str,
+    task_id: str,
+    config_id: str,
 ) -> int:
-    """Разложить Table 1 в configurations / datasets / tasks / experiments / results."""
-    n_datasets = len(table.datasets)
-    n_metrics = len(table.metrics)
-
-    dataset_ids = [
-        builder.dataset(
-            dataset_name=DATASET_ALIASES.get(name.casefold(), name),
-            note=f"PDF p. {table.page}, section {section.split(';')[0].strip()}.",
-        )
-        for name in table.datasets
-    ]
-    task_id = builder.task(
-        task_type="open-domain multi-hop question answering",
-        note=f"PDF p. {table.page}, section {section.split(';')[0].strip()}.",
-    )
-    experiment_id = builder.experiment(
-        evaluation_protocol=(
-            "Table 1 main evaluation. EM and F1 after standard text normalization; "
-            "same data splits as prior work. Table 1 reports the authors' experiments "
-            "and rerun baselines."
-        ),
-        hardware=hardware,
-        note=f"PDF p. {table.page}, sections {section}.",
-    )
-
     produced = 0
-    for method, numbers in table.methods:
-        for g_index, generator in enumerate(table.generators):
-            config_id = builder.config(
-                rag_variant=method,
-                generator_model=generator,
-                note=(
-                    f"PDF p. {table.page}, Table 1 row {method}, "
-                    f"generator {generator}."
-                ),
-            )
-            for d_index, dataset in enumerate(table.datasets):
-                for m_index, metric in enumerate(table.metrics):
-                    offset = (g_index * n_datasets + d_index) * n_metrics + m_index
-                    raw = format_number(numbers[offset])
-                    group, variant, direction = METRIC_DEFINITIONS.get(
-                        metric, ("", "", "")
-                    )
-                    builder.result(
-                        experiment_id=experiment_id,
-                        config_id=config_id,
-                        dataset_id=dataset_ids[d_index],
-                        task_id=task_id,
-                        metric_group=group,
-                        metric_name=metric,
-                        metric_variant=variant,
-                        metric_direction=direction,
-                        metric_value=_with_leading_zero(raw),
-                        metric_unit="fraction",
-                        raw_value=raw,
-                        raw_unit="",
-                        normalized_value=_with_leading_zero(raw),
-                        normalized_unit="fraction",
-                        result_origin="primary",
-                        source_page=str(table.page),
-                        source_section=section,
-                        source_table=table.caption,
-                        source_fragment=table.row_fragments[method],
-                        extraction_status="extracted",
-                        note=(
-                            f"Table 1: row {method}; generator {generator}; "
-                            f"dataset {DATASET_ALIASES.get(dataset.casefold(), dataset)}; "
-                            f"column {metric}. Leading zero added without scale conversion; "
-                            f"no unit symbol printed in the table."
-                        ),
-                    )
-                    produced += 1
+    for page in document.pages:
+        if page.source == "empty":
+            continue
+        for sentence in _sentences(page.text):
+            dataset = dataset_in_text(sentence)
+            if not dataset:
+                continue
+            for match in _PROSE_RESULT.finditer(sentence):
+                raw = match.group(2).strip()
+                if "%" not in raw and not raw.startswith("."):
+                    continue  # без знака процента число в прозе слишком двусмысленно
+                metric = parse_metric(match.group(1))
+                if metric is None:
+                    continue
+                value = number_value(raw)
+                if value is None:
+                    continue
+                dataset_id = builder.dataset(
+                    dataset_name=dataset,
+                    note=f"PDF p. {page.number}, mentioned in prose.",
+                )
+                builder.result(
+                    experiment_id=experiment_id,
+                    config_id=config_id,
+                    dataset_id=dataset_id,
+                    task_id=task_id,
+                    metric_group=metric.group,
+                    metric_name=metric_display(metric),
+                    metric_variant=metric.variant,
+                    metric_direction=metric.direction,
+                    metric_k=metric.k,
+                    metric_value=metric_value_text(raw),
+                    metric_unit=metric_unit(metric, raw, value),
+                    raw_value=raw,
+                    raw_unit=raw_unit_text(raw),
+                    normalized_value=metric_value_text(raw),
+                    normalized_unit=metric_unit(metric, raw, value),
+                    result_origin="primary",
+                    source_page=str(page.number),
+                    source_table="",
+                    source_figure="",
+                    source_fragment=quote_from_page(page.text, sentence[:60], raw, sentence),
+                    extraction_status="extracted",
+                    note="Value stated in prose; sentence quoted verbatim.",
+                )
+                produced += 1
     return produced
 
 
-def _with_leading_zero(value: str) -> str:
-    if value.startswith("."):
-        return "0" + value
-    if value.startswith("-."):
-        return "-0" + value[1:]
-    return value
+# --- таблицы ---------------------------------------------------------------
+
+
+def _extract_table(
+    builder: Builder,
+    table: Table,
+    *,
+    task_id: str,
+    default_config: dict[str, str],
+    default_dataset: str,
+) -> int:
+    if not table.columns:
+        return 0
+    caption = table.caption or "unnumbered table"
+    protocol = (
+        f"{caption} evaluation: one row per configuration, one column per "
+        f"dataset/metric; values read from the table as printed."
+    )
+    if table.caption_text:
+        protocol = f"{table.caption_text} {protocol}"
+    experiment_id = builder.experiment(
+        evaluation_protocol=protocol,
+        note=f"PDF p. {table.page}, {caption}.",
+    )
+
+    row_datasets = {row.label: canonical_dataset(row.label) for row in table.rows}
+    known = sum(1 for value in row_datasets.values() if value)
+    rows_are_datasets = known >= max(1, len(table.rows) // 2)
+    caption_generator = generator_from_text(table.caption_text)
+
+    produced = 0
+    for row in table.rows:
+        variant = clean_variant(row.label)
+        if not rows_are_datasets and not re.search(r"[A-Za-z]", variant):
+            continue
+        for column_index, (raw, value) in row.values.items():
+            if column_index >= len(table.columns):
+                continue
+            column = table.columns[column_index]
+            metric = column.metric
+            if metric is None:
+                continue
+
+            if rows_are_datasets:
+                dataset_name = row_datasets.get(row.label) or default_dataset
+                config_fields = dict(default_config)
+            else:
+                dataset_name = column.dataset or row.dataset or default_dataset
+                config_fields = {"rag_variant": variant}
+                fallback = caption_generator or default_config.get("generator_model", "")
+                generator = resolve_generator(row.generator or column.generator, fallback)
+                if generator:
+                    config_fields["generator_model"] = generator
+
+            dataset_name = dataset_name or _UNSPECIFIED_DATASET
+            dataset_id = builder.dataset(
+                dataset_name=dataset_name,
+                note=f"PDF p. {table.page}, {caption}.",
+            )
+            config_id = builder.config(
+                **{
+                    **config_fields,
+                    "note": f"PDF p. {table.page}, {caption}, row {row.label}.",
+                }
+            )
+
+            builder.result(
+                experiment_id=experiment_id,
+                config_id=config_id,
+                dataset_id=dataset_id,
+                task_id=task_id,
+                metric_group=metric.group,
+                metric_name=metric_display(metric),
+                metric_variant=metric.variant,
+                metric_direction=metric.direction,
+                metric_k=metric.k,
+                metric_value=metric_value_text(raw),
+                metric_unit=metric_unit(metric, raw, value, column.text + " " + table.caption_text),
+                raw_value=raw,
+                raw_unit=raw_unit_text(raw),
+                normalized_value=metric_value_text(raw),
+                normalized_unit=metric_unit(metric, raw, value, column.text + " " + table.caption_text),
+                result_origin="primary",
+                source_page=str(table.page),
+                source_table=table.caption,
+                source_figure="",
+                source_fragment=quote_from_page(
+                    table.page_text, row.label, raw, row.fragment
+                ),
+                extraction_status="extracted",
+                note=(
+                    f"{caption}: row {row.label}; column "
+                    f"{column.text or metric_display(metric)}. "
+                    f"Value copied as printed; unit inferred from the header/value scale."
+                ),
+            )
+            produced += 1
+    return produced
 
 
 # --- точка входа -----------------------------------------------------------
@@ -360,48 +595,62 @@ def _with_leading_zero(value: str) -> str:
 
 def extract_document(publication_id: str, document: Document) -> Extraction:
     """Извлечь всё, что поддерживается текущей версией экстрактора."""
+    from .issues import add_issues
+
     builder = Builder(publication_id)
     builder.publication(**extract_metadata(document))
 
-    for page in document.pages:
-        table = parse_numeric_grid(page.text, page.number)
-        if table is not None:
-            extract_table_one(builder, table)
-
-    if not builder.extraction.tables["results"]:
+    if document.is_scan:
         builder.issue(
-            check_name="no_structured_results_extracted",
+            check_name="no_text_layer",
             description=(
-                "Детерминированный экстрактор не нашёл числовой таблицы результатов. "
-                "Публикация требует отдельного разбора; пустые значения не заполнены."
+                "В PDF нет текстового слоя (скан). Без OCR извлечение невозможно; "
+                "пустые значения не заполнены догадками."
             ),
-            source_page="",
+            source_page="1",
             source_fragment="",
             record_ids="",
         )
+        return builder.extraction
+
+    prose = document.text()
+    task_type = choose_task(prose) or _UNSPECIFIED_TASK
+    task_id = builder.task(
+        task_type=task_type,
+        note="Task inferred from the publication text." if task_type != _UNSPECIFIED_TASK else "",
+    )
+
+    variant = proposed_variant(prose)
+    generator = generator_from_text(prose)
+    default_config: dict[str, str] = {}
+    if variant:
+        default_config["rag_variant"] = variant
+    if generator:
+        default_config["generator_model"] = generator
+
+    default_dataset = dataset_in_text(prose)
+
+    tables: list[Table] = []
+    for page in document.pages:
+        tables.extend(find_tables(page))
+
+    for table in tables:
+        _extract_table(
+            builder,
+            table,
+            task_id=task_id,
+            default_config=default_config,
+            default_dataset=default_dataset,
+        )
+
+    # Прозаические результаты — только если таблицы не дали ни одной строки.
+    if not builder.extraction.tables["results"] and default_config:
+        config_id = builder.config(**default_config)
+        experiment_id = builder.experiment(
+            evaluation_protocol="Values stated in prose; no numeric table extracted.",
+            note="Prose-only extraction.",
+        )
+        _prose_results(builder, document, experiment_id, task_id, config_id)
+
+    add_issues(builder)
     return builder.extraction
-
-
-_TITLE_HINT = re.compile(r"^[A-Z][^.]{20,200}$")
-
-
-def extract_metadata(document: Document) -> dict[str, str]:
-    """Грубые метаданные с первой страницы: заголовок, год, DOI, авторы."""
-    if not document.pages:
-        return {}
-    lines = [norm(line) for line in document.pages[0].text.splitlines() if norm(line)]
-    meta: dict[str, str] = {}
-
-    for line in lines[:12]:
-        if _TITLE_HINT.match(line) and "title" not in meta:
-            meta["title"] = line
-            break
-
-    joined = "\n".join(lines)
-    doi = re.search(r"\b(10\.\d{4,9}/[^\s,;]+)", joined)
-    if doi:
-        meta["DOI"] = doi.group(1).rstrip(".")
-    year = re.search(r"\b(19|20)\d{2}\b", joined)
-    if year:
-        meta["year"] = year.group(0)
-    return meta

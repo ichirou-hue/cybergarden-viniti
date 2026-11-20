@@ -122,6 +122,7 @@ class Report:
     by_table: dict[str, TableScore]
     by_publication: dict[str, dict[str, TableScore]]
     by_table_value_mode: dict[str, TableScore] = field(default_factory=dict)
+    by_table_cell_mode: dict[str, TableScore] = field(default_factory=dict)
     gold_total: int = 0
     pred_total: int = 0
 
@@ -168,9 +169,75 @@ def _sig_results_id(row: Mapping[str, str]) -> tuple[str, ...]:
     )
 
 
+def _compact(value: str) -> str:
+    return fold(value).replace(" ", "").replace("-", "")
+
+
+def _resolve_results(
+    rows: Sequence[Mapping[str, str]],
+    submission: Mapping[str, Sequence[Mapping[str, str]]],
+) -> list[dict[str, str]]:
+    """Подставить в results семантические имена вместо внутренних id.
+
+    Идентификаторы у эталона и предсказания всегда разные, поэтому сверять
+    результаты по ``config_id``/``dataset_id`` бессмысленно. Сверяем по тому,
+    что эти id обозначают: вариант, генератор, набор, метрика, k.
+    """
+    configs = {
+        (row.get("publication_id", ""), row.get("config_id", "")): row
+        for row in submission.get("configurations", [])
+    }
+    datasets = {
+        (row.get("publication_id", ""), row.get("dataset_id", "")): row
+        for row in submission.get("datasets", [])
+    }
+    tasks = {
+        (row.get("publication_id", ""), row.get("task_id", "")): row
+        for row in submission.get("tasks", [])
+    }
+
+    resolved: list[dict[str, str]] = []
+    for row in rows:
+        publication_id = row.get("publication_id", "")
+        config = configs.get((publication_id, row.get("config_id", "")), {})
+        dataset = datasets.get((publication_id, row.get("dataset_id", "")), {})
+        task = tasks.get((publication_id, row.get("task_id", "")), {})
+        payload = dict(row)
+        payload["_variant"] = config.get("rag_variant", "")
+        payload["_generator"] = config.get("generator_model", "")
+        payload["_dataset"] = dataset.get("dataset_name", "")
+        payload["_task"] = task.get("task_type", "")
+        resolved.append(payload)
+    return resolved
+
+
+def _sig_results_semantic(row: Mapping[str, str]) -> tuple[str, ...]:
+    # Набор данных — отдельное измерение, а не часть идентичности замера:
+    # имена наборов в эталоне человеческие и часто составные
+    # («Combined six QA benchmarks»). Сверяем конфигурацию + метрику + k.
+    return (
+        row.get("publication_id", ""),
+        fold(row.get("_variant", "")),
+        fold(row.get("_generator", "")),
+        canonical_metric(row.get("metric_name", "")),
+        fold(row.get("metric_k", "")),
+    )
+
+
 def _sig_results_value(row: Mapping[str, str]) -> tuple[str, ...]:
     return (
         row.get("publication_id", ""),
+        canonical_metric(row.get("metric_name", "")),
+        fold(row.get("metric_value", "")),
+        fold(row.get("metric_k", "")),
+    )
+
+
+def _sig_results_cell(row: Mapping[str, str]) -> tuple[str, ...]:
+    """Диагностика качества оцифровки: та же страница, метрика и значение."""
+    return (
+        row.get("publication_id", ""),
+        fold(row.get("source_page", "")),
         canonical_metric(row.get("metric_name", "")),
         fold(row.get("metric_value", "")),
         fold(row.get("metric_k", "")),
@@ -283,8 +350,21 @@ def evaluate(
     tolerance: float = 0.0,
 ) -> Report:
     """Сравнить предсказание с эталоном по всем семи таблицам."""
+    gold_results = _resolve_results(gold.get("results", []), gold)
+    pred_results = _resolve_results(pred.get("results", []), pred)
+    resolved = {"gold": gold_results, "pred": pred_results}
+
     by_table: dict[str, TableScore] = {}
     for table in TABLE_ORDER:
+        if table == "results":
+            by_table[table] = score_table(
+                table,
+                gold_results,
+                pred_results,
+                tolerance=tolerance,
+                key=_sig_results_semantic,
+            )
+            continue
         by_table[table] = score_table(
             table,
             gold.get(table, []),
@@ -301,6 +381,15 @@ def evaluate(
         key=_sig_results_value,
     )
 
+    by_table_cell: dict[str, TableScore] = {}
+    by_table_cell["results"] = score_table(
+        "results",
+        gold.get("results", []),
+        pred.get("results", []),
+        tolerance=tolerance,
+        key=_sig_results_cell,
+    )
+
     by_publication: dict[str, dict[str, TableScore]] = {}
     publication_ids = sorted(
         {
@@ -313,12 +402,18 @@ def evaluate(
     for publication_id in publication_ids:
         scores: dict[str, TableScore] = {}
         for table in TABLE_ORDER:
-            gold_rows = [r for r in gold.get(table, []) if r.get("publication_id") == publication_id]
-            pred_rows = [r for r in pred.get(table, []) if r.get("publication_id") == publication_id]
+            if table == "results":
+                gold_rows = [r for r in gold_results if r.get("publication_id") == publication_id]
+                pred_rows = [r for r in pred_results if r.get("publication_id") == publication_id]
+                key = _sig_results_semantic
+            else:
+                gold_rows = [r for r in gold.get(table, []) if r.get("publication_id") == publication_id]
+                pred_rows = [r for r in pred.get(table, []) if r.get("publication_id") == publication_id]
+                key = None
             if not gold_rows and not pred_rows:
                 continue
             scores[table] = score_table(
-                table, gold_rows, pred_rows, tolerance=tolerance
+                table, gold_rows, pred_rows, tolerance=tolerance, key=key
             )
         by_publication[publication_id] = scores
 
@@ -330,6 +425,7 @@ def evaluate(
         by_table=by_table,
         by_publication=by_publication,
         by_table_value_mode=by_table_value,
+        by_table_cell_mode=by_table_cell,
         gold_total=sum(len(gold.get(t, [])) for t in TABLE_ORDER),
         pred_total=sum(len(pred.get(t, [])) for t in TABLE_ORDER),
     )
@@ -365,6 +461,15 @@ def render_text(report: Report, *, per_publication: bool = False) -> str:
             f"P {_pct(value_score.precision).strip()}, "
             f"R {_pct(value_score.recall).strip()}, "
             f"F1 {_pct(value_score.f1).strip()}"
+        )
+
+    cell_score = report.by_table_cell_mode.get("results")
+    if cell_score is not None:
+        lines.append(
+            "results (оцифровка ячеек: страница + метрика + значение): "
+            f"P {_pct(cell_score.precision).strip()}, "
+            f"R {_pct(cell_score.recall).strip()}, "
+            f"F1 {_pct(cell_score.f1).strip()}"
         )
 
     for table, score in report.by_table.items():
