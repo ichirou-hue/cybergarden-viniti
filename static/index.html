@@ -3,45 +3,50 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ВИНИТИ · Разбор публикаций</title>
+  <title>ВИНИТИ · Каталог результатов</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
-<header class="top"><div class="wrap">ВИНИТИ РАН <span>CyberGarden / RAG</span></div></header>
-<main class="wrap">
-  <section class="intro">
-    <div><h1>Разбор публикаций</h1><p>Метрики RAG с привязкой к исходной странице.</p></div>
-    <form id="upload">
-      <label>Загрузить статью <input id="file" type="file" accept=".pdf,application/pdf" required></label>
-      <button type="submit">Разобрать PDF</button>
-      <button type="button" id="demo" class="secondary">Открыть демо</button>
+<a class="skip" href="#view" onclick="event.preventDefault(); document.getElementById('view').focus()">К содержанию</a>
+<header class="top">
+  <div class="wrap topbar">
+    <a class="brand" href="#/">ВИНИТИ РАН <span>CyberGarden</span></a>
+    <div class="track-switch" id="tracks" role="group" aria-label="Предметная область"></div>
+    <form id="upload" class="upload">
+      <label class="file"><span id="fileName">Загрузить PDF</span>
+        <input id="file" type="file" accept=".pdf,application/pdf">
+      </label>
+      <button type="submit">Разобрать</button>
+      <button type="button" id="demo" class="secondary">Демо</button>
+      <span id="uploadState" class="upload-state" role="status"></span>
     </form>
-  </section>
-  <p id="status" role="status"></p>
-  <section id="workspace" hidden>
-    <div class="bar">
-      <label>Публикация <select id="papers"></select></label>
-      <div class="links"><a id="pdf">Исходный PDF</a><a id="json">Экспорт JSON</a></div>
-    </div>
-    <p id="summary"></p>
-    <ul id="warnings"></ul>
-    <div class="bar filters">
-      <label>Поиск <input id="query" type="search" placeholder="Метрика, набор данных, цитата"></label>
-      <label>Раздел <select id="view"><option value="facts">Метрики</option><option value="sources">Фрагменты PDF</option></select></label>
-      <label id="categoryLabel">Тип <select id="category"></select></label>
-      <label id="issueFilter" class="check"><input id="issues" type="checkbox"> С замечаниями</label>
-    </div>
-    <p id="count" aria-live="polite"></p>
-    <div class="results"><table><thead id="head"></thead><tbody id="rows"></tbody></table></div>
-    <nav class="bar pager" aria-label="Страницы результатов"><button id="prev" class="secondary">Назад</button><span id="page"></span><button id="next" class="secondary">Далее</button></nav>
-  </section>
-</main>
-<dialog id="evidence">
-  <div class="bar"><strong id="evidenceTitle"></strong><button id="close" class="secondary">Закрыть</button></div>
-  <p id="quote"></p>
+  </div>
+</header>
+
+<main class="wrap" id="view" tabindex="-1"></main>
+<p id="status" class="status" role="status"></p>
+<noscript><p class="notice bad wrap">Для работы интерфейса нужен JavaScript.</p></noscript>
+<p id="bootError" class="notice bad wrap" hidden>
+  Не удалось загрузить интерфейс. Обновите страницу; если ошибка повторяется —
+  запустите сервер: <code>.venv/bin/python tools/mock_api.py</code>.
+</p>
+
+<dialog id="evidence" aria-labelledby="evidenceTitle">
+  <div class="bar">
+    <h2 id="evidenceTitle"></h2>
+    <a id="evidencePdf" href="#" target="_blank" rel="noopener">Открыть PDF</a>
+    <button type="button" id="evidenceClose" class="secondary">Закрыть</button>
+  </div>
+  <p id="evidenceQuote"></p>
   <p id="imageError" hidden>Превью недоступно. Номер страницы и цитата указаны выше.</p>
   <img id="preview" alt="Страница PDF с подсветкой источника">
 </dialog>
+<script>
+  setTimeout(function () {
+    var view = document.getElementById("view");
+    if (view && !view.children.length) document.getElementById("bootError").hidden = false;
+  }, 4000);
+</script>
 </body>
 </html>

@@ -1,189 +1,245 @@
-const ui = Object.fromEntries([...document.querySelectorAll("[id]")].map(el => [el.id, el]));
-const kinds = {text: "Текст", table: "Таблица", caption: "Подпись", equation: "Формула"};
-const issues = {
-  missing_unit: "Шкала не указана",
-  out_of_range: "Вне диапазона",
-  conflicting_values: "Противоречивые значения",
-  recall_decreases: "Recall уменьшается при росте k",
-};
-const units = {ratio: "доля", unspecified: "шкала неизвестна"};
-const pageSize = 25;
-let paper;
-let page = 0;
+import { el, fill } from "./dom.js";
+import { tracks } from "./tracks/index.js";
+import { renderCatalog } from "./catalog.js";
+import { renderDocument } from "./document.js";
+import { openEvidence, dismissEvidence } from "./evidence.js";
+import { uploadPDF, openDemo } from "./api.js";
 
-async function request(path, options) {
-  const response = await fetch(path, options);
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error);
-  return data;
+const view = document.getElementById("view");
+const statusLine = document.getElementById("status");
+const form = document.getElementById("upload");
+const fileInput = document.getElementById("file");
+const fileName = document.getElementById("fileName");
+const uploadState = document.getElementById("uploadState");
+const demoButton = document.getElementById("demo");
+const trackBar = document.getElementById("tracks");
+const evidenceDialog = document.getElementById("evidence");
+
+const app = {descriptors: [], track: "rag", controller: null};
+let booted = false;
+
+function parse() {
+  const raw = location.hash.replace(/^#/, "") || "/";
+  const [path, query = ""] = raw.split("?");
+  return {path: path || "/", params: Object.fromEntries(new URLSearchParams(query))};
 }
 
-function option(value, text) {
-  return new Option(text, value);
+function compact(params) {
+  const result = {};
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === "" || value === null || value === undefined) continue;
+    result[key] = value;
+  }
+  return result;
 }
 
-async function work(task) {
-  const controls = [...ui.upload.querySelectorAll("button"), ui.papers];
-  controls.forEach(el => { el.disabled = true; });
-  ui.status.className = "";
-  ui.status.textContent = "Обработка…";
+function buildHash(path, params) {
+  const query = new URLSearchParams(compact(params)).toString();
+  return `#${path}${query ? "?" + query : ""}`;
+}
+
+function patch(changes) {
+  const {path, params} = parse();
+  const next = compact({...params, ...changes});
+  history.replaceState(null, "", buildHash(path, next));
+  return next;
+}
+
+function go(changes) {
+  const {path, params} = parse();
+  location.hash = buildHash(path, compact({...params, ...changes})).slice(1);
+}
+
+function say(message, isError = false) {
+  statusLine.textContent = message || "";
+  statusLine.className = isError ? "status error" : "status";
+}
+
+function renderTracks(active = app.track) {
+  fill(trackBar, app.descriptors.map(item => el("button", {
+    type: "button",
+    class: "track" + (item.track === active ? " active" : ""),
+    "aria-pressed": item.track === active ? "true" : "false",
+    onclick: () => { location.hash = buildHash("/", {track: item.track}).slice(1); },
+    text: item.label || item.track,
+  })));
+}
+
+function setUploadEnabled(enabled) {
+  form.querySelectorAll("button, input").forEach(node => { node.disabled = !enabled; });
+  form.classList.toggle("disabled", !enabled);
+}
+
+function message(title, detail, extra) {
+  document.getElementById("bootError").hidden = true;
+  document.title = `${title} · ВИНИТИ`;
+  fill(view, el("div", {class: "empty"},
+    el("h1", {class: "empty-title", text: title}),
+    detail ? el("p", {class: "muted", text: detail}) : null,
+    extra || el("p", {}, el("a", {href: "#/", text: "К каталогу"})),
+  ));
+}
+
+function focusView() {
   try {
-    ui.status.textContent = await task() || "";
-  } catch (error) {
-    ui.status.textContent = error.message;
-    ui.status.className = "error";
-  } finally {
-    controls.forEach(el => { el.disabled = false; });
+    view.focus({preventScroll: true});
+  } catch {
+    view.focus();
   }
 }
 
-async function refresh(selected) {
-  const papers = await request("/api/papers");
-  ui.papers.replaceChildren(...papers.map(item => option(item.id, item.title)));
-  if (!papers.length) {
-    return "Загрузите PDF или откройте демо.";
+function splitDocId(raw) {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return "";
   }
-  const id = selected || papers[0].id;
-  ui.papers.value = id;
-  openPaper(await request("/api/papers/" + id));
 }
 
-function openPaper(result) {
-  paper = result;
-  const base = "/api/papers/" + paper.id;
-  ui.json.href = base + "?download";
-  ui.json.download = "analysis.json";
-  ui.pdf.href = base + "/pdf";
-  ui.pdf.download = paper.name;
-  ui.workspace.hidden = false;
-  const flagged = paper.facts.filter(fact => fact.issues.length).length;
-  ui.summary.textContent = [
-    paper.pages + " стр.", paper.sources.length + " фрагментов",
-    paper.facts.length + " метрик", flagged + " с замечаниями",
-  ].join("  ·  ");
-  ui.warnings.replaceChildren(...paper.warnings.map(warning => {
-    const item = document.createElement("li");
-    item.textContent = warning;
-    return item;
-  }));
-  ui.view.value = paper.facts.length ? "facts" : "sources";
-  ui.query.value = "";
-  ui.issues.checked = false;
-  setCategories();
-}
-
-function setCategories() {
-  const facts = ui.view.value === "facts";
-  const categories = facts
-    ? [...new Set(paper.facts.map(fact => fact.metric))].sort().map(metric => [metric, metric.toUpperCase()])
-    : Object.entries(kinds);
-  ui.category.replaceChildren(option("", "Все"), ...categories.map(([key, text]) => option(key, text)));
-  ui.issueFilter.hidden = !facts;
-  page = 0;
-  render();
-}
-
-function evidenceButton(label, anchor, resource, id) {
-  const button = document.createElement("button");
-  button.className = "secondary";
-  button.textContent = label;
-  button.onclick = () => {
-    ui.evidenceTitle.textContent = "Страница " + anchor.page;
-    ui.quote.textContent = anchor.quote;
-    ui.imageError.hidden = true;
-    ui.preview.hidden = false;
-    ui.preview.src = "/api/papers/" + paper.id + "/" + resource + "/" + id + ".png";
-    ui.evidence.showModal();
-    ui.evidence.scrollTop = 0;
-  };
-  return button;
-}
-
-function render() {
-  const facts = ui.view.value === "facts";
-  const query = ui.query.value.toLocaleLowerCase().trim().split(/\s+/);
-  const category = ui.category.value;
-  const entries = (facts ? paper.facts : paper.sources).filter(entry => {
-    if (category && category !== (facts ? entry.metric : entry.kind)) return false;
-    if (facts && ui.issues.checked && !entry.issues.length) return false;
-    const searchable = facts
-      ? [entry.metric, entry.cutoff ? entry.metric + "@" + entry.cutoff : "", entry.value,
-         entry.raw_value, entry.context, entry.evidence.quote, units[entry.unit],
-         ...entry.issues.map(code => issues[code])].join(" ")
-      : entry.quote;
-    return query.every(word => searchable.toLocaleLowerCase().includes(word));
-  });
-  const columns = facts
-    ? ["Метрика", "Значение", "Контекст", "Проверка", "Источник"]
-    : ["Тип", "Цитата", "Источник"];
-  const header = document.createElement("tr");
-  for (const title of columns) {
-    const cell = document.createElement("th");
-    cell.scope = "col";
-    cell.textContent = title;
-    header.append(cell);
+async function route() {
+  let {path, params} = parse();
+  const legacyTab = path.match(/^\/doc\/([^/]+)\/(issues|entities|sources)$/);
+  if (legacyTab) {
+    path = `/doc/${legacyTab[1]}`;
+    params = {...params, tab: legacyTab[2]};
+    history.replaceState(null, "", buildHash(path, params));
   }
-  ui.head.replaceChildren(header);
-  ui.rows.replaceChildren();
-  for (const entry of entries.slice(page * pageSize, (page + 1) * pageSize)) {
-    const row = ui.rows.insertRow();
-    if (facts) {
-      row.insertCell().textContent = entry.metric.toUpperCase() + (entry.cutoff ? "@" + entry.cutoff : "");
-      row.insertCell().textContent = entry.value + " · " + units[entry.unit] + " (" + entry.raw_value + ")";
-      row.insertCell().textContent = entry.context || "—";
-      const check = row.insertCell();
-      check.textContent = entry.issues.map(code => issues[code]).join(" · ") || "Замечаний нет";
-      check.classList.toggle("flag", Boolean(entry.issues.length));
-      const evidence = row.insertCell();
-      evidence.append(evidenceButton("Стр. " + entry.evidence.page, entry.evidence, "facts", entry.id));
-      if (entry.header) evidence.append(evidenceButton("Заголовок", entry.header, "headers", entry.id));
+  const match = path.match(/^\/doc\/(.+?)(?:\/source\/([0-9]+))?$/);
+  const docId = match ? splitDocId(match[1]) : "";
+  if (!(match && match[2])) dismissEvidence();
+  if (match && !docId) {
+    setUploadEnabled(false);
+    message("Страница не найдена.", "Некорректный адрес документа.");
+    return;
+  }
+  const desired = docId ? docId.split(":")[0] : (params.track || app.track);
+  const descriptor = app.descriptors.find(item => item.track === desired);
+  renderTracks(desired);
+  if (!descriptor) {
+    setUploadEnabled(false);
+    const label = desired === "solar" ? "Solar" : desired;
+    message(
+      `Раздел «${label}» пока не подключён.`,
+      "Обработчик области ещё не добавлен. Каталог RAG работает; Solar появится отдельным дескриптором.",
+      el("p", {}, el("a", {href: "#/?track=rag", text: "Перейти в каталог RAG"})),
+    );
+    return;
+  }
+  app.track = descriptor.track;
+  setUploadEnabled(true);
+  renderTracks();
+  if (docId && params.track && params.track !== descriptor.track) {
+    history.replaceState(null, "", buildHash(path, {...params, track: descriptor.track}));
+  }
+
+  app.controller?.abort();
+  const controller = new AbortController();
+  app.controller = controller;
+  const {signal} = controller;
+  const ctx = {descriptor, params, signal, patch, go, say};
+
+  try {
+    if (match) {
+      const sourceId = match[2];
+      await renderDocument(view, {...ctx, docId});
+      if (signal.aborted) return;
+      if (sourceId) {
+        try {
+          await openEvidence({docId, sourceId, signal});
+        } catch (error) {
+          if (error.name === "AbortError") return;
+          say(`Не удалось открыть источник: ${error.message}`, true);
+        }
+      }
+    } else if (path === "/") {
+      await renderCatalog(view, ctx);
+      if (signal.aborted) return;
     } else {
-      row.insertCell().textContent = kinds[entry.kind];
-      row.insertCell().textContent = entry.quote;
-      row.insertCell().append(evidenceButton("Стр. " + entry.page, entry, "sources", entry.id));
+      setUploadEnabled(false);
+      message("Страница не найдена.");
+      return;
     }
+    if (booted && !evidenceDialog.open) focusView();
+    booted = true;
+    document.getElementById("bootError").hidden = true;
+  } catch (error) {
+    if (error.name === "AbortError" || signal.aborted) return;
+    fill(view, el("div", {class: "notice bad", role: "alert"},
+      el("strong", {text: "Не удалось загрузить данные"}),
+      el("p", {text: error.message}),
+      el("p", {}, el("a", {href: "#/", text: "Вернуться в каталог"})),
+    ));
+    say(error.message, true);
   }
-  const total = Math.max(1, Math.ceil(entries.length / pageSize));
-  ui.count.textContent = entries.length ? "Найдено " + entries.length : "По этому запросу ничего не найдено.";
-  ui.prev.disabled = page === 0;
-  ui.next.disabled = page + 1 === total;
-  ui.page.textContent = (page + 1) + " / " + total;
 }
 
-ui.upload.onsubmit = event => {
-  event.preventDefault();
-  const file = ui.file.files[0];
-  if (!file) return;
-  work(async () => {
-    const result = await request("/api/papers", {
-      method: "POST", body: file,
-      headers: {"Content-Type": "application/pdf", "X-Filename": encodeURIComponent(file.name)},
-    });
-    await refresh(result.id);
-    ui.file.value = "";
-  });
-};
-ui.demo.onclick = () => work(async () => {
-  const result = await request("/api/demo", {method: "POST"});
-  await refresh(result.id);
-});
-ui.papers.onchange = () => work(async () => {
+async function busy(messageText, task) {
+  const controls = [...form.querySelectorAll("button, input")];
+  controls.forEach(node => { node.disabled = true; });
+  form.classList.add("busy");
+  uploadState.classList.remove("error");
+  uploadState.textContent = messageText;
+  say(messageText);
   try {
-    openPaper(await request("/api/papers/" + ui.papers.value));
+    return await task();
   } catch (error) {
-    ui.papers.value = paper?.id || "";
-    throw error;
+    say(error.message, true);
+    uploadState.textContent = error.message;
+    uploadState.classList.add("error");
+    return null;
+  } finally {
+    controls.forEach(node => { node.disabled = false; });
+    form.classList.remove("busy");
+    if (!uploadState.classList.contains("error")) uploadState.textContent = "";
   }
-});
-ui.view.onchange = setCategories;
-for (const control of [ui.query, ui.category, ui.issues]) {
-  control.oninput = () => { page = 0; render(); };
 }
-ui.prev.onclick = () => { page -= 1; render(); };
-ui.next.onclick = () => { page += 1; render(); };
-ui.close.onclick = () => ui.evidence.close();
-ui.preview.onerror = () => {
-  ui.preview.hidden = true;
-  ui.imageError.hidden = false;
-};
-work(refresh);
+
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files[0];
+  fileName.textContent = file ? file.name : "Загрузить PDF";
+  fileName.title = file ? file.name : "";
+  uploadState.classList.remove("error");
+  uploadState.textContent = "";
+});
+
+function openDocument(item) {
+  const track = item.track || app.track;
+  const id = item.document_id || `${track}:${item.id}`;
+  location.hash = `#/doc/${encodeURIComponent(id)}?track=${encodeURIComponent(track)}`;
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const file = fileInput.files[0];
+  if (!file) {
+    uploadState.textContent = "Сначала выберите PDF";
+    return;
+  }
+  const result = await busy("Обработка PDF…", () => uploadPDF(file, app.track));
+  if (!result) return;
+  fileInput.value = "";
+  fileName.textContent = "Загрузить PDF";
+  fileName.title = "";
+  say("");
+  openDocument(result);
+});
+
+demoButton.addEventListener("click", async () => {
+  const result = await busy("Открываю демо…", () => openDemo(app.track));
+  if (!result) return;
+  say("");
+  openDocument(result);
+});
+
+app.descriptors = await tracks();
+if (!app.descriptors.length) {
+  setUploadEnabled(false);
+  message(
+    "Не удалось загрузить интерфейс.",
+    "Модули областей недоступны. Запустите сервер: .venv/bin/python tools/mock_api.py",
+  );
+} else {
+  if (!location.hash) history.replaceState(null, "", buildHash("/", {track: app.track}));
+  window.addEventListener("hashchange", route);
+  await route();
+}
