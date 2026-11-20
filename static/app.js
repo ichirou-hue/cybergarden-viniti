@@ -133,11 +133,7 @@ async function route() {
     passportLink.setAttribute("aria-current", "page");
     setContext("паспорт статьи");
     setUploadEnabled(true);
-    renderTracks();
-    trackBar.querySelectorAll(".track").forEach(node => {
-      node.classList.remove("active");
-      node.setAttribute("aria-pressed", "false");
-    });
+    renderTracks("");
     renderPassport(view, {say, go, patch, params});
     if (booted && pathChanged) focusView();
     booted = true;

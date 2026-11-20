@@ -16,8 +16,10 @@
   </div>
 </header>
 <div class="wrap toolbar">
-  <div class="track-switch" id="tracks" role="group" aria-label="Предметная область"></div>
-  <a class="button secondary nav-link" id="passportLink" href="#/passport">Паспорт</a>
+  <div class="track-switch" role="group" aria-label="Разделы">
+    <div class="tracks" id="tracks"></div>
+    <a class="track" id="passportLink" href="#/passport">Паспорт</a>
+  </div>
   <form id="upload" class="upload">
     <label class="file"><span id="fileName">Загрузить PDF</span>
       <input id="file" type="file" accept=".pdf,application/pdf">
