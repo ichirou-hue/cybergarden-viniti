@@ -4,6 +4,7 @@ import { renderCatalog } from "./catalog.js";
 import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
 import { uploadPDF, openDemo } from "./api.js";
+import { renderPassport, setPassport } from "./passport.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -12,6 +13,7 @@ const fileInput = document.getElementById("file");
 const fileName = document.getElementById("fileName");
 const uploadState = document.getElementById("uploadState");
 const demoButton = document.getElementById("demo");
+const passportInput = document.getElementById("passport");
 const trackBar = document.getElementById("tracks");
 const evidenceDialog = document.getElementById("evidence");
 
@@ -154,6 +156,9 @@ async function route() {
     } else if (path === "/") {
       await renderCatalog(view, ctx);
       if (signal.aborted) return;
+    } else if (path === "/passport") {
+      renderPassport(view, ctx);
+      if (signal.aborted) return;
     } else {
       setUploadEnabled(false);
       message("Страница не найдена.");
@@ -193,6 +198,20 @@ async function busy(messageText, task) {
     if (!uploadState.classList.contains("error")) uploadState.textContent = "";
   }
 }
+
+passportInput.addEventListener("change", async () => {
+  const file = passportInput.files[0];
+  if (!file) return;
+  try {
+    setPassport(JSON.parse(await file.text()));
+    say("");
+    if (location.hash.startsWith("#/passport")) await route();
+    else location.hash = "#/passport";
+  } catch (error) {
+    say(`Не удалось загрузить паспорт: ${error.message}`, true);
+  }
+  passportInput.value = "";
+});
 
 fileInput.addEventListener("change", () => {
   const file = fileInput.files[0];

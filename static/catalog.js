@@ -60,17 +60,34 @@ export async function renderCatalog(root, ctx) {
     rows,
   );
   const box = el("div", {class: "results"}, table);
-  const placeholder = el("div", {});
+  const placeholder = el("div", {class: "placeholder"});
 
-  fill(root, el("section", {class: "screen"},
-    el("header", {class: "screen-head"},
+  const statTotal = el("strong", {text: "—"});
+  const statDone = el("strong", {text: "—"});
+  const statReview = el("strong", {text: "—"});
+
+  fill(root,
+    el("section", {class: "hero"},
       el("div", {},
-        el("h1", {text: "Каталог публикаций"}),
-        el("p", {class: "muted", text: descriptor.note || ""}),
+        el("p", {class: "eyebrow", text: "Пакетный разбор"}),
+        el("h1", {}, "Каталог", el("br"), "публикаций", el("span", {class: "dot", text: "."})),
+        el("p", {class: "lede", text: `${descriptor.note || "Публикации предметной области"}. `
+          + "Загрузите PDF или откройте демо, чтобы увидеть результаты и доказательства."}),
       ),
     ),
+    el("section", {class: "stats", "aria-label": "Сводка прогона"},
+      el("div", {}, el("span", {text: "В прогоне"}), statTotal),
+      el("div", {}, el("span", {text: "Обработано"}), statDone),
+      el("div", {}, el("span", {text: "Требуют разбора"}), statReview),
+    ),
     banner,
-    el("section", {class: "catalog-panel"},
+    el("section", {class: "panel catalog-panel"},
+      el("header", {class: "panel-head"},
+        el("div", {},
+          el("p", {class: "eyebrow", text: "Документы"}),
+          el("h2", {text: "Публикации"}),
+        ),
+      ),
       el("div", {class: "bar filters"},
         el("label", {class: "grow"}, "Поиск", search),
         el("label", {}, "Статус", status),
@@ -82,7 +99,7 @@ export async function renderCatalog(root, ctx) {
       box,
       pager,
     ),
-  ));
+  );
 
   let timer = 0;
   let request = 0;
@@ -123,6 +140,9 @@ export async function renderCatalog(root, ctx) {
     if (!data || ctx.signal.aborted) return;
     const failed = Number(data.failed) || 0;
     const partial = Number(data.partial) || 0;
+    statTotal.textContent = number(data.total);
+    statDone.textContent = number(data.done);
+    statReview.textContent = number(failed + partial);
     fill(banner,
       el("span", {},
         el("strong", {text: `Обработано ${data.done} из ${data.total}`}),

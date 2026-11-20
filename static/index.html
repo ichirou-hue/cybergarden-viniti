@@ -10,19 +10,26 @@
 <body>
 <a class="skip" href="#view" onclick="event.preventDefault(); document.getElementById('view').focus()">К содержанию</a>
 <header class="top">
-  <div class="wrap topbar">
-    <a class="brand" href="#/">ВИНИТИ РАН <span>CyberGarden</span></a>
-    <div class="track-switch" id="tracks" role="group" aria-label="Предметная область"></div>
-    <form id="upload" class="upload">
-      <label class="file"><span id="fileName">Загрузить PDF</span>
-        <input id="file" type="file" accept=".pdf,application/pdf">
-      </label>
-      <button type="submit">Разобрать</button>
-      <button type="button" id="demo" class="secondary">Демо</button>
-      <span id="uploadState" class="upload-state" role="status"></span>
-    </form>
+  <div class="wrap masthead">
+    <a class="brand" href="#/"><span class="mark" aria-hidden="true">✳</span>ВИНИТИ РАН<span>CyberGarden</span></a>
+    <span class="context">Проверка научных данных · каталог результатов</span>
   </div>
 </header>
+<div class="wrap toolbar">
+  <div class="track-switch" id="tracks" role="group" aria-label="Предметная область"></div>
+  <a class="button secondary nav-link" href="#/passport">Паспорт</a>
+  <form id="upload" class="upload">
+    <label class="file"><span id="fileName">Загрузить PDF</span>
+      <input id="file" type="file" accept=".pdf,application/pdf">
+    </label>
+    <button type="submit">Разобрать</button>
+    <button type="button" id="demo" class="secondary">Демо</button>
+    <label class="file">Импорт паспорта JSON
+      <input id="passport" type="file" accept=".json,application/json">
+    </label>
+    <span id="uploadState" class="upload-state" role="status"></span>
+  </form>
+</div>
 
 <main class="wrap" id="view" tabindex="-1"></main>
 <p id="status" class="status" role="status"></p>

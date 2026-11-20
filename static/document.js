@@ -38,7 +38,7 @@ export async function renderDocument(root, ctx) {
   document.title = `${publication.publication_id || summary.publication_id || docId}${heading ? ` · ${String(heading).slice(0, 60)}` : ""} · ВИНИТИ`;
 
   const counts = summary.counts || {};
-  const header = el("section", {class: "doc-head"},
+  const header = el("section", {class: "hero doc-hero"},
     el("div", {class: "doc-main"},
       el("nav", {class: "crumbs", "aria-label": "Хлебные крошки"},
         el("a", {href: `#/?track=${encodeURIComponent(ctx.descriptor.track)}`, text: "Каталог"}),
@@ -60,6 +60,11 @@ export async function renderDocument(root, ctx) {
   );
 
   const notices = noticeBlock(summary);
+  const stats = el("section", {class: "stats", "aria-label": "Сводка документа"},
+    el("div", {}, el("span", {text: "Результатов"}), el("strong", {text: number(counts.results ?? 0)})),
+    el("div", {}, el("span", {text: "Замечаний"}), el("strong", {text: number(counts.issues ?? 0)})),
+    el("div", {}, el("span", {text: "Обработка"}), el("strong", {text: seconds(summary.run && summary.run.duration_ms)})),
+  );
   const body = el("section", {class: "tab-body", id: "tabpanel", role: "tabpanel", "aria-labelledby": `tab-${active}`, tabindex: "0"});
 
   const tabs = el("nav", {class: "tabs", role: "tablist", "aria-label": "Разделы документа"},
@@ -95,7 +100,7 @@ export async function renderDocument(root, ctx) {
     items[index].click();
   });
 
-  fill(root, header, notices, el("section", {class: "doc-panel"},
+  fill(root, header, stats, notices, el("section", {class: "doc-panel"},
     el("h2", {class: "sr-only", text: "Разделы документа"}),
     tabs, body,
   ));
