@@ -474,6 +474,7 @@ dialog img {
   dialog .bar h2 { flex: 1 0 100%; white-space: normal; }
   .doc-actions a { min-height: 34px; padding: 5px 8px; font-size: .82rem; }
   .tabs { flex-wrap: wrap; overflow: visible; }
+  .tabs .tab { padding: 11px 9px; font-size: .85rem; }
   .results { max-height: 62vh; }
   .quote { min-width: 240px; }
   .wide { min-width: 220px; }

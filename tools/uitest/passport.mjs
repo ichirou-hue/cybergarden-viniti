@@ -556,6 +556,11 @@ await step("мобильная ширина", async () => {
   const fragButton = await mp.locator("#view .sources-table tbody button").first().boundingBox();
   check("мобилка: «Стр.» в экране", fragButton && fragButton.x + fragButton.width <= 390,
     JSON.stringify(fragButton));
+  const tabRows = await mp.evaluate(() => {
+    const tabs = [...document.querySelectorAll("#view .tabs .tab")];
+    return new Set(tabs.map(tab => Math.round(tab.getBoundingClientRect().top))).size;
+  });
+  check("мобилка: вкладки в две строки", tabRows === 2, String(tabRows));
   await mobile.close();
 });
 
