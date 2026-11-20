@@ -70,6 +70,7 @@ let rows = [];
 let selected;
 let demo = true;
 let pdfs = new Map();
+let exportColumns = columns;
 
 function validation(row) {
   if (row.issues.length || row.result.validation_status === "review") return "review";
@@ -106,7 +107,7 @@ function detail() {
     ["Тема", publication?.topic],
     ["Контекст", selected.context],
     ...Object.entries(fields).filter(([, field]) => ["string", "number", "boolean"].includes(typeof field)),
-  ]) description.append(node("dt", label), node("dd", text || "—"));
+  ]) description.append(node("dt", label), node("dd", text == null || text === "" ? "—" : text));
   ui.detail.append(description);
   const location = [source.page ? "стр. " + source.page : "", source.section, source.table, source.figure]
     .filter(Boolean).join(" · ");
@@ -163,6 +164,8 @@ function render() {
 function load(tablesData, isDemo) {
   if (!tablesData || typeof tablesData !== "object") throw new Error("Ожидается объект JSON.");
   rows = passportRows(tablesData);
+  exportColumns = tables.every(key => Array.isArray(tablesData[key]))
+    ? columns : [...columns, "context", "fields"];
   demo = isDemo;
   for (const url of pdfs.values()) URL.revokeObjectURL(url);
   pdfs = new Map();
@@ -211,8 +214,10 @@ ui.export.onclick = () => {
   if (demo) return;
   const accepted = rows.filter(row => validation(row) === "passed");
   if (!accepted.length) return;
-  const lines = [columns.join(","), ...accepted.map(({result}) =>
-    columns.map(column => csvCell(result[column])).join(","))];
+  const lines = [exportColumns.join(","), ...accepted.map(({result, context, fields}) => {
+    const record = {...result, context, fields: JSON.stringify(fields)};
+    return exportColumns.map(column => csvCell(record[column])).join(",");
+  })];
   const url = URL.createObjectURL(new Blob([lines.join("\r\n") + "\r\n"], {type: "text/csv;charset=utf-8"}));
   const link = node("a", "");
   link.href = url;
