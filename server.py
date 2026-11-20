@@ -19,6 +19,16 @@ ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/api.js": ("api.js", "text/javascript; charset=utf-8"),
+    "/catalog.js": ("catalog.js", "text/javascript; charset=utf-8"),
+    "/document.js": ("document.js", "text/javascript; charset=utf-8"),
+    "/dom.js": ("dom.js", "text/javascript; charset=utf-8"),
+    "/evidence.js": ("evidence.js", "text/javascript; charset=utf-8"),
+    "/passport.js": ("passport.js", "text/javascript; charset=utf-8"),
+    "/solar.mjs": ("solar.mjs", "text/javascript; charset=utf-8"),
+    "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/tracks/index.js": ("tracks/index.js", "text/javascript; charset=utf-8"),
+    "/tracks/rag.js": ("tracks/rag.js", "text/javascript; charset=utf-8"),
 }
 PAPER = re.compile(r"/api/papers/([0-9a-f]{64})(?:/(pdf|sources|facts|headers)(?:/([1-9][0-9]{0,8})\.png)?)?")
 log = logging.getLogger(__name__)

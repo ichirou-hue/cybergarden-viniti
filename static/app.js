@@ -4,7 +4,7 @@ import { renderCatalog } from "./catalog.js";
 import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
 import { uploadPDF, openDemo } from "./api.js";
-import { renderPassport, setPassport } from "./passport.js";
+import { renderPassport, setPassport, setImportNotice } from "./passport.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -14,11 +14,14 @@ const fileName = document.getElementById("fileName");
 const uploadState = document.getElementById("uploadState");
 const demoButton = document.getElementById("demo");
 const passportInput = document.getElementById("passport");
+const passportLink = document.getElementById("passportLink");
+const contextLine = document.getElementById("context");
 const trackBar = document.getElementById("tracks");
 const evidenceDialog = document.getElementById("evidence");
 
 const app = {descriptors: [], track: "rag", controller: null};
 let booted = false;
+let lastPath = "";
 
 function parse() {
   const raw = location.hash.replace(/^#/, "") || "/";
@@ -55,6 +58,10 @@ function go(changes) {
 function say(message, isError = false) {
   statusLine.textContent = message || "";
   statusLine.className = isError ? "status error" : "status";
+}
+
+function setContext(text) {
+  if (contextLine) contextLine.textContent = `Проверка научных данных · ${text}`;
 }
 
 function renderTracks(active = app.track) {
@@ -108,12 +115,36 @@ async function route() {
   }
   const match = path.match(/^\/doc\/(.+?)(?:\/source\/([0-9]+))?$/);
   const docId = match ? splitDocId(match[1]) : "";
+  const pathChanged = path !== lastPath;
+  lastPath = path;
+  say("");
+  document.body.dataset.view = "catalog";
+  passportLink.removeAttribute("aria-current");
   if (!(match && match[2])) dismissEvidence();
   if (match && !docId) {
     setUploadEnabled(false);
     message("Страница не найдена.", "Некорректный адрес документа.");
     return;
   }
+
+  if (path === "/passport") {
+    app.controller?.abort();
+    document.body.dataset.view = "passport";
+    passportLink.setAttribute("aria-current", "page");
+    setContext("паспорт статьи");
+    setUploadEnabled(true);
+    renderTracks();
+    trackBar.querySelectorAll(".track").forEach(node => {
+      node.classList.remove("active");
+      node.setAttribute("aria-pressed", "false");
+    });
+    renderPassport(view, {say, go, patch, params});
+    if (booted && pathChanged) focusView();
+    booted = true;
+    document.getElementById("bootError").hidden = true;
+    return;
+  }
+
   const desired = docId ? docId.split(":")[0] : (params.track || app.track);
   const descriptor = app.descriptors.find(item => item.track === desired);
   renderTracks(desired);
@@ -128,6 +159,8 @@ async function route() {
     return;
   }
   app.track = descriptor.track;
+  document.body.dataset.view = match ? "doc" : "catalog";
+  setContext(match ? "карточка статьи" : "каталог результатов");
   setUploadEnabled(true);
   renderTracks();
   if (docId && params.track && params.track !== descriptor.track) {
@@ -156,15 +189,12 @@ async function route() {
     } else if (path === "/") {
       await renderCatalog(view, ctx);
       if (signal.aborted) return;
-    } else if (path === "/passport") {
-      renderPassport(view, ctx);
-      if (signal.aborted) return;
     } else {
       setUploadEnabled(false);
       message("Страница не найдена.");
       return;
     }
-    if (booted && !evidenceDialog.open) focusView();
+    if (booted && pathChanged && !evidenceDialog.open) focusView();
     booted = true;
     document.getElementById("bootError").hidden = true;
   } catch (error) {
@@ -199,17 +229,31 @@ async function busy(messageText, task) {
   }
 }
 
+async function openPassport() {
+  if (location.hash.startsWith("#/passport")) await route();
+  else location.hash = "#/passport";
+}
+
 passportInput.addEventListener("change", async () => {
   const file = passportInput.files[0];
   if (!file) return;
+  let data;
   try {
-    setPassport(JSON.parse(await file.text()));
-    say("");
-    if (location.hash.startsWith("#/passport")) await route();
-    else location.hash = "#/passport";
-  } catch (error) {
-    say(`Не удалось загрузить паспорт: ${error.message}`, true);
+    data = JSON.parse(await file.text());
+  } catch {
+    setImportNotice("bad", "Файл не является корректным JSON.");
+    await openPassport();
+    passportInput.value = "";
+    return;
   }
+  try {
+    const count = setPassport(data);
+    setImportNotice("good",
+      `Паспорт загружен. Записей: ${count}. CSV включает только прошедшие проверку строки.`);
+  } catch (error) {
+    setImportNotice("bad", `Не удалось разобрать паспорт. ${error.message}`);
+  }
+  await openPassport();
   passportInput.value = "";
 });
 

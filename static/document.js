@@ -65,7 +65,7 @@ export async function renderDocument(root, ctx) {
     el("div", {}, el("span", {text: "Замечаний"}), el("strong", {text: number(counts.issues ?? 0)})),
     el("div", {}, el("span", {text: "Обработка"}), el("strong", {text: seconds(summary.run && summary.run.duration_ms)})),
   );
-  const body = el("section", {class: "tab-body", id: "tabpanel", role: "tabpanel", "aria-labelledby": `tab-${active}`, tabindex: "0"});
+  const body = el("section", {class: "tab-body", id: "tabpanel", role: "tabpanel", "aria-labelledby": `tab-${active}`});
 
   const tabs = el("nav", {class: "tabs", role: "tablist", "aria-label": "Разделы документа"},
     TABS.map(([key, label]) => el("button", {
@@ -106,8 +106,7 @@ export async function renderDocument(root, ctx) {
   ));
   if (keepTabFocus) {
     keepTabFocus = false;
-    const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (task) => setTimeout(task, 0);
-    frame(() => tabs.querySelector(".tab.active")?.focus());
+    tabs.querySelector(".tab.active")?.focus();
   }
   try {
     await renderTab(body, ctx, summary, facets.data, facets.ok, active);
@@ -752,7 +751,6 @@ async function renderSources(body, ctx, summary) {
 /* -------------------------------------------------------------------- сводка */
 
 function renderSummary(body, ctx, summary, facets) {
-  const counts = summary.counts || {};
   const statuses = facets.statuses || [];
   const metrics = [...(facets.metrics || [])].sort((a, b) => b.count - a.count).slice(0, 10);
   const run = summary.run || {};
@@ -767,20 +765,6 @@ function renderSummary(body, ctx, summary, facets) {
   ));
 
   fill(body,
-    el("div", {class: "cards"},
-      el("div", {class: "card"},
-        el("p", {class: "muted", text: "Результатов"}),
-        el("p", {class: "big", text: number(counts.results ?? 0)}),
-      ),
-      el("div", {class: "card"},
-        el("p", {class: "muted", text: "Замечаний"}),
-        el("p", {class: "big", text: number(counts.issues ?? 0)}),
-      ),
-      el("div", {class: "card"},
-        el("p", {class: "muted", text: "Обработка"}),
-        el("p", {class: "big", text: seconds(run.duration_ms)}),
-      ),
-    ),
     el("div", {class: "summary-grid"},
       el("section", {},
         el("h2", {text: "Статусы извлечения"}),

@@ -1,4 +1,4 @@
-const NAMES = ["rag", "solar"];
+const NAMES = ["rag"];
 
 const loaded = new Map();
 

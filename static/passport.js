@@ -1,6 +1,6 @@
 import { el, fill } from "./dom.js";
 import { solarCatalog } from "./solar.mjs";
-import { number } from "./ui.js";
+import { number, plural } from "./ui.js";
 
 const TABLES = ["publications", "materials", "devices", "layers", "measurements", "results", "issues"];
 const COLUMNS = ("publication_id result_id device_id measurement_id material_id metric_name metric_value metric_unit "
@@ -31,6 +31,12 @@ const SAMPLE = {
 let current = null;
 let demoCache = null;
 let pdfs = new Map();
+let importNotice = null;
+
+/** Сообщение о результате импорта; показывается один раз в ближайшем рендере. */
+export function setImportNotice(tone, text) {
+  importNotice = {tone, text};
+}
 
 function issueList(issues) {
   if (!Array.isArray(issues)) return [];
@@ -58,16 +64,20 @@ function passportRows(data) {
   return entries.map(entry => {
     const id = entry.publication_id || data.publication_id || data.id || data.title || "article";
     const rag = entries === data.facts;
+    const nested = entry.source && typeof entry.source === "object" ? entry.source : {};
+    const legacy = entry.evidence && typeof entry.evidence === "object" ? entry.evidence : {};
     const result = {
       ...entry,
       publication_id: id,
       result_id: entry.result_id ?? entry.id,
       metric_name: entry.metric_name ?? [entry.metric, entry.cutoff ? "@" + entry.cutoff : ""].join(""),
-      normalized_value: entry.normalized_value ?? (rag && entry.unit !== "unspecified" ? entry.value : undefined),
-      normalized_unit: entry.normalized_unit ?? (rag && entry.unit !== "unspecified" ? entry.unit : undefined),
+      normalized_value: entry.normalized_value
+        ?? (rag ? (entry.unit !== "unspecified" ? entry.value : undefined) : entry.value),
+      normalized_unit: entry.normalized_unit
+        ?? (rag ? (entry.unit !== "unspecified" ? entry.unit : undefined) : entry.unit),
       extraction_status: entry.extraction_status ?? (rag ? "extracted" : undefined),
-      source_page: entry.source_page ?? entry.evidence?.page,
-      source_fragment: entry.source_fragment ?? entry.evidence?.quote,
+      source_page: entry.source_page ?? nested.page ?? legacy.page,
+      source_fragment: entry.source_fragment ?? nested.fragment ?? nested.quote ?? legacy.quote,
     };
     return {
       result,
@@ -75,8 +85,11 @@ function passportRows(data) {
       fields: entry.fields ?? {},
       publication: {title: data.title, topic: data.topic ?? data.track},
       source: {
-        page: result.source_page, quote: result.source_fragment,
-        section: entry.source_section, table: entry.source_table, figure: entry.source_figure,
+        page: result.source_page,
+        quote: result.source_fragment,
+        section: entry.source_section ?? nested.section,
+        table: entry.source_table ?? nested.table,
+        figure: entry.source_figure ?? nested.figure,
       },
       issues: issueList(entry.issues),
     };
@@ -93,6 +106,7 @@ function demoState() {
   return demoCache;
 }
 
+/** Возвращает число загруженных записей. */
 export function setPassport(data) {
   if (!data || typeof data !== "object") throw new Error("Ожидается объект JSON.");
   const rows = passportRows(data);
@@ -105,17 +119,29 @@ export function setPassport(data) {
     title: data.title || data.topic || "Паспорт статьи",
     columns: TABLES.every(key => Array.isArray(data[key])) ? COLUMNS : [...COLUMNS, "context", "fields"],
   };
+  return rows.length;
 }
 
 function validation(row) {
-  if (row.issues.length || row.result.validation_status === "review") return "review";
-  if (row.result.validation_status === "passed" && row.result.extraction_status === "extracted") return "passed";
+  const explicit = row.result.validation_status;
+  if (row.issues.length || explicit === "review") return "review";
+  if (explicit === "passed") return "passed";
+  if (!explicit && row.result.extraction_status === "extracted") return "passed";
   return "pending";
 }
 
-function badge(status) {
+function inferred(row) {
+  return !row.result.validation_status && !row.issues.length
+    && row.result.extraction_status === "extracted";
+}
+
+function badge(status, isInferred = false) {
   const tone = status === "passed" ? "ok" : status === "review" ? "warn" : "idle";
-  return el("span", {class: `badge ${tone}`, text: LABELS[status]});
+  return el("span", {
+    class: `badge ${tone}`,
+    text: LABELS[status],
+    title: isInferred ? "Статус выведен из извлечения: запись не проходила валидацию" : null,
+  });
 }
 
 function value(record, prefix) {
@@ -125,7 +151,7 @@ function value(record, prefix) {
 
 function csvCell(cellValue) {
   let text = String(cellValue ?? "");
-  if (/^[\s]*[=+\-@]/.test(text) && !/^[+-]?\d+(?:[.,]\d+)?(?:e[+-]?\d+)?$/i.test(text)) text = "'" + text;
+  if (/^[=+\-@\t\r]/.test(text) && !/^[+-]?\d+(?:[.,]\d+)?(?:e[+-]?\d+)?$/i.test(text)) text = "'" + text;
   return '"' + text.replaceAll('"', '""') + '"';
 }
 
@@ -136,7 +162,8 @@ function download(rows, columns) {
     const record = {...result, context, fields: JSON.stringify(fields)};
     return columns.map(column => csvCell(record[column])).join(",");
   })];
-  const url = URL.createObjectURL(new Blob([lines.join("\r\n") + "\r\n"], {type: "text/csv;charset=utf-8"}));
+  const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], {type: "text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
   const link = el("a", {href: url, download: "results.csv"});
   document.body.append(link);
   link.click();
@@ -148,13 +175,16 @@ export function renderPassport(root, ctx) {
   document.title = "Паспорт статьи · ВИНИТИ";
   const source = current || demoState();
   const rows = source.rows;
+  const notice = importNotice;
+  importNotice = null;
+  const inferredCount = source.demo ? 0 : rows.filter(inferred).length;
 
   const total = el("strong", {text: number(rows.length)});
   const passedCount = el("strong", {text: number(rows.filter(row => validation(row) === "passed").length)});
   const reviewCount = el("strong", {text: number(rows.filter(row => validation(row) === "review").length)});
 
   const body = el("tbody");
-  const detail = el("div", {id: "detail"});
+  const detail = el("div", {id: "detail", "aria-live": "polite"});
   const count = el("p", {class: "count", "aria-live": "polite"});
 
   const query = el("input", {
@@ -174,7 +204,7 @@ export function renderPassport(root, ctx) {
   );
 
   const csvButton = el("button", {
-    type: "button", class: "primary", text: "Скачать CSV",
+    type: "button", class: "secondary", text: "Скачать CSV",
     onclick: () => download(rows, source.columns),
   });
 
@@ -192,24 +222,28 @@ export function renderPassport(root, ctx) {
   });
 
   const importButton = el("button", {
-    type: "button", class: "secondary", text: "Импорт паспорта JSON",
+    type: "button", class: "primary", text: "Импорт паспорта JSON",
     onclick: () => document.getElementById("passport")?.click(),
   });
 
   let selected = null;
-  let filtered = rows;
 
   function drawDetail() {
     detail.replaceChildren();
+    if (!rows.length) {
+      detail.append(el("p", {class: "muted", text: "В паспорте нет результатов."}));
+      return;
+    }
     if (!selected) {
-      detail.append(el("p", {class: "muted", text: "Выберите результат в таблице."}));
+      detail.append(el("p", {class: "muted", text: "Ничего не найдено по фильтрам."}));
       return;
     }
     const {result, publication, source: evidence, issues, fields} = selected;
     const state = validation(selected);
+    const title = [result.metric_name, value(result, "normalized")].filter(part => part && part !== "—").join(" · ");
     detail.append(
-      el("p", {class: "value", text: `${result.metric_name || "Результат"} · ${value(result, "normalized")}`}),
-      badge(state),
+      el("p", {class: "value", text: title || "Результат"}),
+      badge(state, inferred(selected)),
     );
     const list = el("dl", {class: "detail-grid"});
     const terms = [
@@ -247,7 +281,7 @@ export function renderPassport(root, ctx) {
 
   function drawRows() {
     const terms = query.value.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-    filtered = rows.filter(row => {
+    const filtered = rows.filter(row => {
       if (metric.value && row.result.metric_name !== metric.value) return false;
       if (status.value && validation(row) !== status.value) return false;
       const text = [
@@ -257,19 +291,20 @@ export function renderPassport(root, ctx) {
       ].join(" ").toLocaleLowerCase();
       return terms.every(term => text.includes(term));
     });
-    if (!filtered.includes(selected)) selected = filtered[0];
+    if (!filtered.includes(selected)) selected = filtered[0] || null;
     body.replaceChildren();
     for (const row of filtered) {
       const button = el("button", {
         type: "button", class: "row-button",
         "aria-pressed": String(row === selected),
+        "aria-controls": "detail",
         text: row.result.metric_name || "Показатель",
       });
       const tr = el("tr", {class: row === selected ? "selected" : ""},
         el("td", {}, button),
         el("td", {text: value(row.result, "normalized")}),
         el("td", {text: row.context || "—"}),
-        el("td", {}, badge(validation(row))),
+        el("td", {}, badge(validation(row), inferred(row))),
       );
       button.addEventListener("click", () => {
         selected = row;
@@ -283,14 +318,19 @@ export function renderPassport(root, ctx) {
       });
       body.append(tr);
     }
+    if (!filtered.length) {
+      body.append(el("tr", {}, el("td", {
+        colspan: 4, class: "empty",
+        text: rows.length ? "Результаты не найдены" : "В паспорте нет результатов",
+      })));
+    }
     count.textContent = filtered.length
       ? `Показано ${filtered.length} из ${rows.length}`
-      : "Результаты не найдены";
+      : rows.length ? "Результаты не найдены" : "Результатов нет";
   }
 
   function syncActions() {
-    const blocked = source.demo || !selected || !rows.some(row => validation(row) === "passed");
-    csvButton.disabled = blocked;
+    csvButton.disabled = source.demo || !rows.some(row => validation(row) === "passed");
     pdfInput.disabled = source.demo || !selected;
     pdfLabel.classList.toggle("disabled", pdfInput.disabled);
   }
@@ -301,20 +341,24 @@ export function renderPassport(root, ctx) {
     syncActions();
   }
 
-  query.addEventListener("input", paint);
+  let timer = 0;
+  query.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(paint, 180);
+  });
   metric.addEventListener("change", paint);
   status.addEventListener("change", paint);
 
   fill(root,
-    el("section", {class: "hero doc-hero"},
+    el("section", {class: "hero passport-hero"},
       el("div", {},
-        el("p", {class: "eyebrow", text: "Паспорт статьи"}),
-        el("h1", {}, source.title || source.source, el("span", {class: "dot", text: "."})),
-        el("p", {class: "lede", text: "Результаты измерений, проверка значений и доказательства из статьи. "
-          + "Данные читаются из файла в браузере и не уходят на сервер."}),
+        el("p", {class: "eyebrow", text: "Локальный паспорт"}),
+        el("h1", {}, "Паспорт", el("br"), "публикации", el("span", {class: "dot", text: "."})),
+        el("p", {class: "lede", text: source.title}),
       ),
-      el("div", {class: "actions"}, csvButton, pdfLabel, importButton),
+      el("div", {class: "actions"}, importButton, pdfLabel),
     ),
+    notice ? el("p", {class: `notice ${notice.tone}`, role: notice.tone === "bad" ? "alert" : "status", text: notice.text}) : null,
     el("section", {class: "stats", "aria-label": "Сводка паспорта"},
       el("div", {}, el("span", {text: "Извлечено результатов"}), total),
       el("div", {}, el("span", {text: "Прошли проверку"}), passedCount),
@@ -322,13 +366,18 @@ export function renderPassport(root, ctx) {
     ),
     source.demo ? el("p", {class: "notice warn", text:
       "Демонстрационные значения. Импортируйте паспорт, чтобы работать со своими данными."}) : null,
+    inferredCount ? el("p", {class: "notice", text:
+      `Проверка не запускалась: для ${number(inferredCount)} `
+      + `${plural(inferredCount, "записи", "записей", "записей")} статус «Пройдена» выведен `
+      + "из успешного извлечения и отсутствия замечаний."}) : null,
     el("div", {class: "workspace"},
-      el("section", {class: "panel"},
+      el("section", {class: "panel", "aria-labelledby": "passport-results-title"},
         el("header", {class: "panel-head"},
           el("div", {},
-            el("p", {class: "eyebrow", text: source.source}),
-            el("h2", {text: "Результаты"}),
+            el("p", {class: "eyebrow data", title: source.source, text: source.source}),
+            el("h2", {id: "passport-results-title", text: "Результаты"}),
           ),
+          csvButton,
         ),
         el("div", {class: "bar filters"},
           el("label", {class: "grow"}, "Поиск", query),
@@ -336,7 +385,7 @@ export function renderPassport(root, ctx) {
           el("label", {}, "Проверка", status),
         ),
         count,
-        el("div", {class: "table-wrap"},
+        el("div", {class: "results", tabindex: "0", role: "region", "aria-label": "Результаты паспорта"},
           el("table", {},
             el("caption", {class: "sr-only", text: "Результаты паспорта"}),
             el("thead", {}, el("tr", {},
@@ -349,11 +398,11 @@ export function renderPassport(root, ctx) {
           ),
         ),
       ),
-      el("aside", {class: "panel detail"},
+      el("aside", {class: "panel detail", "aria-labelledby": "passport-detail-title"},
         el("header", {class: "panel-head"},
           el("div", {},
             el("p", {class: "eyebrow", text: "Карточка результата"}),
-            el("h2", {text: "Источник и проверка"}),
+            el("h2", {id: "passport-detail-title", text: "Источник и проверка"}),
           ),
         ),
         detail,

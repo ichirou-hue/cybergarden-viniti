@@ -5,7 +5,8 @@
   "description": "jsdom- и e2e-проверки каталога RAG (dev only)",
   "scripts": {
     "test": "node harness.mjs",
-    "e2e": "node e2e.mjs"
+    "e2e": "node e2e.mjs",
+    "passport": "node passport.mjs"
   },
   "dependencies": {
     "jsdom": "^31.0.0"
