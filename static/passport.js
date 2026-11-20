@@ -3,6 +3,7 @@ import { solarCatalog } from "./solar.mjs";
 import { number, plural } from "./ui.js";
 
 const TABLES = ["publications", "materials", "devices", "layers", "measurements", "results", "issues"];
+const PAGE_SIZE = 200;
 const COLUMNS = ("publication_id result_id device_id measurement_id material_id metric_name metric_value metric_unit "
   + "aggregation spread_value n_devices time_point time_unit raw_value raw_unit normalized_value normalized_unit "
   + "result_origin cited_publication_id source_page source_section source_table source_figure source_fragment "
@@ -71,10 +72,9 @@ function passportRows(data) {
       publication_id: id,
       result_id: entry.result_id ?? entry.id,
       metric_name: entry.metric_name ?? [entry.metric, entry.cutoff ? "@" + entry.cutoff : ""].join(""),
-      normalized_value: entry.normalized_value
-        ?? (rag ? (entry.unit !== "unspecified" ? entry.value : undefined) : entry.value),
+      normalized_value: entry.normalized_value ?? entry.value,
       normalized_unit: entry.normalized_unit
-        ?? (rag ? (entry.unit !== "unspecified" ? entry.unit : undefined) : entry.unit),
+        ?? (entry.unit === "unspecified" ? undefined : entry.unit),
       extraction_status: entry.extraction_status ?? (rag ? "extracted" : undefined),
       source_page: entry.source_page ?? nested.page ?? legacy.page,
       source_fragment: entry.source_fragment ?? nested.fragment ?? nested.quote ?? legacy.quote,
@@ -151,7 +151,8 @@ function value(record, prefix) {
 
 function csvCell(cellValue) {
   let text = String(cellValue ?? "");
-  if (/^[=+\-@\t\r]/.test(text) && !/^[+-]?\d+(?:[.,]\d+)?(?:e[+-]?\d+)?$/i.test(text)) text = "'" + text;
+  const risky = /^\s*[=+@-]/.test(text) || /^[\t\r]/.test(text);
+  if (risky && !/^\s*[+-]?\d+(?:[.,]\d+)?(?:e[+-]?\d+)?\s*$/i.test(text)) text = "'" + text;
   return '"' + text.replaceAll('"', '""') + '"';
 }
 
@@ -227,6 +228,7 @@ export function renderPassport(root, ctx) {
   });
 
   let selected = null;
+  let shown = PAGE_SIZE;
 
   function drawDetail() {
     detail.replaceChildren();
@@ -292,8 +294,9 @@ export function renderPassport(root, ctx) {
       return terms.every(term => text.includes(term));
     });
     if (!filtered.includes(selected)) selected = filtered[0] || null;
+    const visible = filtered.slice(0, shown);
     body.replaceChildren();
-    for (const row of filtered) {
+    for (const row of visible) {
       const button = el("button", {
         type: "button", class: "row-button",
         "aria-pressed": String(row === selected),
@@ -323,9 +326,18 @@ export function renderPassport(root, ctx) {
         colspan: 4, class: "empty",
         text: rows.length ? "Результаты не найдены" : "В паспорте нет результатов",
       })));
+    } else if (filtered.length > visible.length) {
+      const next = Math.min(PAGE_SIZE, filtered.length - visible.length);
+      body.append(el("tr", {class: "more"}, el("td", {colspan: 4},
+        el("button", {
+          type: "button", class: "secondary", text: `Показать ещё ${number(next)}`,
+          onclick: () => { shown += PAGE_SIZE; drawRows(); },
+        }),
+      )));
     }
     count.textContent = filtered.length
-      ? `Показано ${filtered.length} из ${rows.length}`
+      ? `Показано ${number(Math.min(shown, filtered.length))} из ${number(rows.length)}`
+        + (filtered.length > shown ? ` · ещё ${number(filtered.length - shown)}` : "")
       : rows.length ? "Результаты не найдены" : "Результатов нет";
   }
 
@@ -342,12 +354,16 @@ export function renderPassport(root, ctx) {
   }
 
   let timer = 0;
+  const repaint = () => {
+    shown = PAGE_SIZE;
+    paint();
+  };
   query.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(paint, 180);
+    timer = setTimeout(repaint, 180);
   });
-  metric.addEventListener("change", paint);
-  status.addEventListener("change", paint);
+  metric.addEventListener("change", repaint);
+  status.addEventListener("change", repaint);
 
   fill(root,
     el("section", {class: "hero passport-hero"},

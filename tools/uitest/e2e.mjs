@@ -65,6 +65,44 @@ await page.waitForTimeout(500);
 check("поиск Recall@5", (await page.locator(".count").textContent()).includes("Найдено"));
 check("поиск Recall@5: строки", (await page.locator("tr.result").count()) > 0);
 
+// Фрагменты PDF: без молчаливой обрезки
+await page.goto(`${base}/#/doc/rag:d020?track=rag&tab=sources`, {waitUntil: "networkidle"});
+await page.waitForTimeout(600);
+check("фрагменты: счётчик 411", (await page.locator("#view .count").textContent()).includes("Фрагментов: 411"),
+  await page.locator("#view .count").textContent());
+check("фрагменты: все строки", await page.locator("#view .sources-table tbody tr").count() === 411,
+  String(await page.locator("#view .sources-table tbody tr").count()));
+
+// Фрагменты PDF: пометка об обрезке на большом документе
+await page.goto(`${base}/#/doc/rag:d014?track=rag&tab=sources`, {waitUntil: "networkidle"});
+await page.waitForTimeout(900);
+check("фрагменты: пометка об обрезке", (await page.locator("#view .count").textContent()).includes("показаны первые 500"),
+  await page.locator("#view .count").textContent());
+check("фрагменты: 500 строк", await page.locator("#view .sources-table tbody tr").count() === 500,
+  String(await page.locator("#view .sources-table tbody tr").count()));
+
+// result= вне первой страницы
+await page.goto(`${base}/#/doc/rag:d020?track=rag&result=R060`, {waitUntil: "networkidle"});
+await page.waitForTimeout(1400);
+check("result= на второй странице", await page.locator("#view tr.target").count() === 1 &&
+  (await page.locator("#view .count").textContent()).includes("страница 2"),
+  `${await page.locator("#view tr.target").count()} · ${await page.locator("#view .count").textContent()}`);
+
+// Битый source: старый диалог не остаётся
+await page.goto(`${base}/#/doc/rag:d020/source/1001?track=rag`, {waitUntil: "networkidle"});
+await page.waitForTimeout(700);
+check("source: диалог открыт", await page.locator("#evidence").evaluate(dialog => dialog.open));
+await page.evaluate(() => { location.hash = "#/doc/rag:d020/source/999999?track=rag"; });
+await page.waitForTimeout(1400);
+check("битый source: диалог закрыт", !(await page.locator("#evidence").evaluate(dialog => dialog.open)));
+check("битый source: сообщение", (await page.locator("#status").textContent()).includes("Не удалось открыть источник"));
+
+// Документ без префикса области
+await page.goto(`${base}/#/doc/foo`, {waitUntil: "networkidle"});
+await page.waitForTimeout(700);
+const docFoo = (await page.locator("#view").textContent()).replace(/\s+/g, " ");
+check("#/doc/foo: документ не найден", docFoo.includes("Документ не найден") && !docFoo.includes("Раздел"), docFoo.slice(0, 120));
+
 // Загрузка PDF
 const response = await context.request.get(`${base}/api/documents/rag%3Ad020/pdf`);
 writeFileSync("/tmp/viniti-uitest-upload.pdf", await response.body());

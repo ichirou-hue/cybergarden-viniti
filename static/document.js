@@ -4,6 +4,7 @@ import { docStatus, extractStatus, fieldLabel, issueLabel, number, plural, secon
 import { openEvidence } from "./evidence.js";
 
 const PAGE = 50;
+const LOCATE_LIMIT = 1000;
 
 const TABS = [
   ["results", "Результаты"],
@@ -432,6 +433,7 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
   let timer = 0;
   let request = 0;
   let pageJump = false;
+  let locating = false;
   ctx.signal.addEventListener("abort", () => clearTimeout(timer), {once: true});
 
   search.addEventListener("input", () => {
@@ -449,6 +451,28 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
     state.page = 1;
     load();
   });
+
+  async function locateResult() {
+    const chunkSize = 200;
+    for (let offset = 0; offset < LOCATE_LIMIT; offset += chunkSize) {
+      let chunk;
+      try {
+        chunk = await getJSON(`${base}/results`, {
+          q: state.q, metric: state.metric, k: state.k, dataset: state.dataset,
+          config: state.config, status: state.status, issues: state.issues ? "1" : "",
+          limit: chunkSize, offset,
+        }, ctx.signal);
+      } catch (error) {
+        if (error.name === "AbortError") throw error;
+        return 0;
+      }
+      if (ctx.signal.aborted) return 0;
+      const index = chunk.items.findIndex(item => item.result_id === state.result);
+      if (index >= 0) return Math.floor((offset + index) / PAGE) + 1;
+      if (offset + chunkSize >= chunk.total) break;
+    }
+    return 0;
+  }
 
   async function load() {
     if (ctx.signal.aborted) return;
@@ -538,7 +562,23 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
         count.focus();
       }
     }
-    const target = rows.querySelector("tr.target");
+    let target = rows.querySelector("tr.target");
+    if (!target && state.result && !locating) {
+      locating = true;
+      let found = 0;
+      try {
+        found = await locateResult();
+      } finally {
+        locating = false;
+      }
+      if (found && found !== state.page) {
+        state.page = found;
+        return load();
+      }
+      if (!found) {
+        ctx.say(`Запись ${state.result} не найдена среди первых ${number(LOCATE_LIMIT)} результатов.`);
+      }
+    }
     if (target) {
       if (typeof target.scrollIntoView === "function") target.scrollIntoView({block: "center"});
       const expander = target.querySelector("button.ghost");
@@ -715,9 +755,11 @@ async function renderSources(body, ctx, summary) {
     ctx.patch({kind: select.value, sq: search.value.trim()});
     const data = await getJSON(
       `/api/documents/${encodeURIComponent(ctx.docId)}/sources`,
-      {kind: select.value, q: search.value.trim(), limit: 200}, ctx.signal);
+      {kind: select.value, q: search.value.trim(), limit: 500}, ctx.signal);
     if (id !== request || ctx.signal.aborted) return;
-    count.textContent = `Фрагментов: ${number(data.total)}`;
+    count.textContent = data.items.length < data.total
+      ? `Фрагментов: ${number(data.total)} · показаны первые ${number(data.items.length)}`
+      : `Фрагментов: ${number(data.total)}`;
     if (!data.items.length) {
       fill(wrap, emptyState("Фрагменты не найдены."));
       return;

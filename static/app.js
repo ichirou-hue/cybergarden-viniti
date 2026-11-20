@@ -141,7 +141,9 @@ async function route() {
     return;
   }
 
-  const desired = docId ? docId.split(":")[0] : (params.track || app.track);
+  const desired = docId
+    ? (docId.includes(":") ? docId.split(":")[0] : (params.track || app.track))
+    : (params.track || app.track);
   const descriptor = app.descriptors.find(item => item.track === desired);
   renderTracks(desired);
   if (!descriptor) {
@@ -179,6 +181,7 @@ async function route() {
           await openEvidence({docId, sourceId, signal});
         } catch (error) {
           if (error.name === "AbortError") return;
+          dismissEvidence();
           say(`Не удалось открыть источник: ${error.message}`, true);
         }
       }

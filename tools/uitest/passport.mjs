@@ -272,6 +272,45 @@ await step("RAG facts", async () => {
   check("facts: CSV с value", /1\.55|1,55/.test(csv.text));
 });
 
+/* 5b. Unit unspecified и окно строк */
+await step("unit unspecified", async () => {
+  await open("#/passport");
+  await importJSON({title: "Unspecified", facts: [
+    {id: "U1", metric: "Recall", value: "0.42", unit: "unspecified", evidence: {page: 3, quote: "Recall 0.42"}},
+  ]});
+  check("unit unspecified: значение в таблице", (await page.locator("#view tbody").innerText()).includes("0.42"),
+    (await page.locator("#view tbody").innerText()).replace(/\s+/g, " "));
+  check("unit unspecified: значение в карточке", (await page.locator("#detail .value").innerText()).trim() === "Recall · 0.42",
+    (await page.locator("#detail .value").innerText()).trim());
+});
+
+await step("паспорт: окно строк", async () => {
+  await open("#/passport");
+  const response = await context.request.get(`${base}/api/documents/rag:d020/export.json`);
+  check("экспорт: доступен", response.ok(), String(response.status()));
+  await importJSON(await response.json());
+  const buttons = () => page.locator("#view tbody button.row-button").count();
+  check("окно: 200 строк из 408", await buttons() === 200, String(await buttons()));
+  check("окно: счётчик", (await page.locator("#view .count").innerText()).includes("Показано 200 из 408"),
+    await page.locator("#view .count").innerText());
+  const more = page.locator('#view button:has-text("Показать ещё")');
+  check("окно: кнопка «Показать ещё»", await more.count() === 1);
+  await more.click();
+  await page.waitForTimeout(300);
+  check("окно: после клика 400 строк", await buttons() === 400, String(await buttons()));
+});
+
+await step("CSV: формула после пробела", async () => {
+  await open("#/passport");
+  await importJSON({title: "CSV", results: [
+    {id: "S1", metric: " =cmd", value: 1, unit: "u", validation_status: "passed", extraction_status: "extracted"},
+  ]});
+  const csv = await csvText();
+  const parsed = parseCSV(csv.text);
+  const cell = parsed.rows[0] ? parsed.rows[0][parsed.header.indexOf("metric_name")] : "";
+  check("CSV: пробел перед = экранируется", String(cell).startsWith("' ="), String(cell));
+});
+
 /* 6. Семь таблиц Solar */
 await step("solar", async () => {
   await open("#/passport");
