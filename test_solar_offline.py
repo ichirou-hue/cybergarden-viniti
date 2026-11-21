@@ -116,6 +116,18 @@ class TableExtractionTest(unittest.TestCase):
         value, _, _ = solar_offline._bandgap(
             {"1": "The transport layer has a wide bandgap, higher than 3 eV."})
         self.assertEqual(value, "")
+        value, _, _ = solar_offline._bandgap(
+            {"1": "The absorber has a wide bandgap of 1.8 eV."}, "CdTe")
+        self.assertEqual(value, "1.8")
+        value, _, _ = solar_offline._bandgap(
+            {"1": "CuCrOx is a wide bandgap (3.2 eV) material."}, "CdTe")
+        self.assertEqual(value, "")
+        value, _, _ = solar_offline._bandgap(
+            {"1": "The band-gap of 1.8 eV matches the absorber."}, "CdTe")
+        self.assertEqual(value, "1.8")
+        value, _, _ = solar_offline._bandgap(
+            {"1": "The CuCrOx wide-bandgap buffer has 3.2 eV."}, "CdTe")
+        self.assertEqual(value, "")
 
     def test_bandgap_is_attached_to_the_material(self):
         tables = extract(TABLE_PAGE + ["The absorber has a band gap of 1.65 eV."],
@@ -273,6 +285,67 @@ class DatabaseProcessorTest(unittest.TestCase):
         self.assertIn("documents", str(raised.exception))
         self.assertEqual(kept, 1)
 
+    def test_any_table_without_documents_is_not_overwritten(self):
+        with TemporaryDirectory() as directory:
+            pdf = Path(directory, "D001.pdf")
+            pdf.write_bytes(make_pdf(TABLE_PAGE, table=True))
+            database = Path(directory, "solar.sqlite3")
+            storage.init(database)
+            connection = storage.connect(database)
+            try:
+                with connection:
+                    connection.execute(
+                        "INSERT INTO solar_materials (area, publication_id, material_id) "
+                        "VALUES ('solar', 'D001', 'M1')")
+            finally:
+                connection.close()
+            saved = os.environ.get("VINITI_DATA_DB")
+            os.environ["VINITI_DATA_DB"] = str(database)
+            try:
+                with self.assertRaises(ValueError) as raised:
+                    solar_offline.process("solar", "D001", pdf)
+            finally:
+                if saved is None:
+                    os.environ.pop("VINITI_DATA_DB", None)
+                else:
+                    os.environ["VINITI_DATA_DB"] = saved
+            connection = storage.connect(database)
+            try:
+                kept = connection.execute(
+                    "SELECT COUNT(*) FROM solar_materials WHERE area = 'solar' "
+                    "AND publication_id = 'D001'").fetchone()[0]
+            finally:
+                connection.close()
+        self.assertIn("documents", str(raised.exception))
+        self.assertEqual(kept, 1)
+
+    def test_imported_is_refused_before_parsing(self):
+        with TemporaryDirectory() as directory:
+            pdf = Path(directory, "D001.pdf")
+            pdf.write_bytes(b"not a pdf at all")
+            database = Path(directory, "solar.sqlite3")
+            storage.init(database)
+            connection = storage.connect(database)
+            try:
+                with connection:
+                    connection.execute(
+                        "INSERT INTO documents (area, publication_id, parser_status) "
+                        "VALUES ('solar', 'D001', 'imported')")
+            finally:
+                connection.close()
+            saved = os.environ.get("VINITI_DATA_DB")
+            os.environ["VINITI_DATA_DB"] = str(database)
+            try:
+                with self.assertRaises(ValueError) as raised:
+                    solar_offline.process("solar", "D001", pdf)
+            finally:
+                if saved is None:
+                    os.environ.pop("VINITI_DATA_DB", None)
+                else:
+                    os.environ["VINITI_DATA_DB"] = saved
+        self.assertIn("эталон", str(raised.exception))
+        self.assertNotIn("не является PDF", str(raised.exception))
+
     def test_imported_gold_is_not_overwritten(self):
         data = make_pdf(TABLE_PAGE, table=True)
         with TemporaryDirectory() as directory:
@@ -396,6 +469,8 @@ class HelperTest(unittest.TestCase):
                 self.assertEqual(token["literal"], literal)
                 self.assertEqual(token["percent"], percent)
                 self.assertEqual(token["parenthesized"], parenthesized)
+                if text == "(16.5%)":
+                    self.assertEqual(token["text"], "(16.5%)")
 
     def test_percent_glued_to_a_table_cell_is_read(self):
         tables = extract(TABLE_PAGE, table=True, rows=(
@@ -412,6 +487,31 @@ class HelperTest(unittest.TestCase):
     def test_double_percent_is_not_a_value(self):
         line = {"words": [{"text": "16.5%%", "x0": 0, "x1": 40, "top": 0}]}
         self.assertEqual(solar_offline._value_tokens(line), [])
+
+    def test_exponent_keeps_the_percent_of_the_whole_value(self):
+        cases = [
+            (["6.7", "×", "10", "-3%"], "6.7e-3", "6.7e-3%"),
+            (["6.7", "×", "10", "-3", "%"], "6.7e-3", "6.7e-3%"),
+        ]
+        for words, literal, text in cases:
+            with self.subTest(words=words):
+                line = {"words": [
+                    {"text": item, "x0": position * 30, "x1": position * 30 + 20, "top": 0}
+                    for position, item in enumerate(words)
+                ]}
+                token = solar_offline._value_tokens(line)[0]
+                self.assertEqual(token["literal"], literal)
+                self.assertEqual(token["text"], text)
+                self.assertTrue(token["percent"])
+
+    def test_double_percent_in_two_words_is_one_unit(self):
+        line = {"words": [
+            {"text": "14.0%", "x0": 0, "x1": 40, "top": 0},
+            {"text": "%", "x0": 45, "x1": 55, "top": 0},
+        ]}
+        token = solar_offline._value_tokens(line)[0]
+        self.assertEqual(token["text"], "14.0%")
+        self.assertEqual(token["literal"], "14.0")
 
     def test_percent_as_a_separate_word(self):
         line = {"words": [

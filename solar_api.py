@@ -1,8 +1,9 @@
 """Small HTTP adapter for one-document Solar extraction.
 
 The web catalogue stores Solar envelopes separately from the RAG store, but uses
-the same document JSON contract. Extraction remains the existing verified
-``extract.run`` + ``TableFiller`` pipeline.
+the same document JSON contract. Extraction is the deterministic
+``solar_offline`` parser, the same one ``batch`` and the CSV export use, so the
+site and the submission cannot disagree about a paper.
 """
 from __future__ import annotations
 
@@ -17,13 +18,136 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from datetime import UTC, datetime
 
-import db as storage
 from csv_safe import safe_csv_value
-import extract
-import pdf_source
+import solar_offline
+import solar_version
 
 MAX_BYTES = 32 * 1024 * 1024
 TRACK = "solar"
+
+
+def _anchor(source):
+    """One source in the shape the frontend evidence dialog expects."""
+    return {
+        "source_id": source["id"],
+        "page": source["page"],
+        "kind": source.get("kind") or "text",
+        "table": source.get("table", ""),
+        "fragment": source.get("quote", ""),
+        "quote": source.get("quote", ""),
+        "bbox": source.get("bbox"),
+    }
+
+
+def _record_ids(value):
+    """The template keeps record ids in one string (``G1;G2``), the UI wants a list."""
+    return [item.strip() for item in str(value or "").replace(";", ",").split(",")
+            if item.strip()]
+
+
+def _issues(tables):
+    return [{
+        "issue_id": row.get("issue_id", ""),
+        "check_name": row.get("check_name", ""),
+        "description": row.get("description", ""),
+        "record_ids": _record_ids(row.get("record_ids")),
+        "source_page": row.get("source_page", ""),
+        "source_fragment": row.get("source_fragment", ""),
+    } for row in tables.get("issues", [])]
+
+
+def _results(tables, evidence, issues):
+    """Result rows plus the anchor and the checks that apply to each one.
+
+    The finalized tables keep only template columns, so the anchor for a row
+    comes from ``evidence``, which is exactly what ``solar_facts`` verified.
+    ``config_id``/``dataset_id`` mirror the device and the measurement: the
+    shared results table reads those two column keys, while the Solar template
+    names the same links ``device_id``/``measurement_id``.
+    """
+    by_record = {}
+    for issue in issues:
+        for record in issue["record_ids"]:
+            by_record.setdefault(record, []).append(issue)
+    rows = []
+    for row in tables.get("results", []):
+        anchors = evidence.get(f"results/{row.get('result_id', '')}") or []
+        rows.append({
+            "result_id": row.get("result_id", ""),
+            "metric_name": row.get("metric_name", ""),
+            "metric_value": row.get("metric_value", ""),
+            "metric_unit": row.get("metric_unit", ""),
+            "raw_value": row.get("raw_value", ""),
+            "raw_unit": row.get("raw_unit", ""),
+            "normalized_value": row.get("normalized_value", ""),
+            "normalized_unit": row.get("normalized_unit", ""),
+            "metric_group": "",
+            "aggregation": row.get("aggregation", ""),
+            "time_point": row.get("time_point", ""),
+            "time_unit": row.get("time_unit", ""),
+            "result_origin": row.get("result_origin", ""),
+            "cited_publication_id": row.get("cited_publication_id", ""),
+            "extraction_status": row.get("extraction_status", ""),
+            "duplicate_of": row.get("duplicate_of", ""),
+            "note": row.get("note", ""),
+            "material_id": row.get("material_id", ""),
+            "device_id": row.get("device_id", ""),
+            "measurement_id": row.get("measurement_id", ""),
+            "config_id": row.get("device_id", ""),
+            "dataset_id": row.get("measurement_id", ""),
+            "source_page": row.get("source_page", ""),
+            "source_section": row.get("source_section", ""),
+            "source_table": row.get("source_table", ""),
+            "source_figure": row.get("source_figure", ""),
+            "source": _anchor(anchors[0]) if anchors else None,
+            "issues": by_record.get(row.get("result_id", ""), []),
+        })
+    return rows
+
+
+def _text_sources(sources):
+    """Non-table sources for the fragments tab; result rows carry their own."""
+    return [{
+        "source_id": source["id"],
+        "page": source["page"],
+        "kind": source.get("kind") or "text",
+        "fragment": source.get("quote", ""),
+    } for source in sources if (source.get("kind") or "text") != "table"]
+
+
+def solar_sources(envelope, kind="", needle=""):
+    """Result anchors plus text sources, deduplicated, with real kinds kept.
+
+    The shared RAG helper collapses kinds to table/text and does not dedupe
+    across the two lists, so prose anchors repeat and captions disappear.
+    """
+    items, seen = [], set()
+    for row in envelope.get("results", []):
+        source = row.get("source")
+        if source:
+            items.append(source)
+    items.extend(envelope.get("text_sources", []))
+    unique = []
+    for source in items:
+        source_id = source.get("source_id")
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        unique.append(source)
+    if kind:
+        unique = [source for source in unique
+                  if (source.get("kind") or "text") == kind]
+    if needle:
+        unique = [source for source in unique
+                  if needle in str(source.get("fragment") or source.get("quote") or "").lower()]
+    unique.sort(key=lambda source: (int(source.get("page") or 0), int(source.get("source_id") or 0)))
+    return [{
+        "source_id": source["source_id"],
+        "page": source.get("page"),
+        "kind": source.get("kind") or "text",
+        "fragment": source.get("fragment") or source.get("quote") or "",
+        "quote": source.get("fragment") or source.get("quote") or "",
+    } for source in unique]
 
 
 class SolarStore:
@@ -71,44 +195,73 @@ class SolarStore:
                               + [source.get("page", ""), source.get("fragment", "")])])
         return b"\xef\xbb\xbf" + stream.getvalue().encode("utf-8")
 
+    @staticmethod
+    def _envelope(document_id, name, result, started):
+        """Frontend envelope built from one validated ``solar_offline`` result."""
+        tables = result["tables"]
+        publication = dict(tables["publications"][0]) if tables["publications"] else {}
+        anchors = {str(source["id"]): _anchor(source) for source in result["sources"]}
+        issues = _issues(tables)
+        results = _results(tables, result.get("evidence") or {}, issues)
+        duration = int((time.monotonic() - started) * 1000)
+        warnings = list(result.get("warnings") or [])
+        # An excluded paper is a finished answer, not a failed parse: the parser
+        # deliberately left the subject tables empty and said why.
+        excluded = publication.get("in_scope") == "false"
+        status = "done" if results or excluded else "partial"
+        if excluded:
+            reason = publication.get("exclusion_reason") or "причина не указана"
+            warnings.append(f"Статья вне области исследования: {reason}.")
+        elif not results:
+            warnings.append("Результаты не найдены: детерминированный экстрактор "
+                            "не извлёк подтверждённых строк.")
+        return {
+            "document_id": document_id, "track": TRACK,
+            "publication_id": publication.get("publication_id") or result.get("publication_id", ""),
+            "title": publication.get("title") or Path(name).stem,
+            "year": publication.get("year", ""),
+            "authors": publication.get("authors", ""),
+            "pages": result.get("pages", 0),
+            "status": status,
+            "error": "", "results_count": len(results), "issues_count": len(issues),
+            "scanned": not bool(result.get("sources")), "ocr_used": False,
+            "handler_revision": solar_version.PARSER_VERSION,
+            "duration_ms": duration, "updated_at": datetime.now(UTC).isoformat(),
+            "publication": publication, "warnings": warnings,
+            "counts": {"results": len(results), "issues": len(issues)},
+            "run": {"handler": "solar", "source_revision": solar_version.PARSER_VERSION,
+                    "model": "solar-offline", "duration_ms": duration},
+            "export": {"json": f"/api/documents/{document_id}/export.json",
+                       "csv": f"/api/documents/{document_id}/export.csv"},
+            "entities": {}, "results": results, "issues": issues, "anchors": anchors,
+            "text_sources": _text_sources(result["sources"]),
+        }
+
     def ingest(self, name, data):
-        if len(data) > MAX_BYTES or not data.startswith(b"%PDF-"):
+        if len(data) > MAX_BYTES:
             raise ValueError("Нужен PDF размером до 32 МиБ.")
+        if not data.startswith(b"%PDF-"):
+            raise ValueError("Файл не является PDF.")
         content_hash = hashlib.sha256(data).hexdigest()
         with closing(self._connect()) as conn:
             old = conn.execute("SELECT summary FROM solar_documents WHERE content_hash=?", (content_hash,)).fetchone()
         if old:
-            return json.loads(old["summary"])
+            summary = json.loads(old["summary"])
+            # A cached envelope was produced by a specific parser revision: after
+            # bumping PARSER_VERSION the site must reparse, not serve old rows.
+            if summary.get("handler_revision") == solar_version.PARSER_VERSION:
+                return summary
         started = time.monotonic()
         document_id = f"solar:{Path(name).stem[:32] or 'article'}-{content_hash[:8]}".lower()
+        publication_id = f"S{content_hash[:12].upper()}"
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "article.pdf"
             path.write_bytes(data)
-            temp_db = Path(tmp) / "results.sqlite3"
-            storage.init(temp_db)
-            publication_id = f"S{content_hash[:12].upper()}"
-            summary = extract.run("solar", publication_id, data, extract.TableFiller(), db_path=temp_db, source_path=name)
-            parsed = pdf_source.extract(data)
-            conn = storage.connect(temp_db)
-            try:
-                rows = [dict(row) for row in conn.execute('SELECT * FROM "solar_results" WHERE area=? ORDER BY _line', ("solar",))]
-                publication = conn.execute('SELECT * FROM "solar_publications" WHERE area=? LIMIT 1', ("solar",)).fetchone()
-            finally:
-                conn.close()
-        publication = dict(publication) if publication else {}
-        results = []
-        anchors = {}
-        for index, row in enumerate(rows, 1):
-            try:
-                page = int(row.get("source_page") or 1)
-            except (TypeError, ValueError):
-                page = 1
-            source = {"source_id": 1000 + index, "page": page, "kind": "table", "table": row.get("source_table", ""), "fragment": row.get("source_fragment", ""), "quote": row.get("source_fragment", ""), "bbox": None}
-            anchors[str(source["source_id"])] = source
-            results.append({"result_id": row.get("result_id", f"X{index:03d}"), "metric_name": row.get("metric_name", ""), "metric_value": row.get("metric_value", ""), "metric_unit": row.get("metric_unit", ""), "raw_value": row.get("metric_value", ""), "extraction_status": row.get("extraction_status", "extracted"), "source": source, "issues": [], "device_id": row.get("device_id", ""), "measurement_id": row.get("measurement_id", "")})
-        duration = int((time.monotonic() - started) * 1000)
-        title = publication.get("title") or Path(name).stem
-        envelope = {"document_id": document_id, "track": TRACK, "publication_id": publication.get("publication_id") or publication_id, "title": title, "year": publication.get("year", ""), "authors": publication.get("authors", ""), "pages": parsed.get("pages", 0), "status": "done" if results else "partial", "error": "", "results_count": len(results), "issues_count": 0, "scanned": not bool(parsed.get("sources")), "ocr_used": False, "handler_revision": 1, "duration_ms": duration, "updated_at": datetime.now(UTC).isoformat(), "publication": publication, "warnings": (["Результаты не найдены: baseline Solar-экстрактор не извлёк подтверждённых строк."] if not results else []), "counts": {"results": len(results), "issues": 0}, "run": {"handler": "solar", "source_revision": 1, "model": "deterministic-solar-table-extractor", "duration_ms": duration}, "export": {"json": f"/api/documents/{document_id}/export.json", "csv": f"/api/documents/{document_id}/export.csv"}, "entities": {}, "results": results, "issues": [], "anchors": anchors, "text_sources": []}
+            # The checked pipeline: literal citations, normalized units and the
+            # deterministic consistency issues. A ValueError means the paper did
+            # not pass verification, not that the upload is malformed.
+            result = solar_offline.extract_pdf(path, publication_id)
+        envelope = self._envelope(document_id, name, result, started)
         summary_keys = {k: v for k, v in envelope.items() if k not in {"entities", "results", "issues", "anchors", "text_sources", "publication", "counts", "run", "export", "warnings"}}
         with closing(self._connect()) as conn, conn:
             conn.execute("INSERT OR REPLACE INTO solar_documents VALUES (?, ?, ?, ?, ?, ?)", (document_id, content_hash, json.dumps(summary_keys, ensure_ascii=False), json.dumps(envelope, ensure_ascii=False), data, envelope["updated_at"]))

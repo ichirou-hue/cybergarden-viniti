@@ -38,6 +38,7 @@ import pdfplumber
 
 import solar_facts
 import solar_schema
+from solar_version import PARSER_VERSION
 
 # ---------------------------------------------------------------- vocabulary
 
@@ -435,11 +436,28 @@ def _label_boundary(lines, start, centers):
     return (min(centers) - 15) if centers else 0
 
 
+def _parse_value(text):
+    """One printed number: ``(literal, parenthesized, percent)`` or ``None``.
+
+    Parentheses must be balanced and a percent sign may sit inside or outside
+    them, but not both (``16.5%%`` is a typo, not a value).
+    """
+    match = VALUE_WORD.match(text)
+    if not match or bool(match.group("open")) != bool(match.group("close")):
+        return None
+    if match.group("percent") and match.group("trailing"):
+        return None
+    return (match.group("number"),
+            bool(match.group("open")),
+            bool(match.group("percent") or match.group("trailing")))
+
+
 def _value_tokens(line):
     """Numeric tokens of a data line with their x centre, joined when split.
 
     ``6.7 × 10 −3`` arrives as four words; it is one value. A ``±`` after a value
-    is its absolute spread.
+    is its absolute spread. The exponent may itself carry the percent sign
+    (``10-3%``), which belongs to the whole value, not to the exponent.
     """
     tokens = []
     words = line["words"]
@@ -455,30 +473,40 @@ def _value_tokens(line):
                 continue
             index += 1
             continue
-        match = VALUE_WORD.match(text)
-        if match and bool(match.group("open")) == bool(match.group("close")) \
-                and not (match.group("percent") and match.group("trailing")):
-            number = match.group("number")
-            parenthesized = bool(match.group("open"))
-            percent = bool(match.group("percent") or match.group("trailing"))
+        parsed = _parse_value(text)
+        if parsed:
+            number, parenthesized, percent = parsed
             value = text
+            shown_percent = percent
             x0, x1 = word["x0"], word["x1"]
-            if index + 3 < len(words) and clean(words[index + 1]["text"]) in ("×", "x") \
-                    and clean(words[index + 2]["text"]) == "10" and is_number(words[index + 3]["text"]):
-                number = f"{number}e{number_text(words[index + 3]['text'])}"
-                value = number
-                x1 = words[index + 3]["x1"]
-                parenthesized = False
-                index += 4
-            elif index + 1 < len(words) and clean(words[index + 1]["text"]) == "%":
-                # ``(16.5) %`` and ``16.5 %`` print the unit as a separate word.
-                x1 = words[index + 1]["x1"]
-                value = f"{text}%"
+            cursor = index + 1
+            if cursor + 2 < len(words) and clean(words[cursor]["text"]) in ("×", "x") \
+                    and clean(words[cursor + 1]["text"]) == "10":
+                exponent = _parse_value(clean(words[cursor + 2]["text"]))
+                if exponent:
+                    number = f"{number}e{exponent[0]}"
+                    percent = percent or exponent[2]
+                    value = number
+                    shown_percent = False
+                    x1 = words[cursor + 2]["x1"]
+                    parenthesized = False
+                    cursor += 3
+            if cursor < len(words) and clean(words[cursor]["text"]) == "%":
+                # ``(16.5) %`` and ``16.5 %`` print the unit as a separate word;
+                # a value that already shows the sign keeps it once.
+                if not shown_percent:
+                    value = f"{value}%"
+                    shown_percent = True
+                    x1 = words[cursor]["x1"]
                 percent = True
-                index += 1
+                cursor += 1
+            if percent and not shown_percent:
+                value = f"{value}%"
             tokens.append({"text": value, "literal": number, "percent": percent,
                            "x0": x0, "x1": x1, "center": (x0 + x1) / 2,
                            "parenthesized": parenthesized, "spread": ""})
+            index = cursor
+            continue
         index += 1
     return tokens
 
@@ -1156,21 +1184,24 @@ def _absorber(page_text):
 
 
 BANDGAP = re.compile(
-    r"(?:band\s*gap|bandgap|\bEg\b)[^.]{0,80}?(\d+(?:[.,]\d+)?)\s*(?:eV|эВ)", re.I)
+    r"(?:band[\s\-\u2010\u2011]*gap|\bEg\b)[^.]{0,80}?(\d+(?:[.,]\d+)?)\s*(?:eV|эВ)",
+    re.I)
 # "wide bandgap, higher than 3 eV" describes a transport layer, not the
 # absorber; taking the first match would put that number on every material.
 # Only the words glued to this bandgap count: "more than 104 cm-1" elsewhere in
 # the sentence is an absorption coefficient, not a threshold on the gap.
-BANDGAP_NOISE = re.compile(
-    r"wide\s*band\s*gap|(?:higher|larger|greater|more)\s+than|\babove\b", re.I)
+BANDGAP_NOISE = re.compile(r"(?:higher|larger|greater|more)\s+than|\babove\b", re.I)
 BANDGAP_AFTER = re.compile(r"^\s*(?:or\s+)?(?:more|higher|larger|greater|above)\b", re.I)
+WIDE_GAP = re.compile(r"wide[\s\-\u2010\u2011]*band[\s\-\u2010\u2011]*gap", re.I)
 
 
-def _bandgap(page_texts):
+def _bandgap(page_texts, material=""):
     """A band gap stated in the text, with its page and sentence.
 
-    A value inside a comparison ("higher than", "wide bandgap") is skipped: the
-    template wants the absorber value, not a threshold from the discussion.
+    A value inside a comparison ("higher than", "above") is skipped: the
+    template wants the absorber value, not a threshold. "Wide bandgap" is
+    skipped only when the context is not the absorber - a wide-gap absorber is
+    still an absorber, while a wide-gap transport layer is not.
     """
     for page in sorted(page_texts, key=int):
         text = clean(page_texts[page])
@@ -1178,9 +1209,16 @@ def _bandgap(page_texts):
             value = number_text(match.group(1))
             if not value or not 0.2 <= float(value) <= 5:
                 continue
-            lead = text[max(0, match.start() - 24):match.start()]
-            if BANDGAP_NOISE.search(lead + match.group(0)):
+            lead = text[max(0, match.start() - 60):match.start()]
+            found = lead + match.group(0)
+            if BANDGAP_NOISE.search(match.group(0)):
                 continue
+            if WIDE_GAP.search(found):
+                context = text[max(0, match.start() - 60):match.end() + 60]
+                absorber = "absorber" in context.lower() \
+                    or (material and _compact(material) in _compact(context))
+                if not absorber:
+                    continue
             if BANDGAP_AFTER.match(text[match.end():match.end() + 20]):
                 continue
             return value, page, match.group(0)
@@ -1821,7 +1859,7 @@ def build(data, publication_id):
     # ---- materials: one per device, so the absorber follows the doping
     scope_text = " ".join(page_texts.get(str(page), "") for page in range(1, min(4, len(page_texts) + 1)))
     printed, normalized, material_class = _absorber(scope_text)
-    bandgap = _bandgap(page_texts)
+    bandgap = _bandgap(page_texts, printed)
     materials = _material_rows(devices, printed, normalized, material_class, publication_id,
                                (bandgap[0],) if bandgap[0] else None) if printed else []
     if materials:
@@ -1957,11 +1995,6 @@ def extract_pdf(path, publication_id=None, *, model=""):
     return solar_facts.finalize(tables, document, model=model)
 
 
-# The old filler-based extractor wrote parser_version 1; the deterministic one
-# writes 2, so a stored documents row says which code produced it.
-PARSER_VERSION = 2
-
-
 def _write_envelope(connection, area, publication_id, result, source_path):
     """Record the publication and its page texts, replacing a previous run.
 
@@ -2011,7 +2044,6 @@ def process(area, publication_id, pdf_path):
         raise ValueError("solar_offline обслуживает только область solar.")
     path = Path(pdf_path)
     data = path.read_bytes()
-    result = extract_pdf(path, publication_id)
 
     db_path = Path(os.environ.get("VINITI_DATA_DB") or storage.DEFAULT_DB)
     if not db_path.exists():
@@ -2020,27 +2052,35 @@ def process(area, publication_id, pdf_path):
     connection = storage.connect(db_path)
     written = {}
     try:
-        with connection:
-            previous = connection.execute(
-                "SELECT parser_status FROM documents "
-                "WHERE area = ? AND publication_id = ?",
-                (area, publication_id)).fetchone()
-            if previous and previous["parser_status"] == "imported":
-                # Gold rows share the same tables and the same R ids; replacing
-                # them silently would destroy the reference the scorer needs.
-                raise ValueError(
-                    f"{publication_id}: в базе эталон (parser_status=imported); "
-                    "извлечение заменит его - выберите отдельную базу")
-            if previous is None:
-                # A hand-made or old database may hold rows without a documents
-                # row; those rows are not ours to replace either.
+        # Refuse an imported publication before paying for the parse: a batch
+        # run against a database with the gold set must fail fast, not spend
+        # minutes extracting files it will not write.
+        previous = connection.execute(
+            "SELECT parser_status FROM documents "
+            "WHERE area = ? AND publication_id = ?",
+            (area, publication_id)).fetchone()
+        if previous and previous["parser_status"] == "imported":
+            # Gold rows share the same tables and the same R ids; replacing
+            # them silently would destroy the reference the scorer needs.
+            raise ValueError(
+                f"{publication_id}: в базе эталон (parser_status=imported); "
+                "извлечение заменит его - выберите отдельную базу")
+        if previous is None:
+            # A hand-made or old database may hold rows without a documents row;
+            # those rows are not ours to replace either. Check every table, not
+            # only results: a partial import may hold materials or devices.
+            for table in area_tables:
+                name = storage.table_name(area, table)
                 existing = connection.execute(
-                    "SELECT 1 FROM solar_results WHERE area = ? AND publication_id = ? "
-                    "LIMIT 1", (area, publication_id)).fetchone()
+                    f"SELECT 1 FROM {storage.quote(name)} "
+                    f"WHERE area = ? AND publication_id = ? LIMIT 1",
+                    (area, publication_id)).fetchone()
                 if existing:
                     raise ValueError(
                         f"{publication_id}: строки без записи documents (вероятно, "
                         "эталон); извлечение заменит их - выберите отдельную базу")
+        result = extract_pdf(path, publication_id)
+        with connection:
             blocks = _write_envelope(connection, area, publication_id, result, pdf_path)
             for table, meta in area_tables.items():
                 name = storage.table_name(area, table)

@@ -154,7 +154,9 @@ function metaLine(summary, publication) {
 
 function scopeBadge(publication) {
   if (publication.in_scope === undefined || publication.in_scope === null) return null;
-  const inScope = Boolean(publication.in_scope);
+  // The envelope stores the decision as the template writes it: "true"/"false".
+  // Boolean("false") is true, so the string has to be read explicitly.
+  const inScope = !["false", "0", ""].includes(String(publication.in_scope).trim().toLowerCase());
   return el("span", {
     class: `badge ${inScope ? "idle" : "warn"}`,
     title: publication.exclusion_reason || "",
@@ -181,6 +183,7 @@ function exportLink(summary, base, kind, label, status) {
 
 function noticeBlock(summary) {
   const blocks = [];
+  const excluded = String(summary.publication?.in_scope ?? "").toLowerCase() === "false";
   if (summary.status === "failed" && summary.error) {
     blocks.push(el("div", {class: "notice bad"},
       el("strong", {text: "Обработка не удалась"}),
@@ -199,7 +202,7 @@ function noticeBlock(summary) {
       el("p", {text: "Обработка ещё не начиналась: результатов и экспорта пока нет."}),
     ));
   }
-  if (summary.status === "partial" && !(summary.scanned && !summary.ocr_used)) {
+  if (summary.status === "partial" && !(summary.scanned && !summary.ocr_used) && !excluded) {
     blocks.push(el("div", {class: "notice warn"},
       el("strong", {text: "Обработано частично"}),
       el("p", {text: "Часть страниц не разобрана. Результаты ниже относятся только к прочитанным страницам."}),
@@ -216,7 +219,7 @@ function noticeBlock(summary) {
   }
   if ((summary.results_count ?? summary.counts?.results ?? 0) === 0
       && summary.status !== "failed" && summary.status !== "queued"
-      && summary.status !== "running" && !summary.scanned) {
+      && summary.status !== "running" && !summary.scanned && !excluded) {
     blocks.push(el("div", {class: "notice warn"},
       el("strong", {text: "Подтверждённых результатов не найдено"}),
       el("p", {text: "CSV создан, но он может быть пустым. Это не означает, что статья разобрана полностью: текущий baseline извлекает только поддерживаемые структуры и проверенные цитаты."}),

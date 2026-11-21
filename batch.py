@@ -98,9 +98,9 @@ def default_process(area, publication_id, pdf_path):
 def default_revision(area):
     """Extractor revision a fresh run of the area records in ``jobs``."""
     if area == "solar":
-        import solar_offline
+        from solar_version import PARSER_VERSION
 
-        return solar_offline.PARSER_VERSION
+        return PARSER_VERSION
     return default_extractor_revision()
 
 

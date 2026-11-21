@@ -47,7 +47,7 @@ from rag_api import (
     render_anchor_png,
     sources as list_sources,
 )
-from solar_api import SolarStore
+from solar_api import SolarStore, solar_sources
 from solar_api import MAX_BYTES as SOLAR_MAX_BYTES
 
 
@@ -667,7 +667,10 @@ class Handler(BaseHTTPRequestHandler):
                     doc for doc in items
                     if q in " ".join([
                         str(doc.get("publication_id", "")), str(doc.get("title", "")),
-                        str(doc.get("year", "")), " ".join(doc.get("authors") or []),
+                        str(doc.get("year", "")),
+                        # solar stores authors as one string, RAG as a list
+                        doc.get("authors") if isinstance(doc.get("authors"), str)
+                        else " ".join(doc.get("authors") or []),
                     ]).lower()
                 ]
             status = single.get("status")
@@ -813,14 +816,30 @@ class Handler(BaseHTTPRequestHandler):
         elif resource == "facets":
             self.send_json({"metrics": [], "ks": [], "datasets": [], "configs": [], "statuses": []})
         elif resource == "results":
+            try:
+                limit, offset = self._page(query)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
             items = envelope.get("results", [])
-            limit, offset = self._page(query)
             self.send_json({"total": len(items), "items": items[offset:offset + limit]})
         elif resource == "issues":
-            self.send_json({"total": 0, "items": []})
+            try:
+                limit, offset = self._page(query, default=200, maximum=500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = envelope.get("issues", [])
+            self.send_json({"total": len(items), "items": items[offset:offset + limit]})
         elif resource == "sources":
-            items = [row.get("source") for row in envelope.get("results", []) if row.get("source")]
-            self.send_json({"total": len(items), "items": items[:self._int(query, "limit", 200, 1, 500)]})
+            try:
+                limit = self._int(query, "limit", 200, 1, 500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = solar_sources(envelope, single.get("kind", ""),
+                                  (single.get("q") or "").strip().lower())
+            self.send_json({"total": len(items), "items": items[:limit]})
         elif resource == "entities":
             self.send_json({"total": 0, "items": []})
         elif resource == "export.json":
