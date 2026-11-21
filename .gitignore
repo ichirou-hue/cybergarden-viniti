@@ -11,6 +11,10 @@ _corpus/
 out/
 out_test/
 
+# Локальный лаунчер: в нём машинно-зависимые пути, в репозиторий не кладём
+run_server.bat
+run_server.ps1
+
 # Мусор macOS: .DS_Store и AppleDouble-файлы рядом с настоящими
 .DS_Store
 ._*
