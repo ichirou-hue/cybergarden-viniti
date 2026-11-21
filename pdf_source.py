@@ -5,7 +5,7 @@ import re
 import pdfplumber
 
 
-MAX_PAGES = 150
+MAX_PAGES = 250
 X_TOLERANCE = 1.5
 CAPTION = re.compile(r"^(?:fig(?:ure)?\.?|table|рис(?:унок)?\.?|таблица)\s+\d+\s*[.:–—]", re.I)
 EQUATION = re.compile(r"^\w+(?:\([^)]{1,30}\))?\s*=\s*(?![+-]?\d+\s*%?\s*$)\S")
@@ -57,8 +57,18 @@ def find_tables(page):
         stops = sorted(set(round(position, 1) for position in positions))
         if len(stops) < 3 or not 20 <= stops[-1] - stops[0] <= 360:
             continue
-        box = (max(page.bbox[0], left - 2), stops[0],
-               min(page.bbox[2], right + 2), min(page.bbox[3], stops[-1] + 1))
+        # pdfplumber keeps objects that sit outside the MediaBox, so a stray rule
+        # above or below the page yields a negative top. crop() refuses such a box
+        # with ValueError, and that used to abort the whole document.
+        box = (max(page.bbox[0], left - 2), max(page.bbox[1], stops[0]),
+               min(page.bbox[2], right + 2),
+               min(page.bbox[3], stops[-1] + 1))
+        if box[0] >= box[2] or box[1] >= box[3]:
+            continue
+        page_area = max(0, page.bbox[2] - page.bbox[0]) * max(0, page.bbox[3] - page.bbox[1])
+        box_area = (box[2] - box[0]) * (box[3] - box[1])
+        if page_area and box_area > page_area / 2:
+            continue
         if any(box[0] < t.bbox[2] and box[2] > t.bbox[0]
                and box[1] < t.bbox[3] and box[3] > t.bbox[1] for t in tables):
             continue
@@ -77,11 +87,38 @@ def find_tables(page):
     return tables
 
 
+def page_texts(data):
+    """Whole-page text in reading order, one string per page number.
+
+    Uses pypdf on purpose. pdfplumber keeps the geometry we need, but its text
+    splits a sentence across subscripts (``J`` / ``SC`` on separate lines) and
+    interleaves the two columns of a paper, so a sentence that crosses a column
+    break stops being contiguous. pypdf keeps it contiguous, and it is what the
+    organisers' validator compares quotes against. Falls back to pdfplumber when
+    pypdf is unavailable.
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        with pdfplumber.open(BytesIO(data)) as pdf:
+            return {page.page_number: page.extract_text() or "" for page in pdf.pages}
+    try:
+        reader = PdfReader(BytesIO(data))
+        return {number: page.extract_text() or ""
+                for number, page in enumerate(reader.pages, 1)}
+    except Exception:
+        with pdfplumber.open(BytesIO(data)) as pdf:
+            return {page.page_number: page.extract_text() or "" for page in pdf.pages}
+
+
 def extract(data):
     sources, warnings = [], []
     with pdfplumber.open(BytesIO(data)) as pdf:
         if not 1 <= len(pdf.pages) <= MAX_PAGES:
             raise ValueError(f"Поддерживаются PDF от 1 до {MAX_PAGES} страниц.")
+        # After the page-count check, so an oversized PDF is refused before pypdf
+        # spends minutes extracting text nobody will read.
+        texts = page_texts(data)
         metadata = {key.lower(): str(value) for key, value in pdf.metadata.items() if value}
         for page in pdf.pages:
             deduped = page.dedupe_chars()
@@ -113,11 +150,15 @@ def extract(data):
         return {
             "title": metadata.get("title", ""), "author": metadata.get("author", ""),
             "pages": len(pdf.pages), "sources": sources, "warnings": warnings,
+            "page_texts": texts,
         }
 
 
 def render(data, page_number, box):
     with pdfplumber.open(BytesIO(data)) as pdf:
+        # pages[-1] on 0 would silently highlight the last page instead of failing.
+        if not 1 <= page_number <= len(pdf.pages):
+            raise ValueError(f"нет страницы {page_number}: в PDF {len(pdf.pages)} страниц")
         page = pdf.pages[page_number - 1]
         # PageImage accepts the same top-origin coordinates as the extractor.
         scale = min(100, 140_000 / max(page.width, page.height))

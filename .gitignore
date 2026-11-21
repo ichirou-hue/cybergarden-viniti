@@ -1,5 +1,16 @@
 .venv/
+.venv-*/
 __pycache__/
 *.py[cod]
 .env
 data/
+_refs/
+_corpus/
+*.zip
+.slim/deepwork/
+out/
+out_test/
+
+# Мусор macOS: .DS_Store и AppleDouble-файлы рядом с настоящими
+.DS_Store
+._*

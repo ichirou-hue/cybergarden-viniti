@@ -3,45 +3,81 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ВИНИТИ · Разбор публикаций</title>
+  <title>Конструктор выгрузки · ВИНИТИ</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script src="/constructor.js" defer></script>
 </head>
 <body>
-<header class="top"><div class="wrap">ВИНИТИ РАН <span>CyberGarden / RAG</span></div></header>
-<main class="wrap">
-  <section class="intro">
-    <div><h1>Разбор публикаций</h1><p>Метрики RAG с привязкой к исходной странице.</p></div>
-    <form id="upload">
-      <label>Загрузить статью <input id="file" type="file" accept=".pdf,application/pdf" required></label>
-      <button type="submit">Разобрать PDF</button>
-      <button type="button" id="demo" class="secondary">Открыть демо</button>
-    </form>
-  </section>
-  <p id="status" role="status"></p>
-  <section id="workspace" hidden>
-    <div class="bar">
-      <label>Публикация <select id="papers"></select></label>
-      <div class="links"><a id="pdf">Исходный PDF</a><a id="json">Экспорт JSON</a></div>
+<header class="topbar">
+  <div class="brand">ВИНИТИ <span>конструктор выгрузки</span></div>
+  <div class="area-switch" role="tablist" aria-label="Область">
+    <button id="areaSolar" type="button" class="area" data-area="solar" role="tab">solar</button>
+    <button id="areaRag" type="button" class="area" data-area="rag" role="tab">rag</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="controls">
+    <section class="control">
+      <label class="field-label" for="tableSelect">Таблица</label>
+      <select id="tableSelect"></select>
+    </section>
+
+    <section class="control">
+      <div class="control-head">
+        <span class="field-label">Колонки</span>
+        <div class="btn-row">
+          <button id="allCols" type="button" class="mini">Все</button>
+          <button id="reqCols" type="button" class="mini">Обязат.</button>
+          <button id="resetCols" type="button" class="mini">Сброс</button>
+        </div>
+      </div>
+      <div id="columns" class="columns"></div>
+    </section>
+
+    <section class="control">
+      <span class="field-label">Фильтры</span>
+      <div id="filters" class="filters"></div>
+      <button id="addFilter" type="button" class="mini">+ Фильтр</button>
+    </section>
+
+    <section class="control">
+      <span class="field-label">Сортировка</span>
+      <div class="sort-row">
+        <select id="sortField"></select>
+        <select id="sortDir" aria-label="Направление">
+          <option value="asc">по возр.</option>
+          <option value="desc">по убыв.</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="control">
+      <label class="field-label" for="limit">Лимит строк (0 - без предела)</label>
+      <input id="limit" type="number" min="0" step="1" value="500">
+    </section>
+
+    <div class="actions">
+      <button id="apply" type="button" class="primary">Применить</button>
+      <a id="download" class="btn" href="#">Скачать CSV</a>
+      <a id="downloadFull" class="btn ghost" href="#">Скачать полную сдачу</a>
+      <p class="hint" id="exportHint"></p>
     </div>
-    <p id="summary"></p>
-    <ul id="warnings"></ul>
-    <div class="bar filters">
-      <label>Поиск <input id="query" type="search" placeholder="Метрика, набор данных, цитата"></label>
-      <label>Раздел <select id="view"><option value="facts">Метрики</option><option value="sources">Фрагменты PDF</option></select></label>
-      <label id="categoryLabel">Тип <select id="category"></select></label>
-      <label id="issueFilter" class="check"><input id="issues" type="checkbox"> С замечаниями</label>
+  </aside>
+
+  <section class="result">
+    <div class="result-head">
+      <span id="count" class="count"></span>
+      <span id="status" class="status" role="status" aria-live="polite"></span>
     </div>
-    <p id="count" aria-live="polite"></p>
-    <div class="results"><table><thead id="head"></thead><tbody id="rows"></tbody></table></div>
-    <nav class="bar pager" aria-label="Страницы результатов"><button id="prev" class="secondary">Назад</button><span id="page"></span><button id="next" class="secondary">Далее</button></nav>
+    <div class="table-wrap">
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div id="empty" class="empty" hidden></div>
+    </div>
   </section>
 </main>
-<dialog id="evidence">
-  <div class="bar"><strong id="evidenceTitle"></strong><button id="close" class="secondary">Закрыть</button></div>
-  <p id="quote"></p>
-  <p id="imageError" hidden>Превью недоступно. Номер страницы и цитата указаны выше.</p>
-  <img id="preview" alt="Страница PDF с подсветкой источника">
-</dialog>
 </body>
 </html>
