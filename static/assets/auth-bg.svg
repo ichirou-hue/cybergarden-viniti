@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Абстрактный фон: тёмная сетка, светящиеся круги и линии данных">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1114"/>
+      <stop offset=".46" stop-color="#0e1518"/>
+      <stop offset="1" stop-color="#0a1215"/>
+    </linearGradient>
+    <radialGradient id="glowLime" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#d5ff83" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#d5ff83" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowTeal" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#3a7e70" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#3a7e70" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowMint" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#58907c" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#58907c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="fade" cx="48%" cy="42%" r="72%">
+      <stop offset=".18" stop-color="#fff"/>
+      <stop offset=".78" stop-color="#000"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="50%" cy="46%" r="76%">
+      <stop offset=".55" stop-color="#05090b" stop-opacity="0"/>
+      <stop offset="1" stop-color="#05090b" stop-opacity=".72"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#d5ff83" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#d5ff83" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#d5ff83" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d5ff83" stop-opacity="0"/>
+      <stop offset=".14" stop-color="#d5ff83" stop-opacity=".55"/>
+      <stop offset=".7" stop-color="#8ad9c4" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#8ad9c4" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="72" height="72" patternUnits="userSpaceOnUse">
+      <path d="M72 0H0V72" fill="none" stroke="#adbec1" stroke-opacity=".08" stroke-width="1"/>
+    </pattern>
+    <mask id="gridFade">
+      <rect width="1600" height="1000" fill="url(#fade)"/>
+    </mask>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="42"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#base)"/>
+
+  <g filter="url(#soft)">
+    <ellipse cx="110" cy="60" rx="640" ry="430" fill="url(#glowLime)"/>
+    <ellipse cx="1530" cy="980" rx="620" ry="560" fill="url(#glowTeal)"/>
+    <ellipse cx="1080" cy="-70" rx="420" ry="330" fill="url(#glowMint)"/>
+  </g>
+
+  <rect width="1600" height="1000" fill="url(#grid)" mask="url(#gridFade)"/>
+
+  <g transform="rotate(-22 800 500)" fill="none" stroke="url(#beam)" stroke-width="1.2">
+    <path d="M-300 1180 1700 -220"/>
+    <path d="M-300 1310 1700 -90"/>
+    <path d="M-300 1440 1700 40"/>
+    <path d="M-300 1570 1700 170"/>
+  </g>
+
+  <g fill="none" stroke="#d5ff83" stroke-opacity=".14">
+    <circle cx="1460" cy="-10" r="520" stroke-width="1.4"/>
+    <circle cx="1460" cy="-10" r="392" stroke-dasharray="3 13" stroke="#adbec1" stroke-opacity=".16"/>
+    <circle cx="1460" cy="-10" r="270" stroke-opacity=".08"/>
+  </g>
+  <g fill="none" stroke="#adbec1" stroke-opacity=".12">
+    <circle cx="1470" cy="1120" r="430" stroke-dasharray="2 16"/>
+    <circle cx="1470" cy="1120" r="300" stroke-opacity=".07"/>
+  </g>
+
+  <g fill="none" stroke="#d5ff83" stroke-opacity=".2" stroke-width="1.1">
+    <path d="M980 812 1120 742 1268 790 1392 694 1520 726"/>
+    <path d="M980 812 1042 690 1120 742"/>
+    <path d="M1268 790 1244 900 1392 694"/>
+  </g>
+  <g fill="#d5ff83">
+    <circle cx="980" cy="812" r="3.2" opacity=".6"/>
+    <circle cx="1120" cy="742" r="4" opacity=".75"/>
+    <circle cx="1268" cy="790" r="3.2" opacity=".5"/>
+    <circle cx="1392" cy="694" r="4.4" opacity=".8"/>
+    <circle cx="1520" cy="726" r="3" opacity=".45"/>
+    <circle cx="1042" cy="690" r="2.6" opacity=".45"/>
+    <circle cx="1244" cy="900" r="2.6" opacity=".4"/>
+  </g>
+  <g fill="none" stroke="#adbec1" stroke-opacity=".16" stroke-width="1">
+    <path d="M120 906 C 300 872, 360 946, 520 902 S 760 842, 900 884"/>
+  </g>
+
+  <path d="M120 250 H 620" stroke="#adbec1" stroke-opacity=".07"/>
+  <path d="M120 250 V 470" stroke="#adbec1" stroke-opacity=".07"/>
+  <circle cx="120" cy="250" r="2.4" fill="#d5ff83" opacity=".35"/>
+  <path d="M760 120 C 900 190, 1030 96, 1180 170 S 1400 120, 1500 190" fill="none" stroke="url(#wave)" stroke-width="1.6"/>
+
+  <rect width="1600" height="1000" fill="url(#vignette)"/>
+</svg>

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { seedWindow } from "./account.mjs";
 
 const base = process.env.MOCK_URL || "http://127.0.0.1:8799";
 const root = new URL("../../static/", import.meta.url);
@@ -18,6 +19,11 @@ globalThis.fetch = (input, init) => {
   return nativeFetch(url, init);
 };
 globalThis.dom = dom;
+
+// Экран первого входа теперь обязателен: проверкам каталога нужен уже вошедший
+// пользователь. Аккаунт кладём в localStorage до импорта app.js.
+globalThis.localStorage = dom.window.localStorage;
+seedWindow(dom.window);
 
 const dialog = document.getElementById("evidence");
 dialog.showModal = function showModal() { this.open = true; };
@@ -174,8 +180,9 @@ location.hash = "#/doc/rag:d020?track=rag&page=99";
 await waitFor(() => text(".count").includes("страница 9 из 9"), "зажим страницы");
 check("пагинация: страница зажата", text(".count").includes("страница 9 из 9"), text(".count"));
 
-// Область: неизвестная и несовпадение track с document_id
-location.hash = "#/?track=unknown";
+// Область: неизвестная и несовпадение track с document_id.
+// Корень "/" открывает мастер загрузки, поэтому срез каталога проверяем на /catalog.
+location.hash = "#/catalog?track=unknown";
 await waitFor(() => text("#view").includes("не подключён"), "неизвестная область");
 check("область: явная ошибка", text("#view").includes("Раздел «unknown» пока не подключён"), text("#view"));
 location.hash = "#/doc/rag:d020?track=solar";
