@@ -151,7 +151,7 @@ class EnvelopeTest(unittest.TestCase):
 
 class IngestTest(unittest.TestCase):
     def setUp(self):
-        from test_solar_offline import TABLE_PAGE, make_pdf
+        from tests.test_solar_offline import TABLE_PAGE, make_pdf
 
         self.pdf = make_pdf(TABLE_PAGE, table=True)
         self.directory = TemporaryDirectory()
@@ -226,7 +226,7 @@ class DocumentApiTest(unittest.TestCase):
     def setUp(self):
         from library import Library
         from server import Handler, ThreadingHTTPServer
-        from test_solar_offline import TABLE_PAGE, make_pdf
+        from tests.test_solar_offline import TABLE_PAGE, make_pdf
 
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

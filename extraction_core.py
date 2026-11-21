@@ -15,6 +15,7 @@ from time import monotonic
 
 from atomic_output import publish_directory
 from solar_facts import clean, decimal, finalize, has_unit, has_value, number_text, prepare_pdf, unit_name
+from viniti import paths
 
 
 REVISION = "profile-core-1"
@@ -150,7 +151,7 @@ def response_schema(profile):
 
 
 def load_profile(name):
-    path = Path(__file__).parent / "profiles" / f"{name}.json" if name in {"solar", "custom-example"} else Path(name)
+    path = paths.PROFILES_DIR / f"{name}.json" if name in {"solar", "custom-example"} else Path(name)
     return compile_profile(json.loads(path.read_text(encoding="utf-8")))
 
 

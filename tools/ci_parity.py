@@ -155,7 +155,12 @@ class Sources:
 
 def load_sources(root):
     sources = []
-    for path in sorted(root.glob("*.py")) + sorted((root / "tools").glob("*.py")):
+    paths = sorted(root.glob("*.py")) + sorted((root / "tools").glob("*.py"))
+    for extra in ("tests", "viniti"):
+        directory = root / extra
+        if directory.is_dir():
+            paths += sorted(directory.rglob("*.py"))
+    for path in paths:
         try:
             sources.append(Sources(path, root))
         except SyntaxError as error:
@@ -185,7 +190,7 @@ def check_backslash_paths(sources):
                 continue
             if not isinstance(value, str) or "\\" not in value:
                 continue
-            if value.count("\\") != value.count("\\") or "\\\\" in value:
+            if "\\\\" in value:
                 continue
             match = WINDOWS_PATH.fullmatch(value)
             if not match:

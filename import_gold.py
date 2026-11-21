@@ -13,12 +13,10 @@ import pathlib
 import sys
 
 import db as storage
+from viniti import paths
 
-ROOT = pathlib.Path(__file__).resolve().parent
-GOLD = {
-    "solar": ROOT / "_corpus" / "area1" / "dev_gold",
-    "rag": ROOT / "_corpus" / "rag" / "RAG_ВИНИТИ_участникам_2026-11-20" / "dev_gold",
-}
+ROOT = paths.REPO_ROOT
+GOLD = {area: root / "dev_gold" for area, root in paths.CORPUS_ROOTS.items()}
 
 
 def read_csv(path, columns):

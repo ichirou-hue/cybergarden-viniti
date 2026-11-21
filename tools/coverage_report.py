@@ -19,8 +19,9 @@ exporter or in the storage layer is a silent data-loss bug waiting to happen.
     python -X utf8 tools/coverage_report.py --threshold 70
         exit 1 when any measured module is below 70 percent. Opt-in gate.
 
-Modules are discovered by globbing the repo root for ``*.py``. Excluded:
-``test_*.py`` (they are the tests), ``demo.py`` and ``passport.py``
+Modules are discovered by globbing the repo root for ``*.py`` and ``viniti/`` for
+``**/*.py``. Excluded: ``test_*.py`` and ``tests/`` (they are the suite),
+``__init__.py`` (package markers), ``demo.py`` and ``passport.py``
 (fixtures/generator), ``analyze_pdfs.py`` (runs in a subprocess, so in-process
 coverage would read 0), ``serve_data.py`` (a thin datasette wrapper), and
 anything under ``.venv*``, ``_refs``, ``_corpus``, ``tools``, ``.slim``.
@@ -41,7 +42,7 @@ EXCLUDE_FILES = {
     "analyze_pdfs.py",    # exercised through subprocess only
     "serve_data.py",      # thin wrapper around datasette
 }
-EXCLUDE_DIRS = {".venv", "_refs", "_corpus", "tools", ".slim", "__pycache__", ".git"}
+EXCLUDE_DIRS = {".venv", "_refs", "_corpus", "tools", "tests", ".slim", "__pycache__", ".git"}
 
 # Written by other agents right now. Reported as "absent" when missing, never fatal.
 WATCHLIST = (
@@ -50,10 +51,15 @@ WATCHLIST = (
 
 
 def discover_modules():
-    """Root-level *.py modules that are ours to measure, in name order."""
+    """Production modules: root-level *.py plus viniti/**, in path order.
+
+    ``tests/`` is not measured: those files are the suite itself, and
+    ``run_suite`` already discovers them through the ``tests`` package.
+    """
     found = []
-    for path in sorted(ROOT.glob("*.py")):
-        if path.name.startswith("test_"):
+    candidates = sorted(ROOT.glob("*.py")) + sorted((ROOT / "viniti").rglob("*.py"))
+    for path in candidates:
+        if path.name.startswith("test_") or path.name == "__init__.py":
             continue
         if path.name in EXCLUDE_FILES:
             continue
@@ -193,7 +199,7 @@ def _row(path, statements, missing):
     covered = total - len(missing)
     percent = 100.0 * covered / total if total else 0.0
     return {
-        "module": path.name,
+        "module": path.relative_to(ROOT).as_posix(),
         "path": path,
         "statements": total,
         "missed": len(missing),
@@ -260,7 +266,7 @@ def main(argv):
     parser.add_argument("--gaps", action="store_true",
                         help="print missed line ranges with their source lines")
     parser.add_argument("--module", default="",
-                        help="comma-separated module names for --gaps output")
+                        help="comma-separated module paths for --gaps output")
     parser.add_argument("--threshold", type=float, default=None,
                         help="exit 1 if any measured module is below this percent")
     args = parser.parse_args(argv)

@@ -9,14 +9,15 @@ Run:  python passport.py            # regenerate passport.json
 """
 import importlib.util
 import json
-import pathlib
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent
-PASSPORT = ROOT / "passport.json"
+from viniti import paths
 
-SOLAR_KIT = ROOT / "_corpus" / "area1"
-RAG_KIT = ROOT / "_corpus" / "rag" / "RAG_ВИНИТИ_участникам_2026-11-20"
+ROOT = paths.REPO_ROOT
+PASSPORT = paths.PASSPORT
+
+SOLAR_KIT = paths.CORPUS_ROOTS["solar"]
+RAG_KIT = paths.CORPUS_ROOTS["rag"]
 
 SOLAR_KEYS = {
     "publications": "publication_id",

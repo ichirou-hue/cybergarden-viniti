@@ -52,10 +52,11 @@ from rag_api import (
 )
 from solar_api import SolarStore, solar_sources
 from solar_api import MAX_BYTES as SOLAR_MAX_BYTES
+from viniti import paths
 
 
-ROOT = Path(__file__).resolve().parent
-STATIC_DIR = (ROOT / "static").resolve()
+ROOT = paths.REPO_ROOT
+STATIC_DIR = paths.STATIC_DIR.resolve()
 STATIC_TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
@@ -278,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
     def profile_root_for(self, session):
         root = self.profiles_root()
         if root is None:
-            root = ROOT / "data" / "profiles"
+            root = paths.DATA_DIR / "profiles"
         return Path(root) / session["user"]["id"]
 
     def profile_scope(self, name, *, require_owner=True):
@@ -293,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def parses_root(self):
         configured = getattr(self.server, "parse_root", None)
-        return Path(configured) if configured is not None else ROOT / "data" / "parses"
+        return Path(configured) if configured is not None else paths.DATA_DIR / "parses"
 
     def payload(self, limit, media=None):
         if media and self.headers.get_content_type() != media:
@@ -482,7 +483,7 @@ class Handler(BaseHTTPRequestHandler):
                 interpreter = os.environ.get("VINITI_DOCLING_PYTHON") or interpreter
             publication_id = Path(job.get("filename", "article.pdf")).stem or "article"
             command = [
-                interpreter, "-X", "utf8", str(ROOT / "parse_document.py"), str(folder / "input.pdf"),
+                interpreter, "-X", "utf8", str(paths.PARSE_SCRIPT), str(folder / "input.pdf"),
                 "--profile", str(profile_path), "--publication-id", publication_id,
                 "-o", str(folder / "bundle"), "--parser", parser,
             ]
@@ -682,7 +683,7 @@ class Handler(BaseHTTPRequestHandler):
             # В тестах Handler создают без rag_store: кладём базу рядом
             # с библиотекой, чтобы не писать в рабочий каталог репозитория.
             base = getattr(self.server, "library", None)
-            path = Path(base.path).parent / "rag.sqlite3" if base else ROOT / "data" / "rag.sqlite3"
+            path = Path(base.path).parent / "rag.sqlite3" if base else paths.DATA_DIR / "rag.sqlite3"
             store = RagStore(path)
             self.server.rag_store = store
         return store
@@ -691,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
         store = getattr(self.server, "solar_store", None)
         if store is None:
             base = getattr(self.server, "library", None)
-            path = Path(base.path).parent / "solar.sqlite3" if base else ROOT / "data" / "solar.sqlite3"
+            path = Path(base.path).parent / "solar.sqlite3" if base else paths.DATA_DIR / "solar.sqlite3"
             store = SolarStore(path)
             self.server.solar_store = store
         return store
@@ -1392,16 +1393,16 @@ def serve_until_interrupt(server):
 def main():
     parser = argparse.ArgumentParser(description="VINITI PDF evidence workspace")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--db", type=Path, default=ROOT / "data" / "papers.sqlite3")
-    parser.add_argument("--data", type=Path, default=ROOT / "data" / "viniti.sqlite3")
+    parser.add_argument("--db", type=Path, default=paths.DATA_DIR / "papers.sqlite3")
+    parser.add_argument("--data", type=Path, default=paths.DATA_DIR / "viniti.sqlite3")
     args = parser.parse_args()
     with ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:
         server.library = Library(args.db)
         server.rag_store = RagStore(args.db)
         server.data = args.data
         server.auth = auth.Auth(args.data)
-        server.profiles_dir = ROOT / "data" / "profiles"
-        server.parse_root = ROOT / "data" / "parses"
+        server.profiles_dir = paths.DATA_DIR / "profiles"
+        server.parse_root = paths.DATA_DIR / "parses"
         server.parse_slots = threading.BoundedSemaphore(2)
         server.docling_slot = threading.Semaphore(1)
         print(f"http://127.0.0.1:{server.server_port}", flush=True)

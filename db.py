@@ -26,11 +26,13 @@ import json
 import pathlib
 import sqlite3
 import sys
-import auth
 
-ROOT = pathlib.Path(__file__).resolve().parent
-PASSPORT = ROOT / "passport.json"
-DEFAULT_DB = ROOT / "data" / "viniti.sqlite3"
+import auth
+from viniti import paths
+
+ROOT = paths.REPO_ROOT
+PASSPORT = paths.PASSPORT
+DEFAULT_DB = paths.DATA_DIR / "viniti.sqlite3"
 
 # Historical mirror names that exports, the server and the tests already rely on.
 LEGACY_MIRRORS = {

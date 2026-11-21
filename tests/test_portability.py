@@ -21,7 +21,7 @@ import sys
 import tempfile
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # The same rule as tools/ci_parity.py: a whole string that is a Windows path.
 # Kept local so this test does not depend on the auditor.
@@ -262,7 +262,10 @@ class SyntaxTest(unittest.TestCase):
     """CI pins Python 3.12: anything 3.13+ only is a red build on both runners."""
 
     def test_every_module_parses_as_python_312(self):
-        paths = sorted(ROOT.glob("*.py")) + sorted((ROOT / "tools").glob("*.py"))
+        paths = (sorted(ROOT.glob("*.py"))
+                 + sorted((ROOT / "tools").glob("*.py"))
+                 + sorted((ROOT / "tests").rglob("*.py"))
+                 + sorted((ROOT / "viniti").rglob("*.py")))
         self.assertGreater(len(paths), 10)
         for path in paths:
             with self.subTest(module=path.relative_to(ROOT).as_posix()):

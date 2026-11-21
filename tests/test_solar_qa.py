@@ -16,7 +16,7 @@ from unittest.mock import patch
 from solar_extract import complete, main
 from solar_facts import export_bundle, finalize, prepare_pdf
 from solar_schema import TABLES
-from test_solar import ROOT, fixture, synthetic_pdf
+from tests.test_solar import ROOT, fixture, synthetic_pdf
 
 
 class SolarIndependentQA(unittest.TestCase):

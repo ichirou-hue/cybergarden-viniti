@@ -69,9 +69,11 @@ import sqlite3
 import sys
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-ROOT = pathlib.Path(__file__).resolve().parent
-PASSPORT_PATH = ROOT / "passport.json"
-DEFAULT_DB = ROOT / "data" / "viniti.sqlite3"
+from viniti import paths
+
+ROOT = paths.REPO_ROOT
+PASSPORT_PATH = paths.PASSPORT
+DEFAULT_DB = paths.DATA_DIR / "viniti.sqlite3"
 
 AREAS = ("solar", "rag")
 

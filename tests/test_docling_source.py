@@ -13,7 +13,7 @@ from PIL import Image
 
 from docling_source import normalize_document, page_anchor, prepare_pdf, table_grid
 from extraction_core import export_result, load_profile, run
-from test_solar import ROOT, synthetic_pdf
+from tests.test_solar import ROOT, synthetic_pdf
 
 
 def table_data(values):

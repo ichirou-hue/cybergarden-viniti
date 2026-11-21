@@ -15,7 +15,7 @@ from urllib.request import Request
 from extraction_core import compile_profile, export_result, load_profile, response_schema, run
 from solar_extract import NoRedirect
 from solar_facts import finalize
-from test_solar import ROOT, fixture, synthetic_pdf
+from tests.test_solar import ROOT, fixture, synthetic_pdf
 
 
 def custom_fixture():

@@ -71,10 +71,10 @@ class ParseAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pdf = self.pdf(tmp)
             out = Path(tmp) / "cli-artifacts"
-            script = Path(__file__).resolve().parent / "tools" / "parse_audit.py"
+            script = Path(__file__).resolve().parents[1] / "tools" / "parse_audit.py"
             result = subprocess.run(
                 [sys.executable, "-X", "utf8", str(script), str(pdf), "--out", str(out)],
-                cwd=str(Path(__file__).resolve().parent), capture_output=True, text=True,
+                    cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(validate_artifact(out))
@@ -91,7 +91,7 @@ class ParseAuditTests(unittest.TestCase):
                 validate_artifact(out)
             result = subprocess.run(
                 [sys.executable, "-X", "utf8", "tools/parse_audit.py", "--validate", str(out)],
-                cwd=str(Path(__file__).resolve().parent), capture_output=True, text=True,
+                    cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn("error:", result.stderr)
@@ -103,7 +103,7 @@ class ParseAuditTests(unittest.TestCase):
             write_artifacts(pdf, out)
             result = subprocess.run(
                 [sys.executable, "-X", "utf8", "-m", "tools.parse_audit", "--validate", str(out)],
-                cwd=str(Path(__file__).resolve().parent), capture_output=True, text=True,
+                    cwd=str(Path(__file__).resolve().parents[1]), capture_output=True, text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("valid", result.stdout)

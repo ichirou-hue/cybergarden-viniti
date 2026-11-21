@@ -33,8 +33,9 @@ import batch
 import db as storage
 import export_csv
 import issues
+from viniti import paths
 
-ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = paths.REPO_ROOT
 
 # tools/ не пакет (нет __init__.py), поэтому корень tools кладём в sys.path и
 # импортируем gate модулем - так же поступают norm_report.py и spike_docling.py.

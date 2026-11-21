@@ -27,16 +27,15 @@ import traceback
 from datetime import datetime, timezone
 
 import db
+from viniti import paths
 
-ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = paths.REPO_ROOT
 
 AREAS = ("solar", "rag")
 
 # Corpus kit roots. Both kits use the same split names (dev, test, dev_gold).
-CORPUS_ROOTS = {
-    "solar": ROOT / "_corpus" / "area1",
-    "rag": ROOT / "_corpus" / "rag" / "RAG_ВИНИТИ_участникам_2026-11-20",
-}
+# A copy: tests and one-off runs swap entries, and the shared mapping stays as is.
+CORPUS_ROOTS = dict(paths.CORPUS_ROOTS)
 
 # Keep resume invalidation tied to the actual extractor revision. A separate
 # constant silently lets batch reuse rows after extract.py changes. The import

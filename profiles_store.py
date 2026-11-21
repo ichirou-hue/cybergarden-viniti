@@ -7,9 +7,10 @@ import re
 from tempfile import NamedTemporaryFile
 
 from extraction_core import compile_profile
+from viniti import paths
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = paths.REPO_ROOT
 BUILTINS = ("solar", "custom-example")
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
 MAX_BYTES = 1024 * 1024
@@ -19,14 +20,14 @@ def directory(path=None):
     """Каталог пользовательских профилей; в тестах и на сервере задаётся явно."""
     if path is not None:
         return Path(path)
-    return Path(os.environ.get("VINITI_PROFILES_DIR") or ROOT / "data" / "profiles")
+    return Path(os.environ.get("VINITI_PROFILES_DIR") or paths.DATA_DIR / "profiles")
 
 
 def path_for(name, *, root=None):
     if not isinstance(name, str):
         raise ValueError("Некорректный id профиля.")
     if name in BUILTINS:
-        return ROOT / "profiles" / f"{name}.json"
+        return paths.PROFILES_DIR / f"{name}.json"
     if not NAME.fullmatch(name):
         raise ValueError("Некорректный id профиля.")
     return directory(root) / f"{name}.json"
