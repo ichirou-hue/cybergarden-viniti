@@ -1,0 +1,3363 @@
+{
+ "_comment": "Словарь построен по эталону dev_gold/results.csv области rag. Это осознанная утечка: имена метрик, единицы, группы и направления - это схема сдачи, а не ответ; значения и страницы из эталона не используются ни филлером, ни замером.",
+ "_source": "D:\\sfedu\\_corpus\\rag\\RAG_ВИНИТИ_участникам_2026-11-20\\dev_gold\\results.csv",
+ "_generator": "tools/rag_vocab.py",
+ "metrics": {
+  "ATE": {
+   "rows": 34,
+   "metric_unit": "robust anomaly score",
+   "metric_group": "training stability",
+   "metric_direction": "lower_is_better"
+  },
+  "AUC": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "routing classification",
+   "metric_direction": "higher_is_better"
+  },
+  "AUS": {
+   "rows": 22,
+   "metric_unit": "robust anomaly score",
+   "metric_group": "training stability",
+   "metric_direction": "lower_is_better"
+  },
+  "Absolute F1 difference from MV upper bound": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Abstention rate": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Access risk": {
+   "rows": 18,
+   "metric_unit": "%",
+   "metric_group": "routing risk",
+   "metric_direction": "lower_is_better"
+  },
+  "Access-denied superseder retained rate": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "routing risk",
+   "metric_direction": "lower_is_better"
+  },
+  "Accuracy": {
+   "rows": 1016,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Accuracy among attempted questions": {
+   "rows": 7,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Accuracy gain over Vanilla RAG": {
+   "rows": 6,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Accuracy improvement over GPT-4": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Activation strength": {
+   "rows": 32,
+   "metric_unit": "index",
+   "metric_group": "mechanistic diagnosis",
+   "metric_direction": ""
+  },
+  "Aggregate complex-question accuracy": {
+   "rows": 1,
+   "metric_unit": "",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Aggregation questions": {
+   "rows": 5,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Agreement": {
+   "rows": 26,
+   "metric_unit": "%",
+   "metric_group": "judge reliability",
+   "metric_direction": "higher_is_better"
+  },
+  "Annotation group count": {
+   "rows": 2,
+   "metric_unit": "count",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Annotation group proportion": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Answer F1": {
+   "rows": 12074,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Answer F1 SEM": {
+   "rows": 18,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Answer F1 gap gold minus full knowledge": {
+   "rows": 1,
+   "metric_unit": "fraction_difference",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Answer accuracy": {
+   "rows": 287,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Answer precision": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Answer recall": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Answer-string retrieval-miss proxy": {
+   "rows": 6,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval behavior",
+   "metric_direction": "lower_is_better"
+  },
+  "Answerable generated English questions": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Approximate full decomposition time": {
+   "rows": 1,
+   "metric_unit": "ms",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Approximate total API expenditure": {
+   "rows": 2,
+   "metric_unit": "USD",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Approximate training time per run": {
+   "rows": 2,
+   "metric_unit": "ms",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Approximate visual retrieval duration described in prose": {
+   "rows": 1,
+   "metric_unit": "ms",
+   "metric_group": "latency",
+   "metric_direction": "lower_is_better"
+  },
+  "Assumed unit price": {
+   "rows": 4,
+   "metric_unit": "USD/token",
+   "metric_group": "cost assumptions",
+   "metric_direction": ""
+  },
+  "Attempt rate": {
+   "rows": 6,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Average module latency": {
+   "rows": 8,
+   "metric_unit": "ms",
+   "metric_group": "latency",
+   "metric_direction": "lower_is_better"
+  },
+  "Average training step time": {
+   "rows": 4,
+   "metric_unit": "ms",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Average training step time relative increase": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Avoided Answer": {
+   "rows": 9,
+   "metric_unit": "score",
+   "metric_group": "illustrative monitoring",
+   "metric_direction": "lower_is_better"
+  },
+  "BAD count": {
+   "rows": 4,
+   "metric_unit": "steps",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "BAD rate": {
+   "rows": 5,
+   "metric_unit": "%",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "BLEU-1": {
+   "rows": 24,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "BLEU-1 improvement": {
+   "rows": 1,
+   "metric_unit": "percentage points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "BLEU-2": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "BLEU-3": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "BLEU-4": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Base node categories": {
+   "rows": 1,
+   "metric_unit": "categories",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Baseline errors attributed to missed evidence": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "error attribution",
+   "metric_direction": "lower_is_better"
+  },
+  "Benchmarks with best factuality including ties": {
+   "rows": 1,
+   "metric_unit": "benchmarks",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Breakdown count": {
+   "rows": 6,
+   "metric_unit": "count",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Business Impact sigma": {
+   "rows": 26,
+   "metric_unit": "impact_score",
+   "metric_group": "retrieval diversity",
+   "metric_direction": "higher_is_better"
+  },
+  "Business Impact sigma relative change": {
+   "rows": 8,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "CDPA": {
+   "rows": 17,
+   "metric_unit": "fraction",
+   "metric_group": "RAG consistency",
+   "metric_direction": "higher_is_better"
+  },
+  "CIRA": {
+   "rows": 17,
+   "metric_unit": "fraction",
+   "metric_group": "RAG consistency",
+   "metric_direction": "higher_is_better"
+  },
+  "CR hallucinated minus factual": {
+   "rows": 32,
+   "metric_unit": "index",
+   "metric_group": "mechanistic diagnosis",
+   "metric_direction": ""
+  },
+  "CTI points extracted": {
+   "rows": 1,
+   "metric_unit": "points",
+   "metric_group": "cited component/context result",
+   "metric_direction": ""
+  },
+  "Chunking cost": {
+   "rows": 10,
+   "metric_unit": "USD",
+   "metric_group": "ingestion cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Chunking cost relative change": {
+   "rows": 7,
+   "metric_unit": "%",
+   "metric_group": "ingestion cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Chunking cost savings": {
+   "rows": 1,
+   "metric_unit": "USD",
+   "metric_group": "ingestion cost",
+   "metric_direction": "higher_is_better"
+  },
+  "Classification accuracy": {
+   "rows": 5,
+   "metric_unit": "%",
+   "metric_group": "routing classification",
+   "metric_direction": "higher_is_better"
+  },
+  "Classifier accuracy": {
+   "rows": 30,
+   "metric_unit": "%",
+   "metric_group": "classification",
+   "metric_direction": "higher_is_better"
+  },
+  "Claude GOOD labels": {
+   "rows": 1,
+   "metric_unit": "steps",
+   "metric_group": "label validation",
+   "metric_direction": ""
+  },
+  "Cohen kappa": {
+   "rows": 22,
+   "metric_unit": "fraction",
+   "metric_group": "judge reliability",
+   "metric_direction": "higher_is_better"
+  },
+  "Cohen kappa judge-human agreement": {
+   "rows": 2,
+   "metric_unit": "kappa",
+   "metric_group": "annotation agreement",
+   "metric_direction": "higher_is_better"
+  },
+  "Cohen kappa maximum": {
+   "rows": 3,
+   "metric_unit": "fraction",
+   "metric_group": "judge reliability",
+   "metric_direction": "higher_is_better"
+  },
+  "Cohen kappa minimum": {
+   "rows": 3,
+   "metric_unit": "fraction",
+   "metric_group": "judge reliability",
+   "metric_direction": "higher_is_better"
+  },
+  "Cohen kappa professional annotation agreement": {
+   "rows": 1,
+   "metric_unit": "kappa",
+   "metric_group": "annotation agreement",
+   "metric_direction": "higher_is_better"
+  },
+  "Cohen's kappa": {
+   "rows": 11,
+   "metric_unit": "coefficient",
+   "metric_group": "label validation",
+   "metric_direction": "higher_is_better"
+  },
+  "Collected base documents": {
+   "rows": 2,
+   "metric_unit": "documents",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Combined reward margin >=.20 share": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Communication volume": {
+   "rows": 15,
+   "metric_unit": "MiB",
+   "metric_group": "communication",
+   "metric_direction": "lower_is_better"
+  },
+  "Communication volume reduction": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "communication",
+   "metric_direction": "higher_is_better"
+  },
+  "Comparison questions": {
+   "rows": 5,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "ConR": {
+   "rows": 66,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "ConR improvement over ParamMute": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Conditional predicted class proportion": {
+   "rows": 13,
+   "metric_unit": "%",
+   "metric_group": "classification",
+   "metric_direction": ""
+  },
+  "Content length": {
+   "rows": 11,
+   "metric_unit": "characters",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": ""
+  },
+  "Context recall": {
+   "rows": 36,
+   "metric_unit": "%",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Context recall improvement": {
+   "rows": 8,
+   "metric_unit": "percentage points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Contradictory samples": {
+   "rows": 1,
+   "metric_unit": "samples",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Corpus percentage in topiccluster": {
+   "rows": 25,
+   "metric_unit": "%",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Corpus relevance rate": {
+   "rows": 21,
+   "metric_unit": "%",
+   "metric_group": "source relevance",
+   "metric_direction": "higher_is_better"
+  },
+  "Correct generated answers including corrections": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Correct human answers misjudged": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Correct human answers misjudged count": {
+   "rows": 1,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Correct trajectories": {
+   "rows": 8,
+   "metric_unit": "trajectories",
+   "metric_group": "process validity",
+   "metric_direction": "higher_is_better"
+  },
+  "Correct watermark identification rate": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Cumulative F1": {
+   "rows": 9,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Cumulative data coverage": {
+   "rows": 13,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Cumulative ratio CR": {
+   "rows": 64,
+   "metric_unit": "index",
+   "metric_group": "mechanistic diagnosis",
+   "metric_direction": ""
+  },
+  "DPO loss": {
+   "rows": 4,
+   "metric_unit": "score",
+   "metric_group": "training optimization",
+   "metric_direction": "lower_is_better"
+  },
+  "Delta ConR drop": {
+   "rows": 18,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Delta EM": {
+   "rows": 52,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Delta EM without minus with PRM": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Delta F1": {
+   "rows": 28,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Divergence strength": {
+   "rows": 32,
+   "metric_unit": "index",
+   "metric_group": "mechanistic diagnosis",
+   "metric_direction": ""
+  },
+  "Documents": {
+   "rows": 14,
+   "metric_unit": "files",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Documents in topiccluster": {
+   "rows": 25,
+   "metric_unit": "documents",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Documents with full text": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "EM": {
+   "rows": 852,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "EM decrease": {
+   "rows": 21,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "lower_is_better"
+  },
+  "EM deficit versus StepSearch": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "EM difference vs EDP": {
+   "rows": 4,
+   "metric_unit": "fraction",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "EM gain versus PPO": {
+   "rows": 3,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "EM improvement": {
+   "rows": 5,
+   "metric_unit": "percentage points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "EM improvement over GraphRAG*": {
+   "rows": 4,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "EM improvement over IRCoT": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "EM improvement over KnowTrace": {
+   "rows": 3,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "EM sample SD": {
+   "rows": 144,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Elo": {
+   "rows": 24,
+   "metric_unit": "rating_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Elo lower bound": {
+   "rows": 1,
+   "metric_unit": "rating_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Elo range bound for GEMINI and MIXTRAL": {
+   "rows": 2,
+   "metric_unit": "rating_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Emotional Markers": {
+   "rows": 26,
+   "metric_unit": "distinct_markers",
+   "metric_group": "retrieval diversity",
+   "metric_direction": "higher_is_better"
+  },
+  "Emotional Markers relative change": {
+   "rows": 8,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Empty-context rate": {
+   "rows": 16,
+   "metric_unit": "%",
+   "metric_group": "routing risk",
+   "metric_direction": "lower_is_better"
+  },
+  "English response instead of question language": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "language correctness",
+   "metric_direction": "lower_is_better"
+  },
+  "Entity Match Rate": {
+   "rows": 10,
+   "metric_unit": "%",
+   "metric_group": "retrieval precision",
+   "metric_direction": "higher_is_better"
+  },
+  "Entity Match Rate absolute gain": {
+   "rows": 3,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Entity Match Rate relative change": {
+   "rows": 2,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Errors attributed to query ambiguity": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "error attribution",
+   "metric_direction": "lower_is_better"
+  },
+  "Estimated annotation proportion": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Estimated total compute budget": {
+   "rows": 1,
+   "metric_unit": "H20_GPU_hours",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Evaluator accuracy": {
+   "rows": 15,
+   "metric_unit": "score",
+   "metric_group": "evaluator quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Evidence Type Coverage": {
+   "rows": 16,
+   "metric_unit": "%",
+   "metric_group": "representation coverage",
+   "metric_direction": "higher_is_better"
+  },
+  "Evidence Type Coverage relative change": {
+   "rows": 7,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Example text perplexity": {
+   "rows": 6,
+   "metric_unit": "perplexity",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Executed searches": {
+   "rows": 8,
+   "metric_unit": "searches_per_query",
+   "metric_group": "retrieval behavior",
+   "metric_direction": ""
+  },
+  "Explicitly superseded evidence retained rate": {
+   "rows": 12,
+   "metric_unit": "%",
+   "metric_group": "routing risk",
+   "metric_direction": "lower_is_better"
+  },
+  "F1": {
+   "rows": 779,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "F1 improvement": {
+   "rows": 1,
+   "metric_unit": "percentage points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "F1 improvement over MV": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "F1 improvement over Search-R1": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "FHR": {
+   "rows": 12,
+   "metric_unit": "fraction",
+   "metric_group": "watermark validity",
+   "metric_direction": "lower_is_better"
+  },
+  "FN": {
+   "rows": 12,
+   "metric_unit": "responses",
+   "metric_group": "judge reliability",
+   "metric_direction": ""
+  },
+  "FP": {
+   "rows": 12,
+   "metric_unit": "responses",
+   "metric_group": "judge reliability",
+   "metric_direction": ""
+  },
+  "Factual inconsistency detection precision": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "evaluator quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Factuality": {
+   "rows": 132,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Factuality absolute gain": {
+   "rows": 6,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Factuality gain over SOTA range lower": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Factuality gain over SOTA range upper": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Failure-free rate": {
+   "rows": 12,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "higher_is_better"
+  },
+  "Filtering rate strict upper bound": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Final corpus documents": {
+   "rows": 1,
+   "metric_unit": "documents",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Final label accuracy improvement": {
+   "rows": 1,
+   "metric_unit": "fraction_difference",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Flawed-but-successful chosen trajectories": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "supervision quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Fleiss kappa": {
+   "rows": 1,
+   "metric_unit": "score",
+   "metric_group": "annotation agreement",
+   "metric_direction": "higher_is_better"
+  },
+  "Fraction of individual sentences yielding F1=0": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Fraction of individual sentences yielding correct answer": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Fraction of individual-sentence outputs in F1 bin": {
+   "rows": 50,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Fusion time minus text reranking time": {
+   "rows": 1,
+   "metric_unit": "ms",
+   "metric_group": "latency",
+   "metric_direction": "lower_is_better"
+  },
+  "GOOD count": {
+   "rows": 4,
+   "metric_unit": "steps",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "GOOD rate": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "GPT-4.1 API expense": {
+   "rows": 1,
+   "metric_unit": "USD",
+   "metric_group": "offline cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Generator replacement LLM Score gain": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Grounded in Context": {
+   "rows": 1,
+   "metric_unit": "score",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Gwet AC1": {
+   "rows": 3,
+   "metric_unit": "score",
+   "metric_group": "annotation agreement",
+   "metric_direction": "higher_is_better"
+  },
+  "Hallucinated samples": {
+   "rows": 1,
+   "metric_unit": "samples",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Hallucination rate": {
+   "rows": 60,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "High-quality verified QA pairs": {
+   "rows": 4,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Human Correctness": {
+   "rows": 2,
+   "metric_unit": "score [0,10]",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Human Fluency": {
+   "rows": 2,
+   "metric_unit": "score [0,10]",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Human Mean": {
+   "rows": 2,
+   "metric_unit": "score [0,10]",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Human Rationality": {
+   "rows": 2,
+   "metric_unit": "score [0,10]",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Human accuracy": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Human accuracy by LLM panel": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Human-Qwen3-32B judge agreement": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "judge agreement",
+   "metric_direction": "higher_is_better"
+  },
+  "Human-corrected answers": {
+   "rows": 5,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "IFBC": {
+   "rows": 7,
+   "metric_unit": "%",
+   "metric_group": "process validity",
+   "metric_direction": "lower_is_better"
+  },
+  "IFBC difference p": {
+   "rows": 6,
+   "metric_unit": "probability",
+   "metric_group": "statistical significance",
+   "metric_direction": ""
+  },
+  "IFBC reduction versus outcome-only": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "process validity",
+   "metric_direction": "higher_is_better"
+  },
+  "Incorrect human answers with valid reference": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Incorrect human answers with valid reference count": {
+   "rows": 1,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Indexed text chunks": {
+   "rows": 9,
+   "metric_unit": "chunks",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Input prompt token count ratio MIRAGE/MMLU": {
+   "rows": 1,
+   "metric_unit": "ratio",
+   "metric_group": "input resources",
+   "metric_direction": ""
+  },
+  "Input tokens": {
+   "rows": 12,
+   "metric_unit": "tokens",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Input tokens relative change": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Insight interactions": {
+   "rows": 1,
+   "metric_unit": "count",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Inspected pools satisfying construction criteria": {
+   "rows": 1,
+   "metric_unit": "instances",
+   "metric_group": "governance failure",
+   "metric_direction": "higher_is_better"
+  },
+  "Interactions": {
+   "rows": 1,
+   "metric_unit": "count",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "KB expansion all-cases WRR": {
+   "rows": 1,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "KCR": {
+   "rows": 17,
+   "metric_unit": "fraction",
+   "metric_group": "text quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Knowledge F1": {
+   "rows": 2471,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Knowledge graph edge relationships": {
+   "rows": 1,
+   "metric_unit": "edges",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Knowledge graph nodes": {
+   "rows": 1,
+   "metric_unit": "nodes",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Knowledge precision": {
+   "rows": 7688,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Knowledge recall": {
+   "rows": 5738,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "LLM Score": {
+   "rows": 123,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "LLM Score gain": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "LLM accuracy": {
+   "rows": 77,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "LLM accuracy gain": {
+   "rows": 5,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Label accuracy": {
+   "rows": 9,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Latency": {
+   "rows": 25,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Latency Document selection": {
+   "rows": 11,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Latency Generation": {
+   "rows": 11,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Latency Query embedding": {
+   "rows": 13,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Latency Reranking": {
+   "rows": 19,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Latency Source selection": {
+   "rows": 13,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Latency increment": {
+   "rows": 6,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Latency total": {
+   "rows": 14,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Leakage rate": {
+   "rows": 119,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Leakage rate 95% CI lower": {
+   "rows": 18,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Leakage rate 95% CI upper": {
+   "rows": 18,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Leakage rate all-model value": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Leakage rate maximum": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Leakage rate minimum": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Leakage rate paired McNemar p": {
+   "rows": 9,
+   "metric_unit": "probability",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Leakage rate reduction vs Naive": {
+   "rows": 9,
+   "metric_unit": "percentage_points",
+   "metric_group": "governance failure",
+   "metric_direction": "higher_is_better"
+  },
+  "Low grounded-in-context threshold": {
+   "rows": 1,
+   "metric_unit": "score",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "MLE Elo": {
+   "rows": 19,
+   "metric_unit": "rating_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "MRR": {
+   "rows": 24,
+   "metric_unit": "score",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Main-task negative impact": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "RAG task impact",
+   "metric_direction": ""
+  },
+  "Matching labels": {
+   "rows": 1,
+   "metric_unit": "steps",
+   "metric_group": "label validation",
+   "metric_direction": ""
+  },
+  "Maximum communication-volume reduction": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "communication",
+   "metric_direction": "higher_is_better"
+  },
+  "Maximum document length": {
+   "rows": 4,
+   "metric_unit": "characters",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Maximum end-to-end latency reduction": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "efficiency",
+   "metric_direction": "higher_is_better"
+  },
+  "Maximum source-contact reduction": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "communication",
+   "metric_direction": "higher_is_better"
+  },
+  "Mean F1 improvement top3 versus top1": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Mean candidate knowledge sentences": {
+   "rows": 2,
+   "metric_unit": "sentences",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Mean input tokens per file": {
+   "rows": 14,
+   "metric_unit": "tokens/file",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Mean input tokens per file relative change": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Mean labeled gold knowledge sentences": {
+   "rows": 2,
+   "metric_unit": "sentences",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Mean output tokens per file": {
+   "rows": 14,
+   "metric_unit": "tokens/file",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Mean output tokens per file relative change": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Mean references per training example": {
+   "rows": 3,
+   "metric_unit": "references",
+   "metric_group": "training data",
+   "metric_direction": ""
+  },
+  "Mean retained candidate documents": {
+   "rows": 1,
+   "metric_unit": "documents",
+   "metric_group": "routing risk",
+   "metric_direction": ""
+  },
+  "Mean selected knowledge sentences": {
+   "rows": 583,
+   "metric_unit": "sentences",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Mean time per file": {
+   "rows": 14,
+   "metric_unit": "ms",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Mean time per file relative change": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Median document length": {
+   "rows": 4,
+   "metric_unit": "characters",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "MemR": {
+   "rows": 60,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Minimum document length": {
+   "rows": 4,
+   "metric_unit": "characters",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Misalignment Rate MR": {
+   "rows": 1,
+   "metric_unit": "",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Missing response rate": {
+   "rows": 60,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Multi-hop questions": {
+   "rows": 5,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "NDCG upper threshold mentioned in related work": {
+   "rows": 1,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval ranking",
+   "metric_direction": ""
+  },
+  "NDCG@3": {
+   "rows": 24,
+   "metric_unit": "score",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "NDCG@5": {
+   "rows": 410,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval ranking",
+   "metric_direction": "higher_is_better"
+  },
+  "NDCG@5 approximate relative improvement": {
+   "rows": 1,
+   "metric_unit": "relative_percent",
+   "metric_group": "retrieval ranking",
+   "metric_direction": "higher_is_better"
+  },
+  "NDCG@5 mean relative improvement": {
+   "rows": 2,
+   "metric_unit": "relative_percent",
+   "metric_group": "retrieval ranking",
+   "metric_direction": "higher_is_better"
+  },
+  "NDCG@5 relative improvement": {
+   "rows": 118,
+   "metric_unit": "relative_percent",
+   "metric_group": "retrieval ranking",
+   "metric_direction": "higher_is_better"
+  },
+  "NDCG@6": {
+   "rows": 24,
+   "metric_unit": "score",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Natural generated English questions": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Natural question proportion": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "No-search rate": {
+   "rows": 8,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval behavior",
+   "metric_direction": ""
+  },
+  "Noisy or ambiguous examples": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Noisy or ambiguous examples count": {
+   "rows": 1,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Non-checkpoint storage": {
+   "rows": 2,
+   "metric_unit": "MiB",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Number of examples": {
+   "rows": 5,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "OAGC": {
+   "rows": 47,
+   "metric_unit": "ratio",
+   "metric_group": "training stability",
+   "metric_direction": "lower_is_better"
+  },
+  "Organizations": {
+   "rows": 1,
+   "metric_unit": "organizations",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Original answers": {
+   "rows": 5,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Output to input unit-price ratio": {
+   "rows": 1,
+   "metric_unit": "ratio",
+   "metric_group": "cost assumptions",
+   "metric_direction": ""
+  },
+  "Output tokens": {
+   "rows": 12,
+   "metric_unit": "tokens",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Output tokens relative change": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Over-filter rate": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "routing risk",
+   "metric_direction": "lower_is_better"
+  },
+  "Over-refusal rate": {
+   "rows": 13,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "lower_is_better"
+  },
+  "Over-refusal rate all-model value": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "lower_is_better"
+  },
+  "Over-refusal rate maximum": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "lower_is_better"
+  },
+  "Over-refusal rate minimum": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "lower_is_better"
+  },
+  "P90 time": {
+   "rows": 12,
+   "metric_unit": "ms",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "P90 time relative change": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "P95 time": {
+   "rows": 12,
+   "metric_unit": "ms",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "P95 time relative change": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "PPLavg": {
+   "rows": 20,
+   "metric_unit": "perplexity",
+   "metric_group": "text quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Page-evidence Recall": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Page-evidence Recall gain over Vector Retrieval": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Paired t-test p": {
+   "rows": 17,
+   "metric_unit": "probability",
+   "metric_group": "statistical significance",
+   "metric_direction": ""
+  },
+  "Pairs per retained question": {
+   "rows": 1,
+   "metric_unit": "ratio",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Pairwise Loss count": {
+   "rows": 12,
+   "metric_unit": "examples",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Pairwise Tie count": {
+   "rows": 12,
+   "metric_unit": "examples",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Pairwise Win count": {
+   "rows": 12,
+   "metric_unit": "examples",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Pairwise win rate": {
+   "rows": 5,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Paraphrasing WRR drop lower": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Paraphrasing WRR drop upper": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Pearson correlation with VDD": {
+   "rows": 12,
+   "metric_unit": "correlation",
+   "metric_group": "training stability",
+   "metric_direction": ""
+  },
+  "Positive samples": {
+   "rows": 1,
+   "metric_unit": "samples",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Precision": {
+   "rows": 17,
+   "metric_unit": "fraction",
+   "metric_group": "judge reliability",
+   "metric_direction": "higher_is_better"
+  },
+  "Precision@3": {
+   "rows": 35,
+   "metric_unit": "score",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Precision@3 relative improvement": {
+   "rows": 5,
+   "metric_unit": "%",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Precision@6": {
+   "rows": 26,
+   "metric_unit": "score",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Precision@6 relative improvement": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Predicted route proportion": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "routing distribution",
+   "metric_direction": ""
+  },
+  "Preference accuracy": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "training optimization",
+   "metric_direction": "higher_is_better"
+  },
+  "Preference margin": {
+   "rows": 4,
+   "metric_unit": "score",
+   "metric_group": "training optimization",
+   "metric_direction": "higher_is_better"
+  },
+  "Preference pair distribution": {
+   "rows": 25,
+   "metric_unit": "%",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Preference pairs": {
+   "rows": 2,
+   "metric_unit": "pairs",
+   "metric_group": "training resources",
+   "metric_direction": ""
+  },
+  "Prefix construction time": {
+   "rows": 4,
+   "metric_unit": "ms",
+   "metric_group": "offline cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Processed files": {
+   "rows": 10,
+   "metric_unit": "files",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": ""
+  },
+  "Processing time": {
+   "rows": 12,
+   "metric_unit": "ms",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Processing time relative change": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "ingestion efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Professional quality assurance cost per language": {
+   "rows": 1,
+   "metric_unit": "USD_per_language",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Professional translation cost per language": {
+   "rows": 1,
+   "metric_unit": "USD_per_language",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Prose answer accuracy, ambiguous scope": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Pseudo QA pairs generated": {
+   "rows": 1,
+   "metric_unit": "QA pairs",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "QA accuracy": {
+   "rows": 173,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "QA accuracy single GPT-4 judge": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "QA pairs": {
+   "rows": 10,
+   "metric_unit": "questions",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Quality-limited estimated upper bound": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "dataset quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Queries": {
+   "rows": 38,
+   "metric_unit": "queries",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Queries required for stable detection": {
+   "rows": 5,
+   "metric_unit": "queries",
+   "metric_group": "detection efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Queries with sufficient retrieval information": {
+   "rows": 9,
+   "metric_unit": "%",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Query proportion": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Query to retrieved context L2": {
+   "rows": 24,
+   "metric_unit": "L2 distance",
+   "metric_group": "retrieval analysis",
+   "metric_direction": "lower_is_better"
+  },
+  "Question count by type": {
+   "rows": 16,
+   "metric_unit": "questions",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Question proportion by type": {
+   "rows": 16,
+   "metric_unit": "%",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Questions answerable without retrieval": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "QwQ GOOD labels": {
+   "rows": 1,
+   "metric_unit": "steps",
+   "metric_group": "label validation",
+   "metric_direction": ""
+  },
+  "R squared": {
+   "rows": 6,
+   "metric_unit": "score",
+   "metric_group": "scaling fit",
+   "metric_direction": ""
+  },
+  "ROC-AUC": {
+   "rows": 9,
+   "metric_unit": "score",
+   "metric_group": "evaluator quality",
+   "metric_direction": "higher_is_better"
+  },
+  "ROUGE-1": {
+   "rows": 41,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "ROUGE-1 improvement": {
+   "rows": 5,
+   "metric_unit": "percentage points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "ROUGE-2": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "ROUGE-L": {
+   "rows": 14,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "ROUGE-L F1": {
+   "rows": 9,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "RSavg": {
+   "rows": 17,
+   "metric_unit": "score [-10,10]",
+   "metric_group": "text quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Random-chance identification rate": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Raw English-English generated QA pairs": {
+   "rows": 1,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Raw generated pairs": {
+   "rows": 4,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Reason-step audit share": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "label validation",
+   "metric_direction": ""
+  },
+  "Recall": {
+   "rows": 27,
+   "metric_unit": "fraction",
+   "metric_group": "routing classification",
+   "metric_direction": "higher_is_better"
+  },
+  "Recall@3": {
+   "rows": 24,
+   "metric_unit": "score",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Recall@6": {
+   "rows": 26,
+   "metric_unit": "score",
+   "metric_group": "retrieval quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Recovered subset share at depth1": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Refusal precision": {
+   "rows": 12,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "higher_is_better"
+  },
+  "Refusal recall": {
+   "rows": 12,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "higher_is_better"
+  },
+  "Relative QA accuracy decrease versus English": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Relative latency overhead": {
+   "rows": 10,
+   "metric_unit": "%",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Relative reduction in GOOD calls by Claude": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "label validation",
+   "metric_direction": ""
+  },
+  "Relative time per query": {
+   "rows": 162,
+   "metric_unit": "relative_to_single_step",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Relative training-margin growth": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "training optimization",
+   "metric_direction": "higher_is_better"
+  },
+  "Relevant samples proportion": {
+   "rows": 60,
+   "metric_unit": "fraction",
+   "metric_group": "confidence calibration",
+   "metric_direction": "higher_is_better"
+  },
+  "Reported Step": {
+   "rows": 6,
+   "metric_unit": "reported_steps",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Reported formatted triplets": {
+   "rows": 1,
+   "metric_unit": "triplets",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Reported training instances": {
+   "rows": 3,
+   "metric_unit": "instances",
+   "metric_group": "training resources",
+   "metric_direction": ""
+  },
+  "Reranking latency reduction": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "efficiency",
+   "metric_direction": "higher_is_better"
+  },
+  "Reranking share oftotal latency": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Retained source news articles": {
+   "rows": 5,
+   "metric_unit": "articles",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Retrieval Relevance": {
+   "rows": 1,
+   "metric_unit": "score",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Retrieval recall": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "retrieval effectiveness",
+   "metric_direction": "higher_is_better"
+  },
+  "Retrieval recall absolute gain from 5 to 50 pages": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "retrieval effectiveness",
+   "metric_direction": "higher_is_better"
+  },
+  "Retrieval-and-generation steps per query": {
+   "rows": 147,
+   "metric_unit": "steps_per_query",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Returned affiliated institutions": {
+   "rows": 1,
+   "metric_unit": "nodes",
+   "metric_group": "retrieval output",
+   "metric_direction": ""
+  },
+  "Returned countries": {
+   "rows": 1,
+   "metric_unit": "nodes",
+   "metric_group": "retrieval output",
+   "metric_direction": ""
+  },
+  "Returned published documents": {
+   "rows": 1,
+   "metric_unit": "nodes",
+   "metric_group": "retrieval output",
+   "metric_direction": ""
+  },
+  "Revenue Band Coverage": {
+   "rows": 16,
+   "metric_unit": "%",
+   "metric_group": "representation coverage",
+   "metric_direction": "higher_is_better"
+  },
+  "Revenue Band Coverage relative change": {
+   "rows": 9,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Router forward-pass latency upper bound": {
+   "rows": 1,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Router inference latency": {
+   "rows": 2,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "Rule-based accuracy": {
+   "rows": 50,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Rule-based accuracy gain": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "SFT wall-clock duration": {
+   "rows": 1,
+   "metric_unit": "hours",
+   "metric_group": "training resources",
+   "metric_direction": "lower_is_better"
+  },
+  "Same-action pair share": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Sample percentage distribution over confidence bins": {
+   "rows": 6,
+   "metric_unit": "",
+   "metric_group": "confidence calibration",
+   "metric_direction": ""
+  },
+  "Sampled peak GPU memory": {
+   "rows": 2,
+   "metric_unit": "GiB",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Samples": {
+   "rows": 6,
+   "metric_unit": "samples",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Samples per source dataset": {
+   "rows": 1,
+   "metric_unit": "samples",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Search budget saturation": {
+   "rows": 8,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval behavior",
+   "metric_direction": "lower_is_better"
+  },
+  "Seed SME core documents": {
+   "rows": 1,
+   "metric_unit": "documents",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Selected topic clusters": {
+   "rows": 1,
+   "metric_unit": "clusters",
+   "metric_group": "construction statistics",
+   "metric_direction": ""
+  },
+  "Sentiment-Intensity sigma": {
+   "rows": 38,
+   "metric_unit": "sentiment_score",
+   "metric_group": "retrieval diversity",
+   "metric_direction": "higher_is_better"
+  },
+  "Sentiment-Intensity sigma absolute gain": {
+   "rows": 3,
+   "metric_unit": "sentiment_score",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Sentiment-Intensity sigma relative change": {
+   "rows": 24,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Set questions": {
+   "rows": 5,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "Settings with highest compared mean EM": {
+   "rows": 2,
+   "metric_unit": "settings",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Settings with mean EM higher than PPO": {
+   "rows": 2,
+   "metric_unit": "settings",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Significance p upper bound": {
+   "rows": 9,
+   "metric_unit": "probability",
+   "metric_group": "statistical significance",
+   "metric_direction": ""
+  },
+  "Source datasets": {
+   "rows": 1,
+   "metric_unit": "datasets",
+   "metric_group": "dataset statistics",
+   "metric_direction": ""
+  },
+  "Source-contact reduction": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "communication",
+   "metric_direction": "higher_is_better"
+  },
+  "Sources contacted": {
+   "rows": 12,
+   "metric_unit": "sources_per_query",
+   "metric_group": "communication",
+   "metric_direction": "lower_is_better"
+  },
+  "Spearman correlation with human judgments": {
+   "rows": 1,
+   "metric_unit": "correlation",
+   "metric_group": "evaluator quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Stale citation rate": {
+   "rows": 124,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Stale citation rate 95% CI lower": {
+   "rows": 16,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Stale citation rate 95% CI upper": {
+   "rows": 16,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Stale citation rate all-model value": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Stale citation rate maximum": {
+   "rows": 6,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Stale citation rate minimum": {
+   "rows": 6,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Stale citation rate paired McNemar p": {
+   "rows": 8,
+   "metric_unit": "probability",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Stale citation rate reduction vs Naive": {
+   "rows": 8,
+   "metric_unit": "percentage_points",
+   "metric_group": "governance failure",
+   "metric_direction": "higher_is_better"
+  },
+  "Stale-boundary risk": {
+   "rows": 12,
+   "metric_unit": "%",
+   "metric_group": "routing risk",
+   "metric_direction": "lower_is_better"
+  },
+  "Step count": {
+   "rows": 4,
+   "metric_unit": "steps",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Step distribution": {
+   "rows": 6,
+   "metric_unit": "%",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Steps per trajectory": {
+   "rows": 1,
+   "metric_unit": "ratio",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Supersession risk": {
+   "rows": 22,
+   "metric_unit": "%",
+   "metric_group": "routing risk",
+   "metric_direction": "lower_is_better"
+  },
+  "Synthetic data inference passes": {
+   "rows": 1,
+   "metric_unit": "passes",
+   "metric_group": "training resources",
+   "metric_direction": "lower_is_better"
+  },
+  "Synthetic data wall-clock duration upper bound": {
+   "rows": 1,
+   "metric_unit": "hours",
+   "metric_group": "training resources",
+   "metric_direction": "lower_is_better"
+  },
+  "TN": {
+   "rows": 12,
+   "metric_unit": "responses",
+   "metric_group": "judge reliability",
+   "metric_direction": ""
+  },
+  "TP": {
+   "rows": 12,
+   "metric_unit": "responses",
+   "metric_group": "judge reliability",
+   "metric_direction": ""
+  },
+  "Tenure Coverage": {
+   "rows": 16,
+   "metric_unit": "%",
+   "metric_group": "representation coverage",
+   "metric_direction": "higher_is_better"
+  },
+  "Tenure Coverage relative change": {
+   "rows": 9,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "Text filtering rate": {
+   "rows": 6,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Total source contacts": {
+   "rows": 2,
+   "metric_unit": "contacts",
+   "metric_group": "communication",
+   "metric_direction": "lower_is_better"
+  },
+  "Total training time": {
+   "rows": 4,
+   "metric_unit": "ms",
+   "metric_group": "cost",
+   "metric_direction": "lower_is_better"
+  },
+  "Training examples": {
+   "rows": 4,
+   "metric_unit": "examples",
+   "metric_group": "training data",
+   "metric_direction": ""
+  },
+  "Unfiltered / filtered pair count ratio": {
+   "rows": 1,
+   "metric_unit": "ratio",
+   "metric_group": "supervision distribution",
+   "metric_direction": ""
+  },
+  "Unrelated filtering maximum": {
+   "rows": 1,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Unsupported answer count": {
+   "rows": 3,
+   "metric_unit": "responses",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Unsupported answer rate": {
+   "rows": 124,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Unsupported answer rate 95% CI lower": {
+   "rows": 20,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Unsupported answer rate 95% CI upper": {
+   "rows": 20,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Unsupported answer rate all-model value": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Unsupported answer rate maximum": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Unsupported answer rate minimum": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "lower_is_better"
+  },
+  "Unsupported answer rate paired McNemar p": {
+   "rows": 10,
+   "metric_unit": "probability",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Unsupported answer rate reduction vs Naive": {
+   "rows": 10,
+   "metric_unit": "percentage_points",
+   "metric_group": "governance failure",
+   "metric_direction": "higher_is_better"
+  },
+  "Unsupported-answer McNemar p upper bound": {
+   "rows": 1,
+   "metric_unit": "probability",
+   "metric_group": "governance failure",
+   "metric_direction": ""
+  },
+  "Unverified response rate": {
+   "rows": 24,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "User annotated proportion": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "illustrative UI",
+   "metric_direction": ""
+  },
+  "Valid answer rate": {
+   "rows": 12,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "higher_is_better"
+  },
+  "Valid answer rate all-model value": {
+   "rows": 4,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "higher_is_better"
+  },
+  "Valid answer rate maximum": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "higher_is_better"
+  },
+  "Valid answer rate minimum": {
+   "rows": 2,
+   "metric_unit": "%",
+   "metric_group": "utility",
+   "metric_direction": "higher_is_better"
+  },
+  "Valid audited labels": {
+   "rows": 1,
+   "metric_unit": "steps",
+   "metric_group": "label validation",
+   "metric_direction": ""
+  },
+  "Valid response rate": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "governance failure",
+   "metric_direction": "higher_is_better"
+  },
+  "Vendi score": {
+   "rows": 32,
+   "metric_unit": "score",
+   "metric_group": "data diversity",
+   "metric_direction": "higher_is_better"
+  },
+  "Verified English QA pairs": {
+   "rows": 1,
+   "metric_unit": "examples",
+   "metric_group": "dataset quality",
+   "metric_direction": ""
+  },
+  "W1 relative change": {
+   "rows": 4,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "lower_is_better"
+  },
+  "W1 relative reduction range endpoint": {
+   "rows": 6,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "W1 sentiment distribution distance": {
+   "rows": 8,
+   "metric_unit": "sentiment_score",
+   "metric_group": "distribution fidelity",
+   "metric_direction": "lower_is_better"
+  },
+  "WDPV": {
+   "rows": 16,
+   "metric_unit": "fraction",
+   "metric_group": "infused knowledge QA",
+   "metric_direction": "higher_is_better"
+  },
+  "WRR": {
+   "rows": 153,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "WRR range lower": {
+   "rows": 5,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "WRR range upper": {
+   "rows": 5,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "WRR shaded uncertainty envelope": {
+   "rows": 2,
+   "metric_unit": "",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "WTRR": {
+   "rows": 31,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "Watermark filtering rate": {
+   "rows": 10,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "lower_is_better"
+  },
+  "Watermark recovery across evaluated datasets": {
+   "rows": 1,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": ""
+  },
+  "Watermark text generation time": {
+   "rows": 4,
+   "metric_unit": "ms",
+   "metric_group": "offline cost",
+   "metric_direction": "lower_is_better"
+  },
+  "accuracy gain from generator scaling": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "anchor count": {
+   "rows": 1,
+   "metric_unit": "count",
+   "metric_group": "case diagnostics",
+   "metric_direction": ""
+  },
+  "answer correctness": {
+   "rows": 29,
+   "metric_unit": "score",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "answer correctness improvement attributed to keyword detection": {
+   "rows": 1,
+   "metric_unit": "reported_%",
+   "metric_group": "comparative claim",
+   "metric_direction": "higher_is_better"
+  },
+  "answer relevance": {
+   "rows": 22,
+   "metric_unit": "score",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "answer similarity": {
+   "rows": 26,
+   "metric_unit": "score",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "benchmarks addressing opinion synthesis": {
+   "rows": 3,
+   "metric_unit": "benchmarks",
+   "metric_group": "benchmark audit",
+   "metric_direction": ""
+  },
+  "bootstrap Elo": {
+   "rows": 49,
+   "metric_unit": "rating_points",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "dense retriever size": {
+   "rows": 17,
+   "metric_unit": "MB",
+   "metric_group": "resources",
+   "metric_direction": ""
+  },
+  "entity-matched demographic coverage absolute gain range endpoint": {
+   "rows": 2,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "entity-matched retrieved document count relative change": {
+   "rows": 1,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "entity-matched retrieved documents": {
+   "rows": 2,
+   "metric_unit": "document_slots",
+   "metric_group": "retrieval precision",
+   "metric_direction": "higher_is_better"
+  },
+  "estimated joint retrieval failure probability": {
+   "rows": 3,
+   "metric_unit": "fraction",
+   "metric_group": "retrieval",
+   "metric_direction": "lower_is_better"
+  },
+  "estimated total training and generation FLOPs": {
+   "rows": 1,
+   "metric_unit": "FLOPs",
+   "metric_group": "resources",
+   "metric_direction": "lower_is_better"
+  },
+  "estimated training and generation GPU time": {
+   "rows": 1,
+   "metric_unit": "GPU_seconds",
+   "metric_group": "resources",
+   "metric_direction": "lower_is_better"
+  },
+  "failed test queries": {
+   "rows": 12,
+   "metric_unit": "queries",
+   "metric_group": "retrieval",
+   "metric_direction": "lower_is_better"
+  },
+  "failure count": {
+   "rows": 6,
+   "metric_unit": "cases",
+   "metric_group": "failure analysis",
+   "metric_direction": ""
+  },
+  "full perspective coverage": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "cited retrieval evaluation",
+   "metric_direction": "higher_is_better"
+  },
+  "gradient cosine similarity": {
+   "rows": 16,
+   "metric_unit": "score",
+   "metric_group": "gradient similarity",
+   "metric_direction": ""
+  },
+  "gradient cosine similarity bound": {
+   "rows": 3,
+   "metric_unit": "score",
+   "metric_group": "gradient similarity",
+   "metric_direction": ""
+  },
+  "human preference for enriched responses": {
+   "rows": 7,
+   "metric_unit": "%",
+   "metric_group": "human preference",
+   "metric_direction": "higher_is_better"
+  },
+  "human-judge agreement": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "cited component/context result",
+   "metric_direction": "higher_is_better"
+  },
+  "knowledge-base document count": {
+   "rows": 12,
+   "metric_unit": "documents",
+   "metric_group": "resources",
+   "metric_direction": ""
+  },
+  "log-linear intercept": {
+   "rows": 6,
+   "metric_unit": "%",
+   "metric_group": "scaling fit",
+   "metric_direction": ""
+  },
+  "log-linear slope": {
+   "rows": 6,
+   "metric_unit": "percentage_points_per_log_million_tokens",
+   "metric_group": "scaling fit",
+   "metric_direction": ""
+  },
+  "mean accuracy gain over Vanilla RAG": {
+   "rows": 1,
+   "metric_unit": "percentage_points",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "mean relative accuracy gain over RAG": {
+   "rows": 6,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "minimum EM bound across sweeps": {
+   "rows": 1,
+   "metric_unit": "fraction",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "nVDD": {
+   "rows": 56,
+   "metric_unit": "ratio",
+   "metric_group": "training stability",
+   "metric_direction": "lower_is_better"
+  },
+  "p-value bound": {
+   "rows": 31,
+   "metric_unit": "probability",
+   "metric_group": "statistical significance",
+   "metric_direction": ""
+  },
+  "pairwise win fraction": {
+   "rows": 20,
+   "metric_unit": "%",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "perspective-aware retrieval benchmarks": {
+   "rows": 1,
+   "metric_unit": "benchmarks",
+   "metric_group": "benchmark audit",
+   "metric_direction": ""
+  },
+  "positive label prevalence": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "annotation agreement",
+   "metric_direction": ""
+  },
+  "raw annotator agreement": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "annotation agreement",
+   "metric_direction": "higher_is_better"
+  },
+  "reference-based judge score": {
+   "rows": 15,
+   "metric_unit": "score_1_to_5",
+   "metric_group": "answer quality",
+   "metric_direction": "higher_is_better"
+  },
+  "relative accuracy gain over RAG": {
+   "rows": 6,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "relative accuracy gap below RAG": {
+   "rows": 1,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "lower_is_better"
+  },
+  "relevance/correctness improvement lower bound": {
+   "rows": 5,
+   "metric_unit": "reported_%",
+   "metric_group": "comparative claim",
+   "metric_direction": "higher_is_better"
+  },
+  "reported Raw relative excess W1 range endpoint": {
+   "rows": 2,
+   "metric_unit": "relative_percent",
+   "metric_group": "comparative change",
+   "metric_direction": "lower_is_better"
+  },
+  "reported average accuracy gain": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "reports processed": {
+   "rows": 1,
+   "metric_unit": "reports",
+   "metric_group": "cited component/context result",
+   "metric_direction": ""
+  },
+  "retained node count": {
+   "rows": 1,
+   "metric_unit": "count",
+   "metric_group": "case diagnostics",
+   "metric_direction": ""
+  },
+  "retrieval failure rate": {
+   "rows": 12,
+   "metric_unit": "%",
+   "metric_group": "retrieval",
+   "metric_direction": "lower_is_better"
+  },
+  "retrieval latency": {
+   "rows": 64,
+   "metric_unit": "ms",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "retriever impact": {
+   "rows": 28,
+   "metric_unit": "%",
+   "metric_group": "retrieval",
+   "metric_direction": "higher_is_better"
+  },
+  "retriever impact range endpoint": {
+   "rows": 6,
+   "metric_unit": "%",
+   "metric_group": "retrieval",
+   "metric_direction": "higher_is_better"
+  },
+  "semantic node count": {
+   "rows": 2,
+   "metric_unit": "count",
+   "metric_group": "case diagnostics",
+   "metric_direction": ""
+  },
+  "settings beating RAG": {
+   "rows": 3,
+   "metric_unit": "settings",
+   "metric_group": "comparative change",
+   "metric_direction": "higher_is_better"
+  },
+  "share of incorrect predictions": {
+   "rows": 8,
+   "metric_unit": "%",
+   "metric_group": "failure analysis",
+   "metric_direction": ""
+  },
+  "structural edge count": {
+   "rows": 1,
+   "metric_unit": "count",
+   "metric_group": "case diagnostics",
+   "metric_direction": ""
+  },
+  "supporting-stance retrieval bias": {
+   "rows": 1,
+   "metric_unit": "%",
+   "metric_group": "cited retrieval evaluation",
+   "metric_direction": ""
+  },
+  "synthetic/original token ratio at RAG crossover": {
+   "rows": 6,
+   "metric_unit": "ratio",
+   "metric_group": "scaling fit",
+   "metric_direction": "lower_is_better"
+  },
+  "token cost": {
+   "rows": 20,
+   "metric_unit": "tokens",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "total inference cost": {
+   "rows": 1,
+   "metric_unit": "USD",
+   "metric_group": "resources",
+   "metric_direction": "lower_is_better"
+  },
+  "total token cost ratio to KnowTrace": {
+   "rows": 3,
+   "metric_unit": "%",
+   "metric_group": "efficiency",
+   "metric_direction": "lower_is_better"
+  },
+  "unique 4-gram ratio": {
+   "rows": 48,
+   "metric_unit": "fraction",
+   "metric_group": "data diversity",
+   "metric_direction": "higher_is_better"
+  }
+ },
+ "normalized": {
+  "ate": "ATE",
+  "auc": "AUC",
+  "aus": "AUS",
+  "absolutef1differencefrommvupperbound": "Absolute F1 difference from MV upper bound",
+  "abstentionrate": "Abstention rate",
+  "accessrisk": "Access risk",
+  "accessdeniedsupersederretainedrate": "Access-denied superseder retained rate",
+  "accuracy": "Accuracy",
+  "accuracyamongattemptedquestions": "Accuracy among attempted questions",
+  "accuracygainovervanillarag": "Accuracy gain over Vanilla RAG",
+  "accuracyimprovementovergpt4": "Accuracy improvement over GPT-4",
+  "activationstrength": "Activation strength",
+  "aggregatecomplexquestionaccuracy": "Aggregate complex-question accuracy",
+  "aggregationquestions": "Aggregation questions",
+  "agreement": "Agreement",
+  "annotationgroupcount": "Annotation group count",
+  "annotationgroupproportion": "Annotation group proportion",
+  "answerf1": "Answer F1",
+  "answerf1sem": "Answer F1 SEM",
+  "answerf1gapgoldminusfullknowledge": "Answer F1 gap gold minus full knowledge",
+  "answeraccuracy": "Answer accuracy",
+  "answerprecision": "Answer precision",
+  "answerrecall": "Answer recall",
+  "answerstringretrievalmissproxy": "Answer-string retrieval-miss proxy",
+  "answerablegeneratedenglishquestions": "Answerable generated English questions",
+  "approximatefulldecompositiontime": "Approximate full decomposition time",
+  "approximatetotalapiexpenditure": "Approximate total API expenditure",
+  "approximatetrainingtimeperrun": "Approximate training time per run",
+  "approximatevisualretrievaldurationdescribedinprose": "Approximate visual retrieval duration described in prose",
+  "assumedunitprice": "Assumed unit price",
+  "attemptrate": "Attempt rate",
+  "averagemodulelatency": "Average module latency",
+  "averagetrainingsteptime": "Average training step time",
+  "averagetrainingsteptimerelativeincrease": "Average training step time relative increase",
+  "avoidedanswer": "Avoided Answer",
+  "badcount": "BAD count",
+  "badrate": "BAD rate",
+  "bleu1": "BLEU-1",
+  "bleu1improvement": "BLEU-1 improvement",
+  "bleu2": "BLEU-2",
+  "bleu3": "BLEU-3",
+  "bleu4": "BLEU-4",
+  "basenodecategories": "Base node categories",
+  "baselineerrorsattributedtomissedevidence": "Baseline errors attributed to missed evidence",
+  "benchmarkswithbestfactualityincludingties": "Benchmarks with best factuality including ties",
+  "breakdowncount": "Breakdown count",
+  "businessimpactsigma": "Business Impact sigma",
+  "businessimpactsigmarelativechange": "Business Impact sigma relative change",
+  "cdpa": "CDPA",
+  "cira": "CIRA",
+  "crhallucinatedminusfactual": "CR hallucinated minus factual",
+  "ctipointsextracted": "CTI points extracted",
+  "chunkingcost": "Chunking cost",
+  "chunkingcostrelativechange": "Chunking cost relative change",
+  "chunkingcostsavings": "Chunking cost savings",
+  "classificationaccuracy": "Classification accuracy",
+  "classifieraccuracy": "Classifier accuracy",
+  "claudegoodlabels": "Claude GOOD labels",
+  "cohenkappa": "Cohen kappa",
+  "cohenkappajudgehumanagreement": "Cohen kappa judge-human agreement",
+  "cohenkappamaximum": "Cohen kappa maximum",
+  "cohenkappaminimum": "Cohen kappa minimum",
+  "cohenkappaprofessionalannotationagreement": "Cohen kappa professional annotation agreement",
+  "cohen'skappa": "Cohen's kappa",
+  "collectedbasedocuments": "Collected base documents",
+  "combinedrewardmargin>=.20share": "Combined reward margin >=.20 share",
+  "communicationvolume": "Communication volume",
+  "communicationvolumereduction": "Communication volume reduction",
+  "comparisonquestions": "Comparison questions",
+  "conr": "ConR",
+  "conrimprovementoverparammute": "ConR improvement over ParamMute",
+  "conditionalpredictedclassproportion": "Conditional predicted class proportion",
+  "contentlength": "Content length",
+  "contextrecall": "Context recall",
+  "contextrecallimprovement": "Context recall improvement",
+  "contradictorysamples": "Contradictory samples",
+  "corpuspercentageintopiccluster": "Corpus percentage in topiccluster",
+  "corpusrelevancerate": "Corpus relevance rate",
+  "correctgeneratedanswersincludingcorrections": "Correct generated answers including corrections",
+  "correcthumananswersmisjudged": "Correct human answers misjudged",
+  "correcthumananswersmisjudgedcount": "Correct human answers misjudged count",
+  "correcttrajectories": "Correct trajectories",
+  "correctwatermarkidentificationrate": "Correct watermark identification rate",
+  "cumulativef1": "Cumulative F1",
+  "cumulativedatacoverage": "Cumulative data coverage",
+  "cumulativeratiocr": "Cumulative ratio CR",
+  "dpoloss": "DPO loss",
+  "deltaconrdrop": "Delta ConR drop",
+  "deltaem": "Delta EM",
+  "deltaemwithoutminuswithprm": "Delta EM without minus with PRM",
+  "deltaf1": "Delta F1",
+  "divergencestrength": "Divergence strength",
+  "documents": "Documents",
+  "documentsintopiccluster": "Documents in topiccluster",
+  "documentswithfulltext": "Documents with full text",
+  "em": "EM",
+  "emdecrease": "EM decrease",
+  "emdeficitversusstepsearch": "EM deficit versus StepSearch",
+  "emdifferencevsedp": "EM difference vs EDP",
+  "emgainversusppo": "EM gain versus PPO",
+  "emimprovement": "EM improvement",
+  "emimprovementovergraphrag*": "EM improvement over GraphRAG*",
+  "emimprovementoverircot": "EM improvement over IRCoT",
+  "emimprovementoverknowtrace": "EM improvement over KnowTrace",
+  "emsamplesd": "EM sample SD",
+  "elo": "Elo",
+  "elolowerbound": "Elo lower bound",
+  "elorangeboundforgeminiandmixtral": "Elo range bound for GEMINI and MIXTRAL",
+  "emotionalmarkers": "Emotional Markers",
+  "emotionalmarkersrelativechange": "Emotional Markers relative change",
+  "emptycontextrate": "Empty-context rate",
+  "englishresponseinsteadofquestionlanguage": "English response instead of question language",
+  "entitymatchrate": "Entity Match Rate",
+  "entitymatchrateabsolutegain": "Entity Match Rate absolute gain",
+  "entitymatchraterelativechange": "Entity Match Rate relative change",
+  "errorsattributedtoqueryambiguity": "Errors attributed to query ambiguity",
+  "estimatedannotationproportion": "Estimated annotation proportion",
+  "estimatedtotalcomputebudget": "Estimated total compute budget",
+  "evaluatoraccuracy": "Evaluator accuracy",
+  "evidencetypecoverage": "Evidence Type Coverage",
+  "evidencetypecoveragerelativechange": "Evidence Type Coverage relative change",
+  "exampletextperplexity": "Example text perplexity",
+  "executedsearches": "Executed searches",
+  "explicitlysupersededevidenceretainedrate": "Explicitly superseded evidence retained rate",
+  "f1": "F1",
+  "f1improvement": "F1 improvement",
+  "f1improvementovermv": "F1 improvement over MV",
+  "f1improvementoversearchr1": "F1 improvement over Search-R1",
+  "fhr": "FHR",
+  "fn": "FN",
+  "fp": "FP",
+  "factualinconsistencydetectionprecision": "Factual inconsistency detection precision",
+  "factuality": "Factuality",
+  "factualityabsolutegain": "Factuality absolute gain",
+  "factualitygainoversotarangelower": "Factuality gain over SOTA range lower",
+  "factualitygainoversotarangeupper": "Factuality gain over SOTA range upper",
+  "failurefreerate": "Failure-free rate",
+  "filteringratestrictupperbound": "Filtering rate strict upper bound",
+  "finalcorpusdocuments": "Final corpus documents",
+  "finallabelaccuracyimprovement": "Final label accuracy improvement",
+  "flawedbutsuccessfulchosentrajectories": "Flawed-but-successful chosen trajectories",
+  "fleisskappa": "Fleiss kappa",
+  "fractionofindividualsentencesyieldingf1=0": "Fraction of individual sentences yielding F1=0",
+  "fractionofindividualsentencesyieldingcorrectanswer": "Fraction of individual sentences yielding correct answer",
+  "fractionofindividualsentenceoutputsinf1bin": "Fraction of individual-sentence outputs in F1 bin",
+  "fusiontimeminustextrerankingtime": "Fusion time minus text reranking time",
+  "goodcount": "GOOD count",
+  "goodrate": "GOOD rate",
+  "gpt4.1apiexpense": "GPT-4.1 API expense",
+  "generatorreplacementllmscoregain": "Generator replacement LLM Score gain",
+  "groundedincontext": "Grounded in Context",
+  "gwetac1": "Gwet AC1",
+  "hallucinatedsamples": "Hallucinated samples",
+  "hallucinationrate": "Hallucination rate",
+  "highqualityverifiedqapairs": "High-quality verified QA pairs",
+  "humancorrectness": "Human Correctness",
+  "humanfluency": "Human Fluency",
+  "humanmean": "Human Mean",
+  "humanrationality": "Human Rationality",
+  "humanaccuracy": "Human accuracy",
+  "humanaccuracybyllmpanel": "Human accuracy by LLM panel",
+  "humanqwen332bjudgeagreement": "Human-Qwen3-32B judge agreement",
+  "humancorrectedanswers": "Human-corrected answers",
+  "ifbc": "IFBC",
+  "ifbcdifferencep": "IFBC difference p",
+  "ifbcreductionversusoutcomeonly": "IFBC reduction versus outcome-only",
+  "incorrecthumananswerswithvalidreference": "Incorrect human answers with valid reference",
+  "incorrecthumananswerswithvalidreferencecount": "Incorrect human answers with valid reference count",
+  "indexedtextchunks": "Indexed text chunks",
+  "inputprompttokencountratiomirage/mmlu": "Input prompt token count ratio MIRAGE/MMLU",
+  "inputtokens": "Input tokens",
+  "inputtokensrelativechange": "Input tokens relative change",
+  "insightinteractions": "Insight interactions",
+  "inspectedpoolssatisfyingconstructioncriteria": "Inspected pools satisfying construction criteria",
+  "interactions": "Interactions",
+  "kbexpansionallcaseswrr": "KB expansion all-cases WRR",
+  "kcr": "KCR",
+  "knowledgef1": "Knowledge F1",
+  "knowledgegraphedgerelationships": "Knowledge graph edge relationships",
+  "knowledgegraphnodes": "Knowledge graph nodes",
+  "knowledgeprecision": "Knowledge precision",
+  "knowledgerecall": "Knowledge recall",
+  "llmscore": "LLM Score",
+  "llmscoregain": "LLM Score gain",
+  "llmaccuracy": "LLM accuracy",
+  "llmaccuracygain": "LLM accuracy gain",
+  "labelaccuracy": "Label accuracy",
+  "latency": "Latency",
+  "latencydocumentselection": "Latency Document selection",
+  "latencygeneration": "Latency Generation",
+  "latencyqueryembedding": "Latency Query embedding",
+  "latencyreranking": "Latency Reranking",
+  "latencysourceselection": "Latency Source selection",
+  "latencyincrement": "Latency increment",
+  "latencytotal": "Latency total",
+  "leakagerate": "Leakage rate",
+  "leakagerate95%cilower": "Leakage rate 95% CI lower",
+  "leakagerate95%ciupper": "Leakage rate 95% CI upper",
+  "leakagerateallmodelvalue": "Leakage rate all-model value",
+  "leakageratemaximum": "Leakage rate maximum",
+  "leakagerateminimum": "Leakage rate minimum",
+  "leakageratepairedmcnemarp": "Leakage rate paired McNemar p",
+  "leakageratereductionvsnaive": "Leakage rate reduction vs Naive",
+  "lowgroundedincontextthreshold": "Low grounded-in-context threshold",
+  "mleelo": "MLE Elo",
+  "mrr": "MRR",
+  "maintasknegativeimpact": "Main-task negative impact",
+  "matchinglabels": "Matching labels",
+  "maximumcommunicationvolumereduction": "Maximum communication-volume reduction",
+  "maximumdocumentlength": "Maximum document length",
+  "maximumendtoendlatencyreduction": "Maximum end-to-end latency reduction",
+  "maximumsourcecontactreduction": "Maximum source-contact reduction",
+  "meanf1improvementtop3versustop1": "Mean F1 improvement top3 versus top1",
+  "meancandidateknowledgesentences": "Mean candidate knowledge sentences",
+  "meaninputtokensperfile": "Mean input tokens per file",
+  "meaninputtokensperfilerelativechange": "Mean input tokens per file relative change",
+  "meanlabeledgoldknowledgesentences": "Mean labeled gold knowledge sentences",
+  "meanoutputtokensperfile": "Mean output tokens per file",
+  "meanoutputtokensperfilerelativechange": "Mean output tokens per file relative change",
+  "meanreferencespertrainingexample": "Mean references per training example",
+  "meanretainedcandidatedocuments": "Mean retained candidate documents",
+  "meanselectedknowledgesentences": "Mean selected knowledge sentences",
+  "meantimeperfile": "Mean time per file",
+  "meantimeperfilerelativechange": "Mean time per file relative change",
+  "mediandocumentlength": "Median document length",
+  "memr": "MemR",
+  "minimumdocumentlength": "Minimum document length",
+  "misalignmentratemr": "Misalignment Rate MR",
+  "missingresponserate": "Missing response rate",
+  "multihopquestions": "Multi-hop questions",
+  "ndcgupperthresholdmentionedinrelatedwork": "NDCG upper threshold mentioned in related work",
+  "ndcg@3": "NDCG@3",
+  "ndcg@5": "NDCG@5",
+  "ndcg@5approximaterelativeimprovement": "NDCG@5 approximate relative improvement",
+  "ndcg@5meanrelativeimprovement": "NDCG@5 mean relative improvement",
+  "ndcg@5relativeimprovement": "NDCG@5 relative improvement",
+  "ndcg@6": "NDCG@6",
+  "naturalgeneratedenglishquestions": "Natural generated English questions",
+  "naturalquestionproportion": "Natural question proportion",
+  "nosearchrate": "No-search rate",
+  "noisyorambiguousexamples": "Noisy or ambiguous examples",
+  "noisyorambiguousexamplescount": "Noisy or ambiguous examples count",
+  "noncheckpointstorage": "Non-checkpoint storage",
+  "numberofexamples": "Number of examples",
+  "oagc": "OAGC",
+  "organizations": "Organizations",
+  "originalanswers": "Original answers",
+  "outputtoinputunitpriceratio": "Output to input unit-price ratio",
+  "outputtokens": "Output tokens",
+  "outputtokensrelativechange": "Output tokens relative change",
+  "overfilterrate": "Over-filter rate",
+  "overrefusalrate": "Over-refusal rate",
+  "overrefusalrateallmodelvalue": "Over-refusal rate all-model value",
+  "overrefusalratemaximum": "Over-refusal rate maximum",
+  "overrefusalrateminimum": "Over-refusal rate minimum",
+  "p90time": "P90 time",
+  "p90timerelativechange": "P90 time relative change",
+  "p95time": "P95 time",
+  "p95timerelativechange": "P95 time relative change",
+  "pplavg": "PPLavg",
+  "pageevidencerecall": "Page-evidence Recall",
+  "pageevidencerecallgainovervectorretrieval": "Page-evidence Recall gain over Vector Retrieval",
+  "pairedttestp": "Paired t-test p",
+  "pairsperretainedquestion": "Pairs per retained question",
+  "pairwiselosscount": "Pairwise Loss count",
+  "pairwisetiecount": "Pairwise Tie count",
+  "pairwisewincount": "Pairwise Win count",
+  "pairwisewinrate": "Pairwise win rate",
+  "paraphrasingwrrdroplower": "Paraphrasing WRR drop lower",
+  "paraphrasingwrrdropupper": "Paraphrasing WRR drop upper",
+  "pearsoncorrelationwithvdd": "Pearson correlation with VDD",
+  "positivesamples": "Positive samples",
+  "precision": "Precision",
+  "precision@3": "Precision@3",
+  "precision@3relativeimprovement": "Precision@3 relative improvement",
+  "precision@6": "Precision@6",
+  "precision@6relativeimprovement": "Precision@6 relative improvement",
+  "predictedrouteproportion": "Predicted route proportion",
+  "preferenceaccuracy": "Preference accuracy",
+  "preferencemargin": "Preference margin",
+  "preferencepairdistribution": "Preference pair distribution",
+  "preferencepairs": "Preference pairs",
+  "prefixconstructiontime": "Prefix construction time",
+  "processedfiles": "Processed files",
+  "processingtime": "Processing time",
+  "processingtimerelativechange": "Processing time relative change",
+  "professionalqualityassurancecostperlanguage": "Professional quality assurance cost per language",
+  "professionaltranslationcostperlanguage": "Professional translation cost per language",
+  "proseansweraccuracy,ambiguousscope": "Prose answer accuracy, ambiguous scope",
+  "pseudoqapairsgenerated": "Pseudo QA pairs generated",
+  "qaaccuracy": "QA accuracy",
+  "qaaccuracysinglegpt4judge": "QA accuracy single GPT-4 judge",
+  "qapairs": "QA pairs",
+  "qualitylimitedestimatedupperbound": "Quality-limited estimated upper bound",
+  "queries": "Queries",
+  "queriesrequiredforstabledetection": "Queries required for stable detection",
+  "querieswithsufficientretrievalinformation": "Queries with sufficient retrieval information",
+  "queryproportion": "Query proportion",
+  "querytoretrievedcontextl2": "Query to retrieved context L2",
+  "questioncountbytype": "Question count by type",
+  "questionproportionbytype": "Question proportion by type",
+  "questionsanswerablewithoutretrieval": "Questions answerable without retrieval",
+  "qwqgoodlabels": "QwQ GOOD labels",
+  "rsquared": "R squared",
+  "rocauc": "ROC-AUC",
+  "rouge1": "ROUGE-1",
+  "rouge1improvement": "ROUGE-1 improvement",
+  "rouge2": "ROUGE-2",
+  "rougel": "ROUGE-L",
+  "rougelf1": "ROUGE-L F1",
+  "rsavg": "RSavg",
+  "randomchanceidentificationrate": "Random-chance identification rate",
+  "rawenglishenglishgeneratedqapairs": "Raw English-English generated QA pairs",
+  "rawgeneratedpairs": "Raw generated pairs",
+  "reasonstepauditshare": "Reason-step audit share",
+  "recall": "Recall",
+  "recall@3": "Recall@3",
+  "recall@6": "Recall@6",
+  "recoveredsubsetshareatdepth1": "Recovered subset share at depth1",
+  "refusalprecision": "Refusal precision",
+  "refusalrecall": "Refusal recall",
+  "relativeqaaccuracydecreaseversusenglish": "Relative QA accuracy decrease versus English",
+  "relativelatencyoverhead": "Relative latency overhead",
+  "relativereductioningoodcallsbyclaude": "Relative reduction in GOOD calls by Claude",
+  "relativetimeperquery": "Relative time per query",
+  "relativetrainingmargingrowth": "Relative training-margin growth",
+  "relevantsamplesproportion": "Relevant samples proportion",
+  "reportedstep": "Reported Step",
+  "reportedformattedtriplets": "Reported formatted triplets",
+  "reportedtraininginstances": "Reported training instances",
+  "rerankinglatencyreduction": "Reranking latency reduction",
+  "rerankingshareoftotallatency": "Reranking share oftotal latency",
+  "retainedsourcenewsarticles": "Retained source news articles",
+  "retrievalrelevance": "Retrieval Relevance",
+  "retrievalrecall": "Retrieval recall",
+  "retrievalrecallabsolutegainfrom5to50pages": "Retrieval recall absolute gain from 5 to 50 pages",
+  "retrievalandgenerationstepsperquery": "Retrieval-and-generation steps per query",
+  "returnedaffiliatedinstitutions": "Returned affiliated institutions",
+  "returnedcountries": "Returned countries",
+  "returnedpublisheddocuments": "Returned published documents",
+  "revenuebandcoverage": "Revenue Band Coverage",
+  "revenuebandcoveragerelativechange": "Revenue Band Coverage relative change",
+  "routerforwardpasslatencyupperbound": "Router forward-pass latency upper bound",
+  "routerinferencelatency": "Router inference latency",
+  "rulebasedaccuracy": "Rule-based accuracy",
+  "rulebasedaccuracygain": "Rule-based accuracy gain",
+  "sftwallclockduration": "SFT wall-clock duration",
+  "sameactionpairshare": "Same-action pair share",
+  "samplepercentagedistributionoverconfidencebins": "Sample percentage distribution over confidence bins",
+  "sampledpeakgpumemory": "Sampled peak GPU memory",
+  "samples": "Samples",
+  "samplespersourcedataset": "Samples per source dataset",
+  "searchbudgetsaturation": "Search budget saturation",
+  "seedsmecoredocuments": "Seed SME core documents",
+  "selectedtopicclusters": "Selected topic clusters",
+  "sentimentintensitysigma": "Sentiment-Intensity sigma",
+  "sentimentintensitysigmaabsolutegain": "Sentiment-Intensity sigma absolute gain",
+  "sentimentintensitysigmarelativechange": "Sentiment-Intensity sigma relative change",
+  "setquestions": "Set questions",
+  "settingswithhighestcomparedmeanem": "Settings with highest compared mean EM",
+  "settingswithmeanemhigherthanppo": "Settings with mean EM higher than PPO",
+  "significancepupperbound": "Significance p upper bound",
+  "sourcedatasets": "Source datasets",
+  "sourcecontactreduction": "Source-contact reduction",
+  "sourcescontacted": "Sources contacted",
+  "spearmancorrelationwithhumanjudgments": "Spearman correlation with human judgments",
+  "stalecitationrate": "Stale citation rate",
+  "stalecitationrate95%cilower": "Stale citation rate 95% CI lower",
+  "stalecitationrate95%ciupper": "Stale citation rate 95% CI upper",
+  "stalecitationrateallmodelvalue": "Stale citation rate all-model value",
+  "stalecitationratemaximum": "Stale citation rate maximum",
+  "stalecitationrateminimum": "Stale citation rate minimum",
+  "stalecitationratepairedmcnemarp": "Stale citation rate paired McNemar p",
+  "stalecitationratereductionvsnaive": "Stale citation rate reduction vs Naive",
+  "staleboundaryrisk": "Stale-boundary risk",
+  "stepcount": "Step count",
+  "stepdistribution": "Step distribution",
+  "stepspertrajectory": "Steps per trajectory",
+  "supersessionrisk": "Supersession risk",
+  "syntheticdatainferencepasses": "Synthetic data inference passes",
+  "syntheticdatawallclockdurationupperbound": "Synthetic data wall-clock duration upper bound",
+  "tn": "TN",
+  "tp": "TP",
+  "tenurecoverage": "Tenure Coverage",
+  "tenurecoveragerelativechange": "Tenure Coverage relative change",
+  "textfilteringrate": "Text filtering rate",
+  "totalsourcecontacts": "Total source contacts",
+  "totaltrainingtime": "Total training time",
+  "trainingexamples": "Training examples",
+  "unfiltered/filteredpaircountratio": "Unfiltered / filtered pair count ratio",
+  "unrelatedfilteringmaximum": "Unrelated filtering maximum",
+  "unsupportedanswercount": "Unsupported answer count",
+  "unsupportedanswerrate": "Unsupported answer rate",
+  "unsupportedanswerrate95%cilower": "Unsupported answer rate 95% CI lower",
+  "unsupportedanswerrate95%ciupper": "Unsupported answer rate 95% CI upper",
+  "unsupportedanswerrateallmodelvalue": "Unsupported answer rate all-model value",
+  "unsupportedanswerratemaximum": "Unsupported answer rate maximum",
+  "unsupportedanswerrateminimum": "Unsupported answer rate minimum",
+  "unsupportedanswerratepairedmcnemarp": "Unsupported answer rate paired McNemar p",
+  "unsupportedanswerratereductionvsnaive": "Unsupported answer rate reduction vs Naive",
+  "unsupportedanswermcnemarpupperbound": "Unsupported-answer McNemar p upper bound",
+  "unverifiedresponserate": "Unverified response rate",
+  "userannotatedproportion": "User annotated proportion",
+  "validanswerrate": "Valid answer rate",
+  "validanswerrateallmodelvalue": "Valid answer rate all-model value",
+  "validanswerratemaximum": "Valid answer rate maximum",
+  "validanswerrateminimum": "Valid answer rate minimum",
+  "validauditedlabels": "Valid audited labels",
+  "validresponserate": "Valid response rate",
+  "vendiscore": "Vendi score",
+  "verifiedenglishqapairs": "Verified English QA pairs",
+  "w1relativechange": "W1 relative change",
+  "w1relativereductionrangeendpoint": "W1 relative reduction range endpoint",
+  "w1sentimentdistributiondistance": "W1 sentiment distribution distance",
+  "wdpv": "WDPV",
+  "wrr": "WRR",
+  "wrrrangelower": "WRR range lower",
+  "wrrrangeupper": "WRR range upper",
+  "wrrshadeduncertaintyenvelope": "WRR shaded uncertainty envelope",
+  "wtrr": "WTRR",
+  "watermarkfilteringrate": "Watermark filtering rate",
+  "watermarkrecoveryacrossevaluateddatasets": "Watermark recovery across evaluated datasets",
+  "watermarktextgenerationtime": "Watermark text generation time",
+  "accuracygainfromgeneratorscaling": "accuracy gain from generator scaling",
+  "anchorcount": "anchor count",
+  "answercorrectness": "answer correctness",
+  "answercorrectnessimprovementattributedtokeyworddetection": "answer correctness improvement attributed to keyword detection",
+  "answerrelevance": "answer relevance",
+  "answersimilarity": "answer similarity",
+  "benchmarksaddressingopinionsynthesis": "benchmarks addressing opinion synthesis",
+  "bootstrapelo": "bootstrap Elo",
+  "denseretrieversize": "dense retriever size",
+  "entitymatcheddemographiccoverageabsolutegainrangeendpoint": "entity-matched demographic coverage absolute gain range endpoint",
+  "entitymatchedretrieveddocumentcountrelativechange": "entity-matched retrieved document count relative change",
+  "entitymatchedretrieveddocuments": "entity-matched retrieved documents",
+  "estimatedjointretrievalfailureprobability": "estimated joint retrieval failure probability",
+  "estimatedtotaltrainingandgenerationflops": "estimated total training and generation FLOPs",
+  "estimatedtrainingandgenerationgputime": "estimated training and generation GPU time",
+  "failedtestqueries": "failed test queries",
+  "failurecount": "failure count",
+  "fullperspectivecoverage": "full perspective coverage",
+  "gradientcosinesimilarity": "gradient cosine similarity",
+  "gradientcosinesimilaritybound": "gradient cosine similarity bound",
+  "humanpreferenceforenrichedresponses": "human preference for enriched responses",
+  "humanjudgeagreement": "human-judge agreement",
+  "knowledgebasedocumentcount": "knowledge-base document count",
+  "loglinearintercept": "log-linear intercept",
+  "loglinearslope": "log-linear slope",
+  "meanaccuracygainovervanillarag": "mean accuracy gain over Vanilla RAG",
+  "meanrelativeaccuracygainoverrag": "mean relative accuracy gain over RAG",
+  "minimumemboundacrosssweeps": "minimum EM bound across sweeps",
+  "nvdd": "nVDD",
+  "pvaluebound": "p-value bound",
+  "pairwisewinfraction": "pairwise win fraction",
+  "perspectiveawareretrievalbenchmarks": "perspective-aware retrieval benchmarks",
+  "positivelabelprevalence": "positive label prevalence",
+  "rawannotatoragreement": "raw annotator agreement",
+  "referencebasedjudgescore": "reference-based judge score",
+  "relativeaccuracygainoverrag": "relative accuracy gain over RAG",
+  "relativeaccuracygapbelowrag": "relative accuracy gap below RAG",
+  "relevance/correctnessimprovementlowerbound": "relevance/correctness improvement lower bound",
+  "reportedrawrelativeexcessw1rangeendpoint": "reported Raw relative excess W1 range endpoint",
+  "reportedaverageaccuracygain": "reported average accuracy gain",
+  "reportsprocessed": "reports processed",
+  "retainednodecount": "retained node count",
+  "retrievalfailurerate": "retrieval failure rate",
+  "retrievallatency": "retrieval latency",
+  "retrieverimpact": "retriever impact",
+  "retrieverimpactrangeendpoint": "retriever impact range endpoint",
+  "semanticnodecount": "semantic node count",
+  "settingsbeatingrag": "settings beating RAG",
+  "shareofincorrectpredictions": "share of incorrect predictions",
+  "structuraledgecount": "structural edge count",
+  "supportingstanceretrievalbias": "supporting-stance retrieval bias",
+  "synthetic/originaltokenratioatragcrossover": "synthetic/original token ratio at RAG crossover",
+  "tokencost": "token cost",
+  "totalinferencecost": "total inference cost",
+  "totaltokencostratiotoknowtrace": "total token cost ratio to KnowTrace",
+  "unique4gramratio": "unique 4-gram ratio"
+ },
+ "collisions": {}
+}
