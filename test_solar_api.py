@@ -127,13 +127,15 @@ class EnvelopeTest(unittest.TestCase):
     def test_excluded_paper_is_done_with_its_reason(self):
         result = fake_result()
         publication = dict(result["tables"]["publications"][0],
-                           in_scope="false", exclusion_reason="моделирование")
+                           in_scope="false", exclusion_reason="моделирование.")
         result["tables"] = {table: [] for table in TABLES}
         result["tables"]["publications"] = [publication]
         envelope = self.envelope(result)
         # An excluded paper is answered, not half-parsed.
         self.assertEqual(envelope["status"], "done")
-        self.assertTrue(any("вне области" in text for text in envelope["warnings"]))
+        reason = next(text for text in envelope["warnings"] if "вне области" in text)
+        self.assertTrue(reason.endswith("моделирование."))
+        self.assertNotIn("..", reason)
         self.assertFalse(any("Результаты не найдены" in text for text in envelope["warnings"]))
 
     def test_text_sources_skip_table_rows(self):
@@ -283,6 +285,27 @@ class DocumentApiTest(unittest.TestCase):
         status, body = get(base + "sources?kind=caption")
         self.assertEqual(json.loads(body)["total"], 1)
         self.assertEqual(json.loads(body)["items"][0]["source_id"], 8)
+
+    def test_results_endpoint_applies_search_and_issue_filter(self):
+        result = fake_result()
+        result["tables"]["results"].append(
+            result_row(result_id="R002", metric_name="Voc", metric_value="1.2"))
+        result["evidence"]["results/R002"] = result["evidence"]["results/R001"]
+        result["tables"]["issues"][0]["record_ids"] = "R002"
+        base = self.store_envelope(solar_api.SolarStore._envelope(
+            "solar:fake", "fake.pdf", result, 0.0))
+
+        payload = json.loads(get(base + "results")[1])
+        self.assertEqual(payload["total"], 2)
+
+        payload = json.loads(get(base + "results?q=Voc")[1])
+        self.assertEqual([row["result_id"] for row in payload["items"]], ["R002"])
+
+        payload = json.loads(get(base + "results?issues=1")[1])
+        self.assertEqual([row["result_id"] for row in payload["items"]], ["R002"])
+
+        payload = json.loads(get(base + "results?status=extracted")[1])
+        self.assertEqual(payload["total"], 2)
 
     def test_bad_pagination_is_a_client_error(self):
         status, _ = get(self.document_url("results") + "?limit=abc")

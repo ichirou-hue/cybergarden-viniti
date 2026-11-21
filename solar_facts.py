@@ -454,7 +454,7 @@ def finalize(candidate, document, *, model=""):
     check_consistency(tables)
     warnings = [*document["warnings"],
                 "Проверено буквальное наличие источников, но не научная корректность связей и полнота.",
-                "OCR и оцифровка графиков не реализованы; единицы raw_unit предложены моделью и требуют проверки."]
+                "OCR и оцифровка графиков не реализованы; единицы raw_unit нормализуются по словарю шаблона, остальные требуют ручной проверки."]
     return {
         **document, "tables": tables, "evidence": evidence, "warnings": warnings,
         "extraction": {"revision": REVISION, "model": model, "source_verification": "literal"},

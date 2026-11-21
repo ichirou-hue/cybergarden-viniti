@@ -822,7 +822,9 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as error:
                 self.error(str(error), 400)
                 return
-            items = envelope.get("results", [])
+            # The shared filter applies the search and the "issues only" switch;
+            # without it the catalog UI showed every row for any query.
+            items = filter_results(envelope, single)
             self.send_json({"total": len(items), "items": items[offset:offset + limit]})
         elif resource == "issues":
             try:

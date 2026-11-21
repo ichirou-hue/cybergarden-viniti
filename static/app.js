@@ -158,6 +158,7 @@ async function route() {
     return;
   }
   app.track = descriptor.track;
+  document.getElementById("demo").hidden = descriptor.demo === false;
   document.body.dataset.view = match ? "doc" : "catalog";
   setContext(match ? "карточка статьи" : "каталог результатов");
   setUploadEnabled(true);

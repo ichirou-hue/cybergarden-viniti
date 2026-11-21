@@ -223,7 +223,7 @@ class SolarStore:
         unreadable = [warning for warning in warnings if "текстовый слой пуст" in warning]
         status = "partial" if unreadable else "done"
         if excluded:
-            reason = publication.get("exclusion_reason") or "причина не указана"
+            reason = (publication.get("exclusion_reason") or "причина не указана").rstrip(". ")
             warnings.append(f"Статья вне области исследования: {reason}.")
         elif not results:
             warnings.append("Результаты не найдены: детерминированный экстрактор "
