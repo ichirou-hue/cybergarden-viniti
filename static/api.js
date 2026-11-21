@@ -50,6 +50,32 @@ export function uploadPDF(file, track, signal) {
   }).catch(networkError).then(unwrap);
 }
 
+export function getProfiles(signal) {
+  return getJSON("/api/profiles", {}, signal);
+}
+
+export function getLLM(signal) {
+  return getJSON("/api/llm", {}, signal);
+}
+
+export function startParse(file, options = {}, signal) {
+  const llm = options.llm === "api" ? "api" : "off";
+  return fetch("/api/parse", {
+    method: "POST",
+    body: file,
+    signal,
+    headers: {
+      "Content-Type": "application/pdf",
+      "X-Profile": options.profile || "solar",
+      "X-Parser": options.parser || "pdfplumber",
+      "X-OCR": options.ocr || "auto",
+      "X-Charts": options.charts ? "1" : "0",
+      "X-LLM": llm,
+      "X-Filename": encodeURIComponent(file.name),
+    },
+  }).catch(networkError).then(unwrap);
+}
+
 export function openDemo(track, signal) {
   return fetch("/api/demo", {
     method: "POST",

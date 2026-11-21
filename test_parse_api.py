@@ -60,6 +60,24 @@ def custom_profile():
     }
 
 
+def mock_profile():
+    return {
+        "id": "test_mock",
+        "version": "1",
+        "description": "Профиль для mock-оболочки LLM.",
+        "tables": {
+            "equipment": {
+                "key": "equipment_id",
+                "description": "Оборудование с явно указанным числом.",
+                "fields": {
+                    "equipment_id": {"type": "id", "description": "Локальный идентификатор."},
+                    "pce": {"type": "number", "description": "Явно указанная эффективность."},
+                },
+            },
+        },
+    }
+
+
 class ParseApiTest(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
@@ -191,6 +209,41 @@ class ParseApiTest(unittest.TestCase):
         job = json.loads(body)
         self.wait(job["id"])
         status, _ = get(f"{self.base}/api/parse/{job['id']}/file/assets/../../job.json")
+        self.assertIn(status, {400, 404})
+
+    def test_parse_rejects_unknown_llm_mode(self):
+        status, _ = send(self.base + "/api/parse", tiny_pdf(), {
+            "Content-Type": "application/pdf", "X-Profile": "solar", "X-LLM": "remote"})
+        self.assertEqual(status, 400)
+
+    def test_parse_mock_shell_writes_bounded_artifacts(self):
+        status, _ = send(self.base + "/api/profiles/test_mock",
+                         json.dumps(mock_profile()).encode(),
+                         {"Content-Type": "application/json"}, method="PUT")
+        self.assertEqual(status, 200)
+        status, body = send(self.base + "/api/parse", tiny_pdf(), {
+            "Content-Type": "application/pdf", "X-Profile": "test_mock",
+            "X-Filename": "S001.pdf", "X-LLM": "mock",
+        })
+        self.assertEqual(status, 202, body)
+        job = json.loads(body)
+        self.assertEqual(job["llm"], "mock")
+
+        finished = self.wait(job["id"])
+        self.assertEqual(finished["status"], "ok", finished)
+        self.assertEqual(finished["summary"]["llm"]["stages"]["interpret"], "ok")
+
+        status, body = get(f"{self.base}/api/parse/{job['id']}/llm")
+        self.assertEqual(status, 200)
+        found = json.loads(body)
+        self.assertTrue(found["guarantees"]["passport_unchanged"])
+        self.assertFalse(found["guarantees"]["official_csv_written"])
+
+        status, body = get(f"{self.base}/api/parse/{job['id']}/file/llm/interpretation.json")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["tables"]["equipment"][0]["pce"], "21.5")
+
+        status, _ = get(f"{self.base}/api/parse/{job['id']}/file/llm/../../job.json")
         self.assertIn(status, {400, 404})
 
 

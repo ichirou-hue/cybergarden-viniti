@@ -201,18 +201,37 @@ solar_offline.build(bytes)           таблицы из координат сл
   `data/profiles/<id>.json`, проверяет их через `extraction_core.compile_profile`;
   `GET /api/profiles`, `GET|PUT|DELETE /api/profiles/<id>`. Встроенные профили
   перезаписывать и удалять нельзя, для изменения нужна копия с новым id.
-- `parse_document.py` - разбор PDF по профилю без LLM: готовит источники, таблицы,
-  figures и offline-кандидаты, пишет комплект через `extraction_core.export_result`.
-  `POST /api/parse` (PDF + `X-Profile`, `X-Parser`, `X-OCR`, `X-Charts`) запускает
-  его фоновым процессом; `GET /api/parse/<id>`, `/result` и `/file/<path>` отдают
+- `parse_document.py` - разбор PDF по профилю: готовит источники, таблицы,
+  figures и offline-кандидаты, пишет комплект через `extraction_core.export_result`;
+  `--llm-shell off|mock|api` добавляет стадии LLM поверх готового паспорта.
+  `POST /api/parse` (PDF + `X-Profile`, `X-Parser`, `X-OCR`, `X-Charts`, `X-LLM`) запускает
+  его фоновым процессом; `GET /api/parse/<id>`, `/result`, `/llm` и `/file/<path>` отдают
   статус, JSON и артефакты. Результат лежит в `data/parses/<id>/`, исходный PDF -
   рядом как `input.pdf`; `job.json` обновляется атомарно.
+- `llm_shell.py` - оболочка LLM поверх готового scripts-паспорта. `--llm-shell mock`
+  (или `X-LLM: mock`) запускает детерминированный `MockBackend` без сети и ключа и пишет
+  `llm/sources.json`, `request.json`, `interpretation.json`, `audit.json`, `manifest.json`.
+  Ответ бэкенда недоверенный: интерпретация проходит `extraction_core.validate_fields`,
+  аудит - собственную проверку ссылок и цитат; отказ стадии записывается как `rejected`,
+  а не молчаливый пропуск. `result.json` и официальные CSV не переписываются, размеры
+  входа/ответа/артефактов ограничены. В режиме mock интерпретация `solar_csv` помечается
+  `skipped`; в режиме api она проходит `solar_facts.finalize` и даёт семь таблиц.
+- `--llm-shell api` (или `X-LLM: api`) вызывает настоящую модель через
+  `llm_provider.py` - [OI]-совместимый `POST /chat/completions`. Ключ, модель и адрес
+  берутся только из окружения: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`
+  (по умолчанию `https://api.openai.com/v1`), с обратной совместимостью
+  `OPENROUTER_API_KEY`/`OPENROUTER_MODEL` и базой OpenRouter. Ключ не попадает
+  ни в argv, ни в `job.json`, ни в артефакты; ошибки провайдера санированы, редиректы
+  запрещены. Сеть включается дважды: `run_bundle(..., allow_network=True)` и для сервера
+  `VINITI_PARSE_LLM=api`; без флага `X-LLM: api` даёт 403, без ключа - 503.
+  `GET /api/llm` отдаёт `configured`/`enabled`/`available` без ключа.
 - Для `--parser docling` сервер запускает отдельный интерпретатор из
   `VINITI_DOCLING_PYTHON` (иначе `sys.executable`). OCR и локальный chart2csv
   требуют установленного Docling/Tesseract и весов моделей; без них job завершится
   ошибкой, а не молчаливым частичным результатом. `VINITI_PARSE_TIMEOUT` задаёт
   лимит секунд на один разбор (по умолчанию 1800).
-- Это пока разбор, а не извлечение структуры: LLM-этап и LLM-аудит не подключены.
+- Разбор остаётся разбором: `result.json` всегда собран скриптами, LLM-стадии
+  пишут только `bundle/llm/*` и не меняют паспорт и официальные CSV.
 
 ## Схема БД
 

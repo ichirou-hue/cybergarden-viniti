@@ -29,6 +29,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import db as storage
 import export_csv as result_export
+import llm_provider
+import llm_shell
 import profiles_store
 
 from pdfminer.pdfdocument import PDFPasswordIncorrect
@@ -69,6 +71,19 @@ except ValueError:
     PARSE_TIMEOUT = 1800
 PARSE_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}")
 PARSE_KINDS = {"tables", "figures", "charts"}
+PARSE_LLM_MODES = {"off", "mock", "api"}
+# Network LLM mode is a deployment decision, not a per-request one: the
+# operator must set this flag explicitly, and the key stays in the environment.
+PARSE_LLM_NETWORK = os.environ.get("VINITI_PARSE_LLM", "").strip().lower() in {
+    "api", "on", "1", "true", "yes"}
+
+
+def llm_api_status(environ=None):
+    """Whether the api mode is both enabled and configured; never exposes the key."""
+    status = llm_provider.describe(environ)
+    status["enabled"] = bool(PARSE_LLM_NETWORK)
+    status["available"] = bool(status["configured"] and PARSE_LLM_NETWORK)
+    return status
 
 
 def static_file(path):
@@ -239,6 +254,7 @@ class Handler(BaseHTTPRequestHandler):
         parser = (self.headers.get("X-Parser") or "pdfplumber").strip().lower()
         ocr = (self.headers.get("X-OCR") or "auto").strip().lower()
         raw_charts = (self.headers.get("X-Charts") or "").strip().lower()
+        llm = (self.headers.get("X-LLM") or "off").strip().lower() or "off"
         if parser not in {"pdfplumber", "docling"}:
             self.error("Парсер должен быть pdfplumber или docling.", 400)
             return
@@ -255,6 +271,19 @@ class Handler(BaseHTTPRequestHandler):
         if charts and parser != "docling":
             self.error("Извлечение данных графиков требует парсер docling.", 400)
             return
+        if llm not in PARSE_LLM_MODES:
+            self.error("X-LLM должен быть off, mock или api.", 400)
+            return
+        if llm == "api":
+            status = llm_api_status()
+            if not status["enabled"]:
+                self.error(
+                    "LLM api отключён на сервере: задайте VINITI_PARSE_LLM=api.", 403)
+                return
+            if not status["configured"]:
+                self.error(
+                    "LLM api включён, но не настроен: нужны OPENAI_API_KEY и OPENAI_MODEL.", 503)
+                return
         try:
             _, source, profile_path = profiles_store.load(name, root=self.profiles_root())
         except KeyError:
@@ -279,13 +308,14 @@ class Handler(BaseHTTPRequestHandler):
         job = {
             "id": run_id, "status": "queued", "profile": name, "profile_source": source,
             "parser": parser, "ocr": ocr if parser == "docling" else "off", "charts": charts,
+            "llm": llm,
             "filename": filename, "sha256": sha256(data).hexdigest(), "bytes": len(data),
             "created_at": round(time(), 3), "updated_at": round(time(), 3),
         }
         self.write_job(folder, job)
         threading.Thread(
             target=self.run_parse,
-            args=(folder, profile_path, parser, ocr, charts),
+            args=(folder, profile_path, parser, ocr, charts, llm),
             daemon=True,
         ).start()
         self.send_json(job, 202)
@@ -301,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
         temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
         os.replace(temporary, folder / "job.json")
 
-    def run_parse(self, folder, profile_path, parser, ocr, charts):
+    def run_parse(self, folder, profile_path, parser, ocr, charts, llm="off"):
         slot = getattr(self.server, "docling_slot", None) if parser == "docling" else None
         slots = getattr(self.server, "parse_slots", None)
         try:
@@ -326,8 +356,19 @@ class Handler(BaseHTTPRequestHandler):
                 command += ["--ocr", ocr]
                 if charts:
                     command.append("--charts")
+            if llm == "mock":
+                command += ["--llm-shell", "mock"]
+            elif llm == "api":
+                # The key and model travel through the inherited environment,
+                # never through argv, job.json or parse.log.
+                command += ["--llm-shell", "api"]
+            child_env = os.environ.copy()
+            if llm == "api" and PARSE_LLM_NETWORK:
+                # Keep the worker's explicit network opt-in aligned with the
+                # admission check, including embedded/test HTTP servers.
+                child_env["VINITI_PARSE_LLM"] = "api"
             completed = subprocess.run(
-                command, cwd=ROOT, capture_output=True, text=True,
+                command, cwd=ROOT, env=child_env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
             )
             self.write_log(folder, completed)
@@ -404,6 +445,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_data(data, "application/json; charset=utf-8")
             return
+        if segments[3] == "llm":
+            try:
+                data = (folder / "bundle" / "llm" / "manifest.json").read_bytes()
+            except OSError:
+                self.error("Артефакты LLM-оболочки не найдены.", 404)
+                return
+            self.send_data(data, "application/json; charset=utf-8")
+            return
         if segments[3] == "file" and len(segments) > 4:
             self.parse_file(folder / "bundle", segments[4:])
             return
@@ -411,7 +460,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def parse_file(self, base, parts):
         relative = PurePosixPath(*parts)
-        allowed = relative.parts in {("result.json",), ("parser.json",), ("candidates.csv",)}
+        allowed = relative.parts in (
+            {("result.json",), ("parser.json",), ("candidates.csv",)}
+            | {("llm", name) for name in llm_shell.ARTIFACT_NAMES}
+        )
         if not allowed and (
             len(relative.parts) != 3 or relative.parts[0] != "assets"
             or relative.parts[1] not in PARSE_KINDS
@@ -626,6 +678,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/profiles" or path.startswith("/api/profiles/"):
             self.profiles_get(path)
+            return
+
+        if path == "/api/llm":
+            self.send_json(llm_api_status())
             return
 
         if path.startswith("/api/parse/"):
@@ -1075,6 +1131,34 @@ def serve_until_interrupt(server):
         print("Сервер остановлен.", flush=True)
 
 
+def recover_parse_jobs(root):
+    """Mark jobs owned by a previous process as interrupted, never replaying API calls."""
+    root = Path(root)
+    if not root.exists():
+        return
+    for folder in root.iterdir():
+        if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
+            continue
+        job_path = folder / "job.json"
+        try:
+            job = json.loads(job_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if job.get("status") not in {"queued", "running"}:
+            continue
+        job.update(status="error", error="Разбор прерван перезапуском сервера; запустите его снова.",
+                   updated_at=round(time(), 3))
+        temporary = folder / f".job-recover-{uuid.uuid4().hex}.json"
+        try:
+            temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+            os.replace(temporary, job_path)
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="VINITI PDF evidence workspace")
     parser.add_argument("--port", type=int, default=8765)
@@ -1087,6 +1171,7 @@ def main():
         server.data = args.data
         server.profiles_dir = ROOT / "data" / "profiles"
         server.parse_root = ROOT / "data" / "parses"
+        recover_parse_jobs(server.parse_root)
         server.parse_slots = threading.BoundedSemaphore(2)
         server.docling_slot = threading.Semaphore(1)
         print(f"http://127.0.0.1:{server.server_port}", flush=True)

@@ -3,8 +3,9 @@ import { tracks } from "./tracks/index.js";
 import { renderCatalog } from "./catalog.js";
 import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
-import { uploadPDF, openDemo } from "./api.js";
+import { openDemo, getProfiles, getLLM, startParse } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
+import { renderParseJob } from "./parse.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -23,7 +24,12 @@ const dropZone = document.getElementById("dropZone");
 const profileStep = document.getElementById("profileStep");
 let selectedPDF = null;
 
-const app = {descriptors: [], track: "rag", controller: null};
+const FALLBACK_PROFILES = [{
+  id: "solar",
+  description: "Тонкоплёночные солнечные элементы. Семь таблиц шаблона участников.",
+}];
+
+const app = {descriptors: [], profiles: [], track: "rag", llm: "off", controller: null};
 let booted = false;
 let lastPath = "";
 
@@ -117,20 +123,19 @@ async function route() {
     history.replaceState(null, "", buildHash(path, params));
   }
   const match = path.match(/^\/doc\/(.+?)(?:\/source\/([0-9]+))?$/);
+  const parseMatch = path.match(/^\/parse\/([^/]+)$/);
   const docId = match ? splitDocId(match[1]) : "";
   const pathChanged = path !== lastPath;
   lastPath = path;
   say("");
-  const wizardActive = path === "/";
-  wizard.hidden = !wizardActive;
-  document.body.classList.toggle("wizard-active", wizardActive);
-  if (wizardActive) {
-    app.controller?.abort();
-    renderWizard();
-    booted = true;
-    document.getElementById("bootError").hidden = true;
-    return;
-  }
+  // Мастер разбора - наложение поверх каталога, а не отдельный маршрут:
+  // его открывает кнопка загрузки из любого места, а смена hash его закрывает.
+  wizard.hidden = true;
+  document.body.classList.remove("wizard-active");
+  selectedPDF = null;
+  fileInput.value = "";
+  fileName.textContent = "Загрузить PDF";
+  fileName.title = "";
   document.body.dataset.view = "catalog";
   passportLink.removeAttribute("aria-current");
   if (!(match && match[2])) dismissEvidence();
@@ -154,6 +159,35 @@ async function route() {
     return;
   }
 
+  if (parseMatch) {
+    const jobId = splitDocId(parseMatch[1]);
+    app.controller?.abort();
+    document.body.dataset.view = "parse";
+    setContext("ход разбора PDF");
+    setUploadEnabled(true);
+    renderTracks("");
+    if (!/^[0-9a-f]{16}$/.test(jobId)) {
+      message("Разбор не найден.", "Некорректный идентификатор задания.");
+      return;
+    }
+    const controller = new AbortController();
+    app.controller = controller;
+    try {
+      await renderParseJob(view, {jobId, signal: controller.signal, say});
+      if (!controller.signal.aborted && booted && pathChanged) focusView();
+      booted = true;
+      document.getElementById("bootError").hidden = true;
+    } catch (error) {
+      if (error.name === "AbortError" || controller.signal.aborted) return;
+      fill(view, el("div", {class: "notice bad", role: "alert"},
+        el("strong", {text: error.status === 404 ? "Разбор не найден" : "Не удалось загрузить задание"}),
+        el("p", {text: error.message}),
+        el("p", {}, el("a", {href: "#/", text: "Вернуться к загрузке"})),
+      ));
+      say(error.message, true);
+    }
+    return;
+  }
   const wanted = params.track || app.track;
   const known = app.descriptors.some(item => item.track === wanted);
   const desired = docId
@@ -202,7 +236,7 @@ async function route() {
           say(`Не удалось открыть источник: ${error.message}`, true);
         }
       }
-    } else if (path === "/catalog") {
+    } else if (path === "/catalog" || path === "/") {
       await renderCatalog(view, ctx);
       if (signal.aborted) return;
     } else {
@@ -279,36 +313,148 @@ fileInput.addEventListener("change", () => {
   fileName.title = file ? file.name : "";
   uploadState.classList.remove("error");
   uploadState.textContent = "";
-  if (file && !wizard.hidden) selectPDF(file);
+  if (file) selectPDF(file);
 });
+
+function parseProfiles() {
+  return app.profiles.length ? app.profiles : FALLBACK_PROFILES;
+}
+
+function profileLabel(profile) {
+  if (profile.id === "solar") return "Solar";
+  if (profile.id === "custom-example") return "Custom example";
+  return profile.id;
+}
+
+function profileDescription(profile) {
+  return profile.error || profile.description || "Пользовательский профиль извлечения.";
+}
+
+function maxMbFor(profileId) {
+  // Та же предметная граница, что и у загрузки в каталог: solar принимает 32 МиБ,
+  // остальные профили - 20 МиБ.
+  return profileId === "solar" ? 32 : 20;
+}
+
+function selectedProfileId() {
+  return document.querySelector('input[name="wizardProfile"]:checked')?.value
+    || parseProfiles()[0]?.id || "solar";
+}
+
+function setLLMMode(mode) {
+  app.llm = mode === "api" ? "api" : "off";
+  document.querySelectorAll('input[name="toolbarLLM"]').forEach(input => {
+    input.checked = input.value === app.llm;
+  });
+  const state = document.getElementById("wizardLLMState");
+  const note = document.getElementById("wizardLLMNote");
+  if (state) state.textContent = app.llm === "api" ? "LLM включен" : "LLM выключен";
+  if (note) note.textContent = app.llm === "api"
+    ? "Фрагменты документа будут отправлены в настроенную API-модель. Режим задан единым переключателем вверху страницы."
+    : "Разбор выполняется без передачи фрагментов документа модели. Режим задан единым переключателем вверху страницы.";
+}
+
+document.getElementById("toolbarLLM").addEventListener("change", event => {
+  if (event.target.matches('input[name="toolbarLLM"]')) setLLMMode(event.target.value);
+});
+let profilesState = "loading";
+let profilesError = "";
+
+async function loadProfiles() {
+  try {
+    const data = await getProfiles();
+    app.profiles = Array.isArray(data?.profiles) ? data.profiles : [];
+    profilesState = app.profiles.length ? "ok" : "fallback";
+    profilesError = app.profiles.length ? "" : "сервер вернул пустой список профилей";
+  } catch (error) {
+    app.profiles = [];
+    profilesState = "fallback";
+    profilesError = error.message;
+  }
+  if (!wizard.hidden) renderWizard();
+}
+
+async function loadLLMStatus() {
+  const input = document.querySelector('input[name="toolbarLLM"][value="api"]');
+  if (!input) return;
+  try {
+    const status = await getLLM();
+    input.disabled = !status?.available;
+    if (!status?.available && app.llm === "api") setLLMMode("off");
+    const note = document.getElementById("wizardLLMNote");
+    if (note && !status?.available) {
+      note.textContent = status?.configured
+        ? "LLM отключён администратором сервера."
+        : "LLM не настроен: нужны OPENAI_API_KEY и OPENAI_MODEL.";
+    }
+  } catch {
+    // The server remains the final authority; do not disable the control on
+    // a transient status-probe failure.
+  }
+}
+
+function renderProfileNotice() {
+  const notice = document.getElementById("profileNotice");
+  if (profilesState !== "fallback") {
+    notice.hidden = true;
+    notice.replaceChildren();
+    return;
+  }
+  notice.hidden = false;
+  fill(notice,
+    el("strong", {text: "Профили не загрузились."}),
+    el("span", {text: ` ${profilesError || "Сервер не вернул список"}. Пока доступен только встроенный профиль Solar.`}),
+    el("button", {type: "button", class: "link-button", text: "Повторить", onclick: () => loadProfiles()}));
+}
+
+function openWizard() {
+  wizard.hidden = false;
+  document.body.classList.add("wizard-active");
+  renderWizard();
+}
+
+function closeWizard() {
+  wizard.hidden = true;
+  document.body.classList.remove("wizard-active");
+  selectedPDF = null;
+  fileInput.value = "";
+  fileName.textContent = "Загрузить PDF";
+  fileName.title = "";
+  renderWizard();
+}
 
 function renderWizard() {
   const ready = !!selectedPDF;
+  const profiles = parseProfiles();
+  const known = profiles.some(profile => profile.id === app.track);
+  const current = known ? app.track : profiles[0]?.id;
   dropZone.hidden = ready;
   profileStep.hidden = !ready;
   document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Профиль" : "Шаг 1 из 2 · Документ";
   document.getElementById("wizardTitle").textContent = ready ? "Как обработать статью?" : "Загрузите научную статью";
-  document.getElementById("wizardHint").textContent = ready ? "Выберите существующий профиль или создайте свой." : "Перетащите PDF в область ниже или выберите файл на устройстве.";
+  document.getElementById("wizardHint").textContent = ready ? "Выберите профиль извлечения. Настройка LLM наследуется из переключателя вверху страницы." : "Перетащите PDF в область ниже или выберите файл на устройстве.";
   document.getElementById("selectedFile").textContent = ready ? selectedPDF.name : "";
-  fill(document.getElementById("profileChoices"), ...["solar", "rag"].map(track => {
-    const available = app.descriptors.some(item => item.track === track);
-    return el("label", {class: "profile-choice"},
-      el("input", {type: "radio", name: "wizardProfile", value: track,
-        disabled: !available, checked: available && track === app.track}),
-      el("span", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`}));
-  }));
+  renderProfileNotice();
+  setLLMMode(app.llm);
+  fill(document.getElementById("profileChoices"), ...profiles.map(profile => el("label", {class: "profile-choice"},
+    el("input", {type: "radio", name: "wizardProfile", value: profile.id, checked: profile.id === current, disabled: !!profile.error}),
+    el("span", {},
+      el("strong", {text: profileLabel(profile)}),
+      el("small", {text: profileDescription(profile)})))));
 }
 
 function selectPDF(file) {
   const error = document.getElementById("wizardError");
   error.hidden = true;
+  openWizard();
   if (!file || !(file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf")) {
     error.textContent = "Выберите файл PDF.";
     error.hidden = false;
     return;
   }
-  if (file.size > 20 * 1024 * 1024) {
-    error.textContent = "Файл больше 20 МиБ. Выберите PDF меньшего размера.";
+  const maxMb = maxMbFor(selectedProfileId());
+  if (file.size > maxMb * 1024 * 1024) {
+    error.textContent = `Файл больше ${maxMb} МиБ. Выберите PDF меньшего размера.`;
     error.hidden = false;
     return;
   }
@@ -330,17 +476,34 @@ dropZone.addEventListener("drop", event => selectPDF(event.dataTransfer.files[0]
 document.getElementById("wizardBack").addEventListener("click", () => {
   selectedPDF = null; fileInput.value = ""; renderWizard();
 });
+document.getElementById("wizardCancel").addEventListener("click", closeWizard);
 document.getElementById("wizardSubmit").addEventListener("click", async () => {
-  const track = document.querySelector('input[name="wizardProfile"]:checked')?.value;
-  if (!selectedPDF || !track) return;
+  const profile = document.querySelector('input[name="wizardProfile"]:checked')?.value;
+  const llm = app.llm;
+  if (!selectedPDF || !profile) return;
   const button = document.getElementById("wizardSubmit");
   button.disabled = true;
+  button.textContent = llm === "api" ? "Разбор с LLM…" : "Разбор PDF…";
   const error = document.getElementById("wizardError"); error.hidden = true;
-  const result = await busy("Обработка PDF…", () => uploadPDF(selectedPDF, track));
+  const maxMb = maxMbFor(profile);
+  if (selectedPDF.size > maxMb * 1024 * 1024) {
+    error.textContent = `Файл больше ${maxMb} МиБ. Выберите PDF меньшего размера.`;
+    error.hidden = false;
+    button.disabled = false;
+    button.textContent = "Разобрать PDF";
+    return;
+  }
+  const result = await busy(llm === "api" ? "Разбор с LLM…" : "Разбор PDF…",
+    () => startParse(selectedPDF, {profile, llm}));
   button.disabled = false;
+  button.textContent = "Разобрать PDF";
   if (!result) { error.textContent = uploadState.textContent; error.hidden = false; return; }
+  if (!result.id) { error.textContent = "Сервер не вернул идентификатор задания разбора."; error.hidden = false; return; }
   selectedPDF = null;
-  openDocument(result);
+  fileInput.value = "";
+  fileName.textContent = "Загрузить PDF";
+  fileName.title = "";
+  location.hash = `#/parse/${encodeURIComponent(result.id)}`;
 });
 
 function openDocument(item) {
@@ -353,16 +516,14 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const file = fileInput.files[0];
   if (!file) {
-    uploadState.textContent = "Сначала выберите PDF";
+    // Кнопка в тулбаре открывает тот же мастер: шаг 1 с областью перетаскивания.
+    openWizard();
+    const error = document.getElementById("wizardError");
+    error.textContent = "Выберите PDF, чтобы продолжить.";
+    error.hidden = false;
     return;
   }
-  const result = await busy("Обработка PDF…", () => uploadPDF(file, app.track));
-  if (!result) return;
-  fileInput.value = "";
-  fileName.textContent = "Загрузить PDF";
-  fileName.title = "";
-  say("");
-  openDocument(result);
+  selectPDF(file);
 });
 
 demoButton.addEventListener("click", async () => {
@@ -372,7 +533,9 @@ demoButton.addEventListener("click", async () => {
   openDocument(result);
 });
 
-app.descriptors = await tracks();
+  app.descriptors = await tracks();
+await loadLLMStatus();
+await loadProfiles();
 if (!app.descriptors.length) {
   setUploadEnabled(false);
   message(
