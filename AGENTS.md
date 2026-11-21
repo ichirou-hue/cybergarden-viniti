@@ -22,7 +22,10 @@
   шаблона участников, без LLM; `solar_facts.py` - контракт кандидатов, проверка цитат,
   нормализация единиц и согласованность, `solar_schema.py` - колонки и словари шаблона,
   `solar_version.py` - общая ревизия экстрактора для `documents` и `jobs`;
-- `score.py` - precision/recall против эталона, `tools/gate.py` - гейт валидаторов.
+- `score.py` - precision/recall против эталона, `tools/gate.py` - гейт валидаторов;
+- `viniti/paths.py` - единственный источник корневых путей: `REPO_ROOT`, `DATA_DIR`,
+  `STATIC_DIR`, `PROFILES_DIR`, `PASSPORT`, `VOCAB`, `CORPUS_ROOTS`, `PARSE_SCRIPT`.
+  Корневые модули берут готовые значения оттуда, а не считают их из своего `__file__`.
 
 Качество извлечения - baseline, а не решение. `extract.TableFiller` берёт только строки
 таблиц, которые `pdf_source` уже разложил на ячейки, и только когда шапка с метриками
