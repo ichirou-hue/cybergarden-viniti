@@ -9,6 +9,7 @@ import os
 import pathlib
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import batch
 import db as storage
@@ -138,8 +139,8 @@ class BatchTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             batch.run("solar", "../dev", db_path=self.database, process=working, log=quiet)
 
-    def test_default_processor_is_the_real_extractor(self):
-        """Без --processor batch зовёт extract.process и заполняет конверт.
+    def test_default_processor_is_the_area_extractor(self):
+        """Без --processor solar идёт через solar_offline.process и пишет конверт.
 
         documents и blocks пишутся в ту же базу, которую видит batch: процессор
         узнаёт её из VINITI_DATA_DB, потому что сигнатура process его не получает.
@@ -159,12 +160,32 @@ class BatchTest(unittest.TestCase):
             blocks = connection.execute(
                 "SELECT COUNT(*) FROM blocks WHERE area = 'solar' "
                 "AND publication_id = 'D001'").fetchone()[0]
+            results = connection.execute(
+                "SELECT COUNT(*) FROM solar_results WHERE area = 'solar' "
+                "AND publication_id = 'D001'").fetchone()[0]
         finally:
             connection.close()
         self.assertIsNotNone(document)
         self.assertEqual(document["sha256"], hashlib.sha256(pdf).hexdigest())
         self.assertEqual(document["parser_status"], "ok")
         self.assertEqual(blocks, document["page_count"])
+        self.assertEqual(results, 1)
+
+    def test_default_processor_dispatches_by_area(self):
+        with patch("solar_offline.process", return_value="solar") as solar, \
+                patch("extract.process", return_value="extract") as legacy:
+            self.assertEqual(batch.default_process("solar", "D001", "a.pdf"), "solar")
+            self.assertEqual(batch.default_process("rag", "P001", "b.pdf"), "extract")
+        solar.assert_called_once_with("solar", "D001", "a.pdf")
+        legacy.assert_called_once_with("rag", "P001", "b.pdf")
+
+    def test_solar_has_its_own_extractor_revision(self):
+        import solar_offline
+
+        self.assertEqual(batch.default_revision("solar"), solar_offline.PARSER_VERSION)
+        self.assertEqual(batch.default_revision("rag"), batch.DEFAULT_EXTRACTOR_REVISION)
+        self.assertNotEqual(solar_offline.PARSER_VERSION,
+                            batch.DEFAULT_EXTRACTOR_REVISION)
 
 
 if __name__ == "__main__":
