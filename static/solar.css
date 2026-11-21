@@ -1,4 +1,12 @@
 * { box-sizing: border-box; }
+.profile { margin-top: 18px; }
+.profile form { padding: 18px; }
+.profile fieldset, .profile details { border: 1px solid #405358; border-radius: 8px; margin: 12px 0; padding: 12px; min-width: 0; }
+.profile label { display: block; margin: 5px 0; }
+.profile input:not([type=checkbox]), .profile select { color: inherit; background: #10191c; border: 1px solid #405358; border-radius: 5px; padding: 6px; max-width: 100%; }
+.profile-field { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.profile details label { padding: 5px; overflow-wrap: anywhere; }
+.profile summary { cursor: pointer; }
 :root { color: #e7eded; background: #0e1518; font: 15px/1.5 the-system, "Segoe UI", sans-serif; color-scheme: dark; }
 body { margin: 0; }
 .shell { width: min(1320px, calc(100% - 64px)); margin-inline: auto; }
