@@ -364,6 +364,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def static_file(self, path):
         relative = "index.html" if path == "/" else path.lstrip("/")
+        if relative in ("manual-profile", "solar", "solar.html"):
+            relative = "manual-profile.html"
         if relative.startswith("static/"):
             relative = relative[len("static/"):]
         target = (STATIC / relative).resolve()
@@ -598,8 +600,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/documents" and length == 0:
             self.error("Нужен PDF размером до 20 МиБ.", 413)
             return
-        if length > MAX_BYTES:
-            self.error("Файл больше 20 МиБ.", 413)
+        limit = 40 * 1024 * 1024 if path == "/api/profile/source" else MAX_BYTES
+        if length > limit:
+            self.error(f"Файл больше {limit // (1024 * 1024)} МиБ.", 413)
             return
         if length:
             self.rfile.read(length)
@@ -609,6 +612,23 @@ class Handler(BaseHTTPRequestHandler):
                 self.error("Демо для области Solar ещё не подключено.", 404)
                 return
             self.send_json(BY_ID["rag:d020"], 201)
+            return
+        if path == "/api/profile/source":
+            self.send_json({
+                "title": "Synthetic profiling article", "author": "Mock",
+                "pages": 2, "warnings": [], "page_texts": {"1": "mock"},
+                "fallback_pages": [],
+                "sources": [
+                    {"id": 1, "page": 1, "bbox": [10, 10, 200, 20], "kind": "text",
+                     "quote": "The device absorber material is MAPbI3."},
+                    {"id": 2, "page": 1, "bbox": [10, 30, 220, 40], "kind": "text",
+                     "quote": "Device A achieved a power conversion efficiency of 21.4 %."},
+                    {"id": 3, "page": 2, "bbox": [10, 10, 200, 20], "kind": "text",
+                     "quote": "The open-circuit voltage was 1.10 V under AM1.5."},
+                    {"id": 4, "page": 2, "bbox": [10, 30, 240, 40], "kind": "text",
+                     "quote": "RAG retrieval accuracy was 0.82 on the benchmark dataset."},
+                ],
+            })
             return
         if path != "/api/documents":
             self.error("Маршрут не найден.", 404)

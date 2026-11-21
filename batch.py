@@ -2,8 +2,8 @@
 
 This file owns scheduling and bookkeeping only. The extraction itself is
 injected through ``process(area, publication_id, pdf_path)``; by default that is
-``extract.process``, the real extractor, and ``--processor module:callable``
-replaces it.
+``solar_offline.process`` for solar and ``extract.process`` for rag, and
+``--processor module:callable`` replaces it.
 
 Every file gets a ``jobs`` row that moves ``queued`` -> ``running`` ->
 ``ok`` / ``error`` / ``skipped``. A failure is recorded and the batch continues.
@@ -39,13 +39,11 @@ CORPUS_ROOTS = {
 }
 
 # Keep resume invalidation tied to the actual extractor revision. A separate
-# constant silently lets batch reuse rows after extract.py changes.
+# constant silently lets batch reuse rows after extract.py changes. The import
+# stays lazy: extract pulls in pdfplumber, and the harness must import without it.
 def default_extractor_revision():
     import extract
     return extract.PARSER_VERSION
-
-
-DEFAULT_EXTRACTOR_REVISION = None
 
 # Return this from a processor to record the publication as deliberately
 # skipped instead of ok.
@@ -82,14 +80,28 @@ def discover(area, split):
 
 
 def default_process(area, publication_id, pdf_path):
-    """Run the real extractor for one publication.
+    """Run the area's real extractor for one publication.
 
-    ``extract`` is imported lazily so the harness itself stays importable without
-    pdfplumber, which only the extraction needs.
+    Solar is served by ``solar_offline``, which fills all seven submission
+    tables; RAG keeps the filler-based ``extract``. Both are imported lazily so
+    the harness itself stays importable without pdfplumber.
     """
+    if area == "solar":
+        import solar_offline
+
+        return solar_offline.process(area, publication_id, pdf_path)
     import extract
 
     return extract.process(area, publication_id, pdf_path)
+
+
+def default_revision(area):
+    """Extractor revision a fresh run of the area records in ``jobs``."""
+    if area == "solar":
+        from solar_version import PARSER_VERSION
+
+        return PARSER_VERSION
+    return default_extractor_revision()
 
 
 def load_processor(spec):
@@ -180,7 +192,7 @@ def run(area, split, *, db_path=db.DEFAULT_DB, resume=False, limit=None,
     """Process one split. Returns a summary dict; never raises per-file errors."""
     process = process or default_process
     if revision is None:
-        revision = default_extractor_revision()
+        revision = default_revision(area)
     if limit is not None and limit < 0:
         raise ValueError("--limit не может быть отрицательным")
     if timeout is not None and timeout < 0:
@@ -301,15 +313,17 @@ def main(argv):
     parser.add_argument("--resume", action="store_true",
                         help="пропускать ok при текущей ревизии экстрактора")
     parser.add_argument("--limit", type=int, default=None,
-                        help="обработать не больше N файлов (дымовой прогон)")
+                        help="не больше N файлов за запуск, после пропуска готовых "
+                             "по --resume")
     parser.add_argument("--timeout", type=float, default=0.0,
                         help="таймаут на файл в секундах, 0 - без ограничения")
     parser.add_argument("--dry-run", action="store_true",
                         help="только показать, что было бы обработано")
-    parser.add_argument("--extractor-revision", type=int,
-                        default=DEFAULT_EXTRACTOR_REVISION)
+    parser.add_argument("--extractor-revision", type=int, default=None,
+                        help="ревизия экстрактора для jobs; по умолчанию "
+                             "своя для каждой области")
     parser.add_argument("--processor", default=None, metavar="MODULE:CALLABLE",
-                        help="заменить встроенный extract.process: process(area, id, path)")
+                        help="заменить встроенный экстрактор области: process(area, id, path)")
     args = parser.parse_args(argv)
 
     # The processor is called as process(area, publication_id, path) and cannot

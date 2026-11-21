@@ -18,7 +18,14 @@ export default {
   entityFilters: {},
   kinds: {text: "Текст", table: "Таблица", caption: "Подпись", equation: "Формула"},
   units: {},
-  issueLabels: {no_structured_results_extracted: "Результаты не найдены"},
+  issueLabels: {
+    normalization: "Нормализация",
+    contradiction: "Противоречие",
+    jv_consistency: "Согласованность J-V",
+    voc_limit: "Voc выше Eg/q",
+    eqe_consistency: "Согласованность с EQE",
+  },
+  demo: false,
   fieldLabels: {},
-  emptyHint: "В статье не найдено подтверждённых результатов Solar. Это baseline-экстрактор: он извлекает строки таблиц и проверяет цитаты.",
+  emptyHint: "В статье не найдено подтверждённых результатов. Если статья вне области, причина указана в шапке карточки.",
 };

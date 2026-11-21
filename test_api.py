@@ -195,6 +195,15 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(media_type, "text/html; charset=utf-8")
         self.assertEqual(body, (ROOT / "static" / "index.html").read_bytes())
 
+    def test_manual_profile_is_served_from_its_own_screen(self):
+        expected = (ROOT / "static" / "manual-profile.html").read_bytes()
+        for path in ("/manual-profile", "/solar", "/solar.html"):
+            status, media_type, body = get_with_type(self.base + path)
+            self.assertEqual(status, 200, path)
+            self.assertEqual(media_type, "text/html; charset=utf-8", path)
+            self.assertEqual(body, expected, path)
+        self.assertIn(b'id="profilePdf"', expected)
+
     def test_static_file_keeps_its_media_type(self):
         status, media_type, body = get_with_type(self.base + "/style.css")
         self.assertEqual(status, 200)

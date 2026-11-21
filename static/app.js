@@ -3,8 +3,9 @@ import { tracks } from "./tracks/index.js";
 import { renderCatalog } from "./catalog.js";
 import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
-import { uploadPDF, openDemo } from "./api.js";
+import { uploadPDF, uploadPDFWithProgress, openDemo } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
+import { stashProfilePDF } from "./pending.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -15,9 +16,12 @@ const uploadState = document.getElementById("uploadState");
 const demoButton = document.getElementById("demo");
 const passportInput = document.getElementById("passport");
 const passportLink = document.getElementById("passportLink");
-const contextLine = document.getElementById("context");
 const trackBar = document.getElementById("tracks");
 const evidenceDialog = document.getElementById("evidence");
+const wizard = document.getElementById("wizard");
+const dropZone = document.getElementById("dropZone");
+const profileStep = document.getElementById("profileStep");
+let selectedPDF = null;
 
 const app = {descriptors: [], track: "rag", controller: null};
 let booted = false;
@@ -60,10 +64,6 @@ function say(message, isError = false) {
   statusLine.className = isError ? "status error" : "status";
 }
 
-function setContext(text) {
-  if (contextLine) contextLine.textContent = `Проверка научных данных · ${text}`;
-}
-
 function renderTracks(active = app.track) {
   fill(trackBar, app.descriptors.map(item => el("a", {
     class: "track",
@@ -84,7 +84,7 @@ function message(title, detail, extra) {
   fill(view, el("div", {class: "empty"},
     el("h1", {class: "empty-title", text: title}),
     detail ? el("p", {class: "muted", text: detail}) : null,
-    extra || el("p", {}, el("a", {href: "#/", text: "К каталогу"})),
+    extra || el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
   ));
 }
 
@@ -117,6 +117,16 @@ async function route() {
   const pathChanged = path !== lastPath;
   lastPath = path;
   say("");
+  const wizardActive = path === "/";
+  wizard.hidden = !wizardActive;
+  document.body.classList.toggle("wizard-active", wizardActive);
+  if (wizardActive) {
+    app.controller?.abort();
+    renderWizard();
+    booted = true;
+    document.getElementById("bootError").hidden = true;
+    return;
+  }
   document.body.dataset.view = "catalog";
   passportLink.removeAttribute("aria-current");
   if (!(match && match[2])) dismissEvidence();
@@ -130,7 +140,6 @@ async function route() {
     app.controller?.abort();
     document.body.dataset.view = "passport";
     passportLink.setAttribute("aria-current", "page");
-    setContext("паспорт статьи");
     setUploadEnabled(true);
     renderTracks("");
     renderPassport(view, {say, go, patch, params});
@@ -153,13 +162,13 @@ async function route() {
       message(
         `Раздел «${label}» пока не подключён.`,
         "Обработчик области недоступен.",
-      el("p", {}, el("a", {href: "#/?track=rag", text: "Перейти в каталог RAG"})),
+      el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
     );
     return;
   }
   app.track = descriptor.track;
+  document.getElementById("demo").hidden = descriptor.demo === false;
   document.body.dataset.view = match ? "doc" : "catalog";
-  setContext(match ? "карточка статьи" : "каталог результатов");
   setUploadEnabled(true);
   renderTracks();
   if (docId && params.track && params.track !== descriptor.track) {
@@ -187,7 +196,7 @@ async function route() {
           say(`Не удалось открыть источник: ${error.message}`, true);
         }
       }
-    } else if (path === "/") {
+    } else if (path === "/catalog") {
       await renderCatalog(view, ctx);
       if (signal.aborted) return;
     } else {
@@ -203,7 +212,7 @@ async function route() {
     fill(view, el("div", {class: "notice bad", role: "alert"},
       el("strong", {text: "Не удалось загрузить данные"}),
       el("p", {text: error.message}),
-      el("p", {}, el("a", {href: "#/", text: "Вернуться в каталог"})),
+      el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
     ));
     say(error.message, true);
   }
@@ -264,6 +273,101 @@ fileInput.addEventListener("change", () => {
   fileName.title = file ? file.name : "";
   uploadState.classList.remove("error");
   uploadState.textContent = "";
+  if (file && !wizard.hidden) selectPDF(file);
+});
+
+function renderWizard() {
+  const ready = !!selectedPDF;
+  dropZone.hidden = ready;
+  profileStep.hidden = !ready;
+  document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Профиль" : "Шаг 1 из 2 · Документ";
+  document.getElementById("wizardTitle").textContent = ready ? "Выберите профиль обработки" : "Начните с PDF";
+  document.getElementById("wizardHint").textContent = ready ? "Готовый профиль или свой вариант для этой статьи." : "RAG: до 20 МиБ, Solar: до 32 МиБ.";
+  document.getElementById("selectedFile").textContent = ready ? selectedPDF.name : "";
+  fill(document.getElementById("profileChoices"), ...["solar", "rag"].map(track => {
+    const available = app.descriptors.some(item => item.track === track);
+    return el("label", {class: "profile-choice"},
+      el("input", {type: "radio", name: "wizardProfile", value: track,
+        disabled: !available, checked: available && track === app.track}),
+      el("span", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`}));
+  }));
+}
+
+function selectPDF(file) {
+  const error = document.getElementById("wizardError");
+  error.hidden = true;
+  if (!file || !(file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf")) {
+    error.textContent = "Выберите файл PDF.";
+    error.hidden = false;
+    return;
+  }
+  if (file.size > 32 * 1024 * 1024) {
+    error.textContent = "Файл больше 32 МиБ. Выберите PDF меньшего размера.";
+    error.hidden = false;
+    return;
+  }
+  selectedPDF = file;
+  renderWizard();
+}
+
+dropZone.addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("keydown", event => {
+  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileInput.click(); }
+});
+for (const name of ["dragenter", "dragover"]) dropZone.addEventListener(name, event => {
+  event.preventDefault(); dropZone.classList.add("drag-over");
+});
+for (const name of ["dragleave", "drop"]) dropZone.addEventListener(name, event => {
+  event.preventDefault(); dropZone.classList.remove("drag-over");
+});
+dropZone.addEventListener("drop", event => selectPDF(event.dataTransfer.files[0]));
+document.getElementById("wizardBack").addEventListener("click", () => {
+  selectedPDF = null; fileInput.value = ""; renderWizard();
+});
+document.getElementById("createProfile").addEventListener("click", async event => {
+  if (!selectedPDF) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const link = event.currentTarget;
+  link.setAttribute("aria-busy", "true");
+  link.textContent = "Готовим профиль…";
+  try {
+    await stashProfilePDF(selectedPDF);
+  } catch (error) {
+    // Переход не должен зависеть от хранилища: на странице профиля PDF
+    // можно выбрать повторно.
+    console.warn("Не удалось передать PDF в ручной профиль:", error.message);
+  }
+  location.assign(link.href);
+});
+document.getElementById("wizardSubmit").addEventListener("click", async () => {
+  const track = document.querySelector('input[name="wizardProfile"]:checked')?.value;
+  if (!selectedPDF || !track) return;
+  if (track === "rag" && selectedPDF.size > 20 * 1024 * 1024) {
+    const error = document.getElementById("wizardError");
+    error.textContent = "Для RAG нужен PDF размером до 20 МиБ. Выберите Solar или другой PDF.";
+    error.hidden = false;
+    return;
+  }
+  const button = document.getElementById("wizardSubmit");
+  button.disabled = true;
+  const error = document.getElementById("wizardError"); error.hidden = true;
+  const progress = document.getElementById("processingProgress");
+  const bar = document.getElementById("progressBar");
+  progress.hidden = false;
+  bar.value = 0;
+  document.getElementById("progressLabel").textContent = "Передача PDF…";
+  document.getElementById("progressCount").textContent = "0 из 4 этапов";
+  const result = await busy("Обработка PDF…", () => uploadPDFWithProgress(selectedPDF, track, event => {
+    bar.value = event.completed;
+    document.getElementById("progressLabel").textContent = event.label;
+    document.getElementById("progressCount").textContent = `${event.completed} из ${event.total} этапов`;
+  }));
+  button.disabled = false;
+  if (!result) { error.textContent = uploadState.textContent; error.hidden = false; return; }
+  progress.hidden = true;
+  selectedPDF = null;
+  openDocument(result);
 });
 
 function openDocument(item) {

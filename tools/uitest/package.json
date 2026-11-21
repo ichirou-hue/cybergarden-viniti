@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node harness.mjs",
     "e2e": "node e2e.mjs",
-    "passport": "node passport.mjs"
+    "passport": "node passport.mjs",
+    "profile": "node manual-profile.mjs"
   },
   "dependencies": {
     "jsdom": "^31.0.0"

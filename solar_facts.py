@@ -52,9 +52,31 @@ def unit_name(unit):
     return clean(unit).replace("²", "2").replace("^2", "2").replace(" ", "").replace("Ω", "Ohm")
 
 
+THOUSANDS = re.compile(r"(?<![\d.,])([1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?)(?![\d.,])")
+
+
+def plain_number(text):
+    """Drop a thousands separator only; a decimal comma is left untouched.
+
+    ``1,197`` is one thousand one hundred ninety-seven and the page prints it
+    that way, so a literal check has to read both spellings as the same token.
+    ``0,71`` is a decimal comma and ``0,710`` may be one too, so a group that
+    starts with a zero is never treated as thousands.
+    """
+    return THOUSANDS.sub(lambda match: match.group(1).replace(",", ""), clean(text))
+
+
+DECIMAL_COMMA = re.compile(r"(?<=\d),(?=\d{1,2}(?!\d))")
+
+
+def dotted(text):
+    """A decimal comma is the same number as a decimal point."""
+    return DECIMAL_COMMA.sub(".", text)
+
+
 def has_value(raw, quote, *, spread=""):
     """Match a complete original token, including context outside a short quote."""
-    raw, quote = clean(raw), clean(quote)
+    raw, quote = dotted(plain_number(raw)), dotted(plain_number(quote))
     if not raw:
         return False
     scalar = bool(NUMBER.fullmatch(raw))
@@ -77,12 +99,35 @@ def has_value(raw, quote, *, spread=""):
     return False
 
 
+def unit_pattern(unit):
+    """Regex for a printed unit, tolerant to how papers typeset it.
+
+    ``mA/cm2``, ``mA cm-2`` and ``mA cm−2`` are the same unit; a slash may be
+    printed as a space, and an exponent may carry a minus sign. Spaces and the
+    superscript marker are already gone after :func:`unit_name`.
+    """
+    normalized = unit_name(unit)
+    parts = []
+    for index, char in enumerate(normalized):
+        if char == "/":
+            parts.append(r"[/\s]*")
+        elif char == "*":
+            parts.append(r"[\*\u00b7\s]*")
+        elif char == "2" and index and (normalized[index - 1].isalpha() or normalized[index - 1] == ")"):
+            parts.append(r"\s*[-\u2212]?\s*2")
+        else:
+            parts.append(re.escape(char) + r"\s*")
+    return r"(?<![A-Za-z\u00b5\u03bc])" + "".join(parts) + r"(?![A-Za-z0-9\u00b5\u03bc])"
+
+
 def has_unit(unit, anchors):
     if not unit:
         return False
-    normalized = unit_name(unit)
-    pattern = r"(?<![A-Za-zµμ])" + r"\s*".join(re.escape(char) for char in normalized) + r"(?![A-Za-z0-9µμ])"
-    return any(re.search(pattern, clean(source["quote"]).replace("^2", "2").replace("Ω", "Ohm")) for source in anchors)
+    pattern = unit_pattern(unit)
+    # Keep the spaces: removing them would glue "%" to the next word and the
+    # boundary check would then reject a perfectly valid quote.
+    return any(re.search(pattern, clean(source["quote"]).replace("²", "2").replace("^2", "2").replace("Ω", "Ohm"))
+               for source in anchors)
 
 
 def verify_entities(tables, evidence):
@@ -103,8 +148,10 @@ def verify_entities(tables, evidence):
 
 
 def prepare_pdf(name, data):
-    if not data.startswith(b"%PDF-") or len(data) > MAX_BYTES:
+    if len(data) > MAX_BYTES:
         raise ValueError("Нужен PDF размером до 40 МиБ.")
+    if not data.startswith(b"%PDF-"):
+        raise ValueError("Файл не является PDF.")
     publication_id = Path(name.replace("\\", "/")).stem
     if not publication_id or len(publication_id) > 240:
         raise ValueError("Некорректное имя публикации.")
@@ -118,6 +165,18 @@ def prepare_pdf(name, data):
         **document, "publication_id": publication_id, "sha256": sha256(data).hexdigest(),
         "track": "solar", "schema_version": REVISION,
     }
+
+
+def same_number(left, right):
+    """Two printed spellings of one value: ``23`` and ``23.0`` are the same.
+
+    A duplicate may be restated with different precision, so the comparison is
+    numeric when both sides parse and literal otherwise.
+    """
+    try:
+        return decimal(left) == decimal(right)
+    except ValueError:
+        return clean(left) == clean(right)
 
 
 def validate_candidates(candidate, document):
@@ -232,7 +291,7 @@ def check_links(tables):
 def issue(tables, records, rule, description):
     first = records[0]
     tables["issues"].append({
-        "publication_id": first["publication_id"], "issue_id": f"I{len(tables['issues']) + 1:04}",
+        "publication_id": first["publication_id"], "issue_id": f"I{len(tables['issues']) + 1}",
         "record_ids": ";".join(row["result_id"] for row in records), "check_name": rule,
         "description": description, "source_page": first["source_page"],
         "source_fragment": first["source_fragment"],
@@ -250,7 +309,13 @@ def normalize(tables, evidence=None):
             row["note"] = (row["note"] + f" | Original spread: {original_spread} {row['raw_unit']}").strip(" |")
         if row["extraction_status"] != "extracted":
             continue
-        if evidence is not None and not has_unit(row["raw_unit"], evidence[f"results/{row['result_id']}"]):
+        target, factors = UNITS.get(row["metric_name"], ("", {}))
+        raw_unit = unit_name(row["raw_unit"])
+        # A fraction is a scale, not a printed unit: pages write "0.71" and never
+        # the word "fraction". A dimensionless metric likewise has no unit to
+        # find. Only the conversion table may accept these.
+        scale = raw_unit == "fraction" or (raw_unit == "" and "" in factors)
+        if evidence is not None and not scale and not has_unit(row["raw_unit"], evidence[f"results/{row['result_id']}"]):
             issue(tables, [row], "normalization", "Единица/шкала не подтверждена источниками: пересчёт не выполнялся.")
             continue
         try:
@@ -258,8 +323,6 @@ def normalize(tables, evidence=None):
         except ValueError:
             issue(tables, [row], "normalization", "Не одно конечное число: сохранена исходная запись.")
             continue
-        target, factors = UNITS.get(row["metric_name"], ("", {}))
-        raw_unit = unit_name(row["raw_unit"])
         factor = factors.get(raw_unit)
         if factor is None:
             issue(tables, [row], "normalization", "Неизвестная единица/шкала: пересчёт не выполнялся.")
@@ -376,9 +439,11 @@ def check_consistency(tables):
             if any(row[field] != original[field] for field in fields):
                 raise ValueError("duplicate_of объединяет разные результаты/условия.")
             if row["normalized_value"] and original["normalized_value"]:
-                equal = row["normalized_value"] == original["normalized_value"] and row["normalized_unit"] == original["normalized_unit"]
+                equal = same_number(row["normalized_value"], original["normalized_value"]) \
+                    and row["normalized_unit"] == original["normalized_unit"]
             else:
-                equal = clean(row["raw_value"]) == clean(original["raw_value"]) and clean(row["raw_unit"]) == clean(original["raw_unit"])
+                equal = same_number(row["raw_value"], original["raw_value"]) \
+                    and clean(row["raw_unit"]) == clean(original["raw_unit"])
             if not equal:
                 raise ValueError("duplicate_of объединяет разные значения.")
 
@@ -389,7 +454,7 @@ def finalize(candidate, document, *, model=""):
     check_consistency(tables)
     warnings = [*document["warnings"],
                 "Проверено буквальное наличие источников, но не научная корректность связей и полнота.",
-                "OCR и оцифровка графиков не реализованы; единицы raw_unit предложены моделью и требуют проверки."]
+                "OCR и оцифровка графиков не реализованы; единицы raw_unit нормализуются по словарю шаблона, остальные требуют ручной проверки."]
     return {
         **document, "tables": tables, "evidence": evidence, "warnings": warnings,
         "extraction": {"revision": REVISION, "model": model, "source_verification": "literal"},

@@ -32,6 +32,7 @@ import db as storage
 import auth
 import export_csv as result_export
 import profiles_store
+import profile_assistant
 
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
@@ -49,7 +50,7 @@ from rag_api import (
     render_anchor_png,
     sources as list_sources,
 )
-from solar_api import SolarStore
+from solar_api import SolarStore, solar_sources
 from solar_api import MAX_BYTES as SOLAR_MAX_BYTES
 
 
@@ -74,8 +75,8 @@ PARSE_KINDS = {"tables", "figures", "charts"}
 
 
 def static_file(path):
-    if path == "/manual-profile":
-        path = "/solar.html"
+    if path in ("/manual-profile", "/solar", "/solar.html"):
+        path = "/manual-profile.html"
     name = "index.html" if path in ("", "/") else unquote(path).lstrip("/")
     parts = Path(name).parts
     if not name or name.startswith("/") or "\\" in name or any(part in ("", ".", "..") for part in parts):
@@ -861,7 +862,10 @@ class Handler(BaseHTTPRequestHandler):
                     doc for doc in items
                     if q in " ".join([
                         str(doc.get("publication_id", "")), str(doc.get("title", "")),
-                        str(doc.get("year", "")), " ".join(doc.get("authors") or []),
+                        str(doc.get("year", "")),
+                        # solar stores authors as one string, RAG as a list
+                        doc.get("authors") if isinstance(doc.get("authors"), str)
+                        else " ".join(doc.get("authors") or []),
                     ]).lower()
                 ]
             status = single.get("status")
@@ -981,6 +985,10 @@ class Handler(BaseHTTPRequestHandler):
                 # request loop as an unhandled exception.
                 self.error(str(error), 400)
                 return
+            except (ImportError, RuntimeError):
+                log.exception("PNG preview rendering failed")
+                self.error("Не удалось создать PNG-превью. Откройте PDF напрямую.", 503)
+                return
             self.send_data(png, "image/png")
             return
 
@@ -1014,14 +1022,32 @@ class Handler(BaseHTTPRequestHandler):
         elif resource == "facets":
             self.send_json({"metrics": [], "ks": [], "datasets": [], "configs": [], "statuses": []})
         elif resource == "results":
-            items = envelope.get("results", [])
-            limit, offset = self._page(query)
+            try:
+                limit, offset = self._page(query)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            # The shared filter applies the search and the "issues only" switch;
+            # without it the catalog UI showed every row for any query.
+            items = filter_results(envelope, single)
             self.send_json({"total": len(items), "items": items[offset:offset + limit]})
         elif resource == "issues":
-            self.send_json({"total": 0, "items": []})
+            try:
+                limit, offset = self._page(query, default=200, maximum=500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = envelope.get("issues", [])
+            self.send_json({"total": len(items), "items": items[offset:offset + limit]})
         elif resource == "sources":
-            items = [row.get("source") for row in envelope.get("results", []) if row.get("source")]
-            self.send_json({"total": len(items), "items": items[:self._int(query, "limit", 200, 1, 500)]})
+            try:
+                limit = self._int(query, "limit", 200, 1, 500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = solar_sources(envelope, single.get("kind", ""),
+                                  (single.get("q") or "").strip().lower())
+            self.send_json({"total": len(items), "items": items[:limit]})
         elif resource == "entities":
             self.send_json({"total": 0, "items": []})
         elif resource == "anchors" and (key.endswith(".json") or key.endswith(".png")):
@@ -1053,6 +1079,10 @@ class Handler(BaseHTTPRequestHandler):
                 # page=0/None/out-of-range must answer 400, never crash the
                 # request loop.
                 self.error(str(error), 400)
+                return
+            except (ImportError, RuntimeError):
+                log.exception("Solar PNG preview rendering failed")
+                self.error("Не удалось создать PNG-превью. Откройте PDF напрямую.", 503)
                 return
             self.send_data(png, "image/png")
         elif resource == "export.json":
@@ -1137,6 +1167,21 @@ class Handler(BaseHTTPRequestHandler):
             self.auth_login(); return
         if path == "/api/auth/logout":
             self.auth_logout(); return
+        if path == "/api/profile/assist":
+            if self.require_user() is None:
+                return
+            raw = self.payload(64 * 1024, "application/json")
+            if raw is None:
+                return
+            try:
+                result = profile_assistant.suggest(json.loads(raw))
+            except (ValueError, UnicodeError, json.JSONDecodeError) as error:
+                self.error(str(error), 400)
+            except RuntimeError as error:
+                self.error(str(error), 503)
+            else:
+                self.send_json(result)
+            return
         if path == "/api/profile/source":
             if self.require_user() is None: return
             data = self.payload(MAX_BYTES, "application/pdf")
@@ -1162,6 +1207,11 @@ class Handler(BaseHTTPRequestHandler):
             session = self.require_user()
             if session is not None:
                 self.documents_post(path, session)
+            return
+        if path == "/api/documents/stream":
+            session = self.require_user()
+            if session is not None:
+                self.documents_stream(session)
             return
         if path.startswith("/api/profiles/"):
             if self.require_user() is not None:
@@ -1192,6 +1242,56 @@ class Handler(BaseHTTPRequestHandler):
                 self.profiles_delete(path)
             return
         self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def documents_stream(self, session):
+        track = self.headers.get("X-Track", "rag").strip().lower()
+        if track not in AREAS:
+            self.error("Недопустимая область. Допустимы: rag, solar.", 400)
+            return
+        limit = SOLAR_MAX_BYTES if track == "solar" else RAG_MAX_BYTES
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if not 0 < length <= limit or self.headers.get_content_type() != "application/pdf":
+            self.error(f"Нужен PDF размером до {limit // (1024 * 1024)} МиБ.", 400)
+            return
+        data = self.rfile.read(length)
+        if not data.startswith(b"%PDF-"):
+            self.error("Файл не является PDF.", 422)
+            return
+        name = unquote(self.headers.get("X-Filename", "article.pdf"))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.close_connection = True
+
+        def emit(completed, label, result=None, error=None):
+            message = {"completed": completed, "total": 4, "label": label}
+            if result is not None: message["result"] = result
+            if error is not None: message["error"] = error
+            self.wfile.write((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            emit(0, "PDF загружен")
+            if track == "solar":
+                result = self.solar_store().ingest(name, data, progress=emit)
+            else:
+                result = self.rag_store().ingest(name, data, track=track, progress=emit)
+            document_id = result.get("document_id") if isinstance(result, dict) else None
+            if not self.claim_uploaded_document(track, document_id, session):
+                emit(0, "Документ уже загружен другим пользователем.",
+                     error="Документ с таким содержимым уже загружен другим пользователем.")
+            else:
+                emit(4, "Обработка завершена", result=result)
+        except ValueError as error:
+            emit(0, "Ошибка обработки", error=str(error))
+        except Exception:
+            log.exception("Streaming PDF ingest failed")
+            emit(0, "Ошибка обработки", error="Ошибка обработки PDF. Подробности в консоли сервера.")
 
     def documents_post(self, path, session):
         track = self.headers.get("X-Track", "rag").strip().lower()
