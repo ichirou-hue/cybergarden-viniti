@@ -9,4 +9,4 @@ pdfplumber is not installed.
 
 # Bump together with the extractor. The old filler-based extractor used 1, so a
 # new value also makes ``batch --resume`` reprocess its old ``ok`` rows.
-PARSER_VERSION = 2
+PARSER_VERSION = 4

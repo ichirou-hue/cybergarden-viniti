@@ -37,8 +37,8 @@ export function getJSON(path, params = {}, signal) {
   return fetch(url, {signal, headers: JSON_HEADERS}).catch(networkError).then(unwrap);
 }
 
-export function uploadPDF(file, track, signal) {
-  return fetch("/api/documents", {
+export async function uploadPDF(file, track, signal) {
+  const summary = await fetch("/api/documents", {
     method: "POST",
     body: file,
     signal,
@@ -48,6 +48,17 @@ export function uploadPDF(file, track, signal) {
       "X-Filename": encodeURIComponent(file.name),
     },
   }).catch(networkError).then(unwrap);
+  if (summary.recognition_job_id) {
+    const path = "/api/parse/" + encodeURIComponent(summary.recognition_job_id);
+    let job;
+    do {
+      if (signal?.aborted) throw new DOMException("Загрузка отменена", "AbortError");
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      job = await getJSON(path, {}, signal);
+    } while (job.status === "queued" || job.status === "running");
+    if (job.status !== "ok") throw new Error("Docling: " + (job.error || "разбор не завершён"));
+  }
+  return summary;
 }
 
 export function openDemo(track, signal) {

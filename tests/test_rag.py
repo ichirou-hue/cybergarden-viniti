@@ -12,7 +12,7 @@ from rag.extract import (
     resolve_generator,
 )
 from rag.grid import _row_label, find_tables
-from rag.pdf import Line, Page, Word
+from rag.pdf import Line, Page, Word, _page_lines
 from rag.vocab import (
     canonical_dataset,
     looks_like_generator,
@@ -193,6 +193,44 @@ class GridTests(unittest.TestCase):
             ),
         )
         self.assertEqual(_row_label(line, numbers), "RA-CoT")
+
+
+class PdfColumnTests(unittest.TestCase):
+    @staticmethod
+    def page(rows):
+        class FakePage:
+            def get_text(self, mode):
+                return [(x, y, x + len(text) * 4, y + 10, text, 0, index, word)
+                        for index, (y, tokens) in enumerate(rows)
+                        for word, (x, text) in enumerate(tokens)]
+        return FakePage()
+
+    def test_two_column_prose_is_not_joined(self):
+        rows = [(20 + i * 15, [(40, "Left"), (65, "column"), (100, "text"),
+                              (320, "Right"), (350, "column"), (385, "text")])
+                for i in range(3)]
+        lines = _page_lines(self.page(rows))
+        self.assertEqual(len(lines), 6)
+        self.assertEqual([line.column for line in lines], [1, 2, 1, 2, 1, 2])
+        self.assertTrue(all(line.text in {"Left column text", "Right column text"} for line in lines))
+        self.assertTrue(all(line.x1 < 200 or line.x0 > 300 for line in lines))
+
+    def test_established_gutter_splits_short_prose_but_keeps_numeric_rows(self):
+        rows = [(20 + i * 15, [(40, "Left"), (65, "column"), (100, "text"),
+                              (320, "Right"), (350, "column"), (385, "text")])
+                for i in range(3)]
+        rows.extend([(70, [(40, "Short"), (320, "Separate")]),
+                     (85, [(40, "Method"), (100, "0.204"), (320, "0.330")])])
+        lines = _page_lines(self.page(rows))
+        self.assertEqual([line.text for line in lines[-3:]], ["Short", "Separate", "Method 0.204 0.330"])
+
+    def test_table_gaps_do_not_establish_prose_columns(self):
+        rows = [(20 + i * 15, [(40, "Method"), (100, "0.204"), (320, "0.330")])
+                for i in range(4)]
+        lines = _page_lines(self.page(rows))
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(all(line.text == "Method 0.204 0.330" for line in lines))
+        self.assertTrue(all(line.column == 0 for line in lines))
 
 
 if __name__ == "__main__":

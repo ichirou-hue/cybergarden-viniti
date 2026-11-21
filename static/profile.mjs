@@ -138,7 +138,7 @@ function showMatches(profile, browseAll) {
       const label = document.createElement("label");
       const input = document.createElement("input");
       input.type = "checkbox";
-      label.append(input, " Стр. " + source.page + " · " + source.quote);
+      label.append(input, " Стр. " + source.page + " · " + (source.display_text || source.quote));
       panel.append(label);
       selection.push({type: type.name, source, input});
     }
@@ -164,6 +164,31 @@ function scan(browseAll) {
 byId("scanProfile").onclick = () => scan(false);
 byId("browseProfile").onclick = () => scan(true);
 
+async function parseResponse(response) {
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Не удалось прочитать PDF.");
+  return data;
+}
+
+async function readPdf(file) {
+  let job = await parseResponse(await fetch("/api/parse", {
+    method: "POST",
+    headers: {"Content-Type": "application/pdf", "X-Parser": "auto", "X-Profile": "solar",
+      "X-Filename": encodeURIComponent(file.name)},
+    body: file,
+  }));
+  const path = "/api/parse/" + encodeURIComponent(job.id);
+  while (job.status === "queued" || job.status === "running") {
+    status.textContent = job.status === "queued" ? "PDF ожидает своей очереди…"
+      : "Docling распознаёт структуру, текст и формулы. Это может занять несколько минут…";
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    job = await parseResponse(await fetch(path, {cache: "no-store"}));
+  }
+  if (job.status !== "ok") throw new Error(job.error || "Разбор PDF завершился с ошибкой.");
+  const result = await parseResponse(await fetch(path + "/result", {cache: "no-store"}));
+  return {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []};
+}
+
 upload.onchange = async () => {
   const file = upload.files[0];
   if (!file) return;
@@ -172,18 +197,14 @@ upload.onchange = async () => {
   documentData = undefined;
   clearMatches();
   byId("profilePanel").hidden = false;
-  status.textContent = "Читаем PDF…";
+  status.textContent = "Docling распознаёт структуру, текст и формулы. Это может занять несколько минут…";
   try {
-    const response = await fetch("/api/profile/source", {
-      method: "POST", headers: {"Content-Type": "application/pdf"}, body: file,
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
+    const data = await readPdf(file);
     documentData = {...data, filename: file.name};
+    if (!entities.children.length) applyPreset("basic");
     status.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
       + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
     form.hidden = false;
-    if (!entities.children.length) applyPreset("basic");
   } catch (error) {
     status.textContent = error.message;
   } finally {

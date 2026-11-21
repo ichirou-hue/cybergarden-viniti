@@ -83,7 +83,7 @@ DEFAULT_BUDGET = 6000
 DEFAULT_OVERLAP = 1
 # Bump when the parse itself changes (pdf_source, the envelope), so a stored
 # parser_version says which code produced the documents/blocks rows.
-PARSER_VERSION = 4
+PARSER_VERSION = 6
 # Extractor rows use their own id space so a rerun can clear them without ever
 # touching rows imported from dev_gold (which are R### / R#-#).
 RESULT_PREFIX = "X"

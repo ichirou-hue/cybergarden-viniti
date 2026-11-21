@@ -29,7 +29,7 @@ from rag.text import norm
 from csv_safe import safe_csv_value
 
 MAX_BYTES = 20 * 1024 * 1024
-HANDLER_REVISION = 1
+HANDLER_REVISION = 2
 TRACK = "rag"
 
 STATUS_LABELS = {
@@ -433,6 +433,9 @@ def _text_sources(document: Document) -> list[dict[str, Any]]:
                 "quote": text,
                 "fragment": text,
                 "bbox": [line.x0, line.y0, line.x1, line.y1],
+                "column": line.column,
+                "column_count": 2 if line.column else 1,
+                "block_id": f"p{page.number}-b{source_id}",
             })
             if len(items) >= 500:
                 return items
@@ -691,7 +694,7 @@ class RagStore:
             raise ValueError("Нужен PDF размером до 20 МиБ.")
         content_hash = hashlib.sha256(data).hexdigest()
         existing = self.find_by_hash(content_hash)
-        if existing and not forced_id:
+        if existing and not forced_id and existing.get("handler_revision") == HANDLER_REVISION:
             return existing
 
         raw_name = Path(str(name).replace("\\", "/")).name[:240] or "article.pdf"
@@ -876,6 +879,7 @@ def sources(envelope: dict[str, Any], params: dict[str, str]) -> list[dict[str, 
                 "kind": "text",
                 "fragment": source.get("fragment", ""),
                 "quote": source.get("fragment", ""),
+                **{key: source[key] for key in ("bbox", "column", "column_count", "block_id") if key in source},
             })
     items.sort(key=lambda item: (item["page"], item["source_id"]))
     return items

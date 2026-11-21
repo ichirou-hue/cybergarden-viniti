@@ -1,4 +1,4 @@
-"""Разбор одного PDF по профилю без LLM: источники, кандидаты и артефакты парсера."""
+"""Разбор PDF через Docling с OCR и формулами, без связывания фактов LLM."""
 
 import argparse
 import json
@@ -10,6 +10,8 @@ from solar_facts import MAX_BYTES
 
 
 def parse(args):
+    if args.parser == "auto":
+        args.parser = "docling"
     if args.output.exists():
         raise ValueError("Каталог результата уже существует.")
     if args.charts and args.parser != "docling":
@@ -22,7 +24,10 @@ def parse(args):
     if len(data) > MAX_BYTES:
         raise ValueError("PDF больше 40 МиБ.")
     profile = load_profile(args.profile)
-    if args.parser == "docling":
+    if args.parser == "vision":
+        from vision_source import prepare_pdf as prepare_vision
+        document, assets = prepare_vision(path.name, data)
+    elif args.parser == "docling":
         from docling_source import prepare_pdf as prepare_docling
         document, assets = prepare_docling(path.name, data, ocr=args.ocr, charts=args.charts)
     else:
@@ -39,7 +44,7 @@ def parse(args):
     result["coverage"]["reason"] = (
         f"Парсер {args.parser}; OCR {args.ocr if args.parser == 'docling' else 'off'}; "
         f"графики {'запрошены' if args.charts else 'выключены'}. "
-        "Извлечение структуры моделью не выполнялось, кандидаты не являются научными фактами."
+        "Смысловое связывание научных фактов не выполнялось, кандидаты требуют проверки."
     )
     export_result(result, args.output, assets=assets)
     print(json.dumps({
@@ -54,12 +59,12 @@ def parse(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="PDF + профиль -> разбор без LLM: источники, кандидаты и артефакты.")
+        description="PDF + профиль -> источники, кандидаты и артефакты; auto использует локальный Docling.")
     parser.add_argument("pdf", type=Path)
     parser.add_argument("--profile", required=True, help="solar, custom-example или путь к JSON-профилю.")
     parser.add_argument("--publication-id", default="", help="Исходное имя публикации без расширения.")
     parser.add_argument("-o", "--output", required=True, type=Path)
-    parser.add_argument("--parser", choices=["pdfplumber", "docling"], default="pdfplumber")
+    parser.add_argument("--parser", choices=["auto", "vision", "pdfplumber", "docling"], default="auto")
     parser.add_argument("--ocr", choices=["auto", "full", "off"], default="auto", help="Только для Docling.")
     parser.add_argument("--charts", action="store_true",
                         help="Только Docling: локальный chart2csv VLM, результаты требуют проверки.")

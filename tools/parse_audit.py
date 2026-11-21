@@ -33,6 +33,11 @@ def _json_bytes(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _source_item(source):
+    return {key: source[key] for key in ("id", "page", "kind", "bbox", "quote", "table", "row")
+            if key in source}
+
+
 def _atomic_json(path, value, pretty=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,9 +130,12 @@ def build_artifacts(pdf_path, budget_chars=extract.DEFAULT_BUDGET,
     parsed = pdf_source.extract(data)
     windows = extract.context_windows(parsed["sources"], budget_chars=budget_chars,
                                       overlap=overlap)
+    source_map = {source["id"]: source for source in parsed["sources"]}
     # Hash the stable semantic window payload, not dict insertion order or filesystem data.
     for window in windows:
         window["source_ids"] = list(window["sources"])
+        window["items"] = [_source_item(source_map[source_id])
+                           for source_id in window["source_ids"]]
         window["window_hash"] = hashlib.sha256(_json_bytes({
             "page": window["page"], "source_ids": window["source_ids"],
             "text": window["text"],
@@ -251,9 +259,7 @@ def validate_artifact(path):
         for source_id, item in zip(source_ids, items):
             if not isinstance(item, dict):
                 raise ValueError("window item must be an object")
-            canonical = {key: source_map[source_id].get(key) for key in
-                         ("id", "page", "kind", "bbox", "quote", "table", "row")
-                         if key in source_map[source_id]}
+            canonical = _source_item(source_map[source_id])
             if item != canonical:
                 raise ValueError("window item does not match source")
         if any(source_map[item]["page"] != window.get("page") for item in source_ids):

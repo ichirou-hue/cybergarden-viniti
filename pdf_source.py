@@ -3,6 +3,7 @@ from io import BytesIO
 import re
 
 import pdfplumber
+from native_math import attach_script_lines
 
 
 MAX_PAGES = 250
@@ -191,6 +192,94 @@ def page_texts(data):
             return {page.page_number: page.extract_text() or "" for page in pdf.pages}
 
 
+def column_sources(lines, page_number, tables=()):
+    """Split repeated horizontal gutters; retain full-width headings as bands.
+
+    Geometry only: no rewriting, equation reconstruction or semantic linking.
+    A gutter needs at least three independent lines of support.
+    """
+    prepared, gaps = [], []
+    lines = list(lines)
+    for source in tables:
+        left, top, right, bottom = source["bbox"]
+        lines.append({"text": source["quote"], "top": top, "x0": left, "_source": source,
+                      "chars": [{"x0": left, "x1": right, "top": top, "bottom": bottom, "text": source["quote"]}]})
+    for line in lines:
+        chars = sorted((c for c in line["chars"] if c["text"].strip()), key=lambda c: c["x0"])
+        if not chars:
+            continue
+        prepared.append((line, chars))
+        for left, right in zip(chars, chars[1:]):
+            gap = right["x0"] - left["x1"]
+            size = max(left.get("size", 10), right.get("size", 10))
+            if gap >= max(24, 2 * size):
+                gaps.append((left["x1"], right["x0"], len(prepared) - 1))
+    # Baselines in different columns need not align. Also compare neighboring
+    # line boxes with overlapping vertical ranges, independent of line merging.
+    nearby = sorted(enumerate(prepared), key=lambda item: item[1][0]["top"])
+    for offset, (index, (_, chars)) in enumerate(nearby):
+        a = bounds(chars)
+        height = a[3] - a[1]
+        for other_index, (_, other_chars) in nearby[offset + 1:]:
+            b = bounds(other_chars)
+            if b[1] > a[3] + height / 2:
+                break
+            left, right = (a, b) if a[0] < b[0] else (b, a)
+            if right[0] - left[2] >= max(24, 2 * height):
+                gaps.append((left[2], right[0], index))
+                gaps.append((left[2], right[0], other_index))
+    # Choose a cut inside the most widely supported whitespace interval, rather
+    # than assuming that the page midpoint separates columns.
+    cuts = []
+    for left, right, _ in gaps:
+        cut = (left + right) / 2
+        supporters = {index for lo, hi, index in gaps if lo + 4 <= cut <= hi - 4}
+        if len(supporters) >= 3:
+            cuts.append((len(supporters), cut))
+    gutter = max(cuts)[1] if cuts else None
+    pending, result, band = [], [], 1
+
+    def flush():
+        nonlocal band
+        for source in sorted(pending, key=lambda s: (s["column"], s["bbox"][1], s["bbox"][0])):
+            source["layout_band"] = band
+            result.append(source)
+        pending.clear()
+        band += 1
+
+    for line, chars in sorted(prepared, key=lambda item: (item[0]["top"], item[0]["x0"])):
+        groups = [chars]
+        if gutter is not None and any(left["x1"] < gutter < right["x0"]
+                                      and right["x0"] - left["x1"] >= max(24, 2 * max(left.get("size", 10), right.get("size", 10)))
+                                      for left, right in zip(chars, chars[1:])):
+            groups = [[c for c in chars if c["x1"] <= gutter], [c for c in chars if c["x0"] >= gutter]]
+        for group in groups:
+            if not group:
+                continue
+            box = bounds(group)
+            spanning = gutter is not None and box[0] < gutter < box[2]
+            detail = line
+            if len(groups) > 1:
+                raw_quote = pdfplumber.utils.extract_text(group, x_tolerance=X_TOLERANCE).strip()
+                detail = attach_script_lines([{**line, "text": raw_quote, "chars": group}])[0]
+            quote = detail["text"]
+            kind = "caption" if CAPTION.match(quote) else "equation" if EQUATION.match(quote) else "text"
+            column = 0 if spanning else 1 if gutter is None or box[2] <= gutter else 2
+            source = {"page": page_number, "bbox": box, "quote": quote, "kind": kind,
+                      **line.get("_source", {}),
+                      **{key: detail[key] for key in ("math_spans", "display_text", "original_lines") if key in detail},
+                      "column": column, "column_count": 2 if gutter is not None else 1}
+            if spanning:
+                flush()
+                source["layout_band"] = band
+                result.append(source)
+                band += 1
+            else:
+                pending.append(source)
+    flush()
+    return result
+
+
 def extract(data):
     sources, warnings, fallback_pages = [], [], []
     with pdfplumber.open(BytesIO(data)) as pdf:
@@ -214,26 +303,21 @@ def extract(data):
                 page.close()
                 continue
             tables = find_tables(deduped)
-            sources.extend(table_rows(tables, words, page))
+            rows = list(table_rows(tables, words, page))
             # Extract lines after excluding words belonging to detected tables.
             text = deduped.filter(
                 lambda obj: obj.get("object_type") != "char"
                 or not any(is_inside(obj, table.bbox) for table in tables)
             )
-            for line in text.extract_text_lines(return_chars=True, x_tolerance=X_TOLERANCE):
-                chars = [char for char in line["chars"] if char["text"].strip()]
-                if not chars:
-                    continue
-                quote = line["text"]
-                kind = "caption" if CAPTION.match(quote) else "equation" if EQUATION.match(quote) else "text"
-                sources.append({
-                    "page": page.page_number, "bbox": bounds(chars),
-                    "quote": quote, "kind": kind,
-                })
+            lines = attach_script_lines(text.extract_text_lines(return_chars=True, x_tolerance=X_TOLERANCE))
+            sources.extend(column_sources(lines, page.page_number, rows))
             page.close()
-        sources.sort(key=lambda source: (source["page"], source["bbox"][1], source["bbox"][0]))
+        # Stable page order preserves column/band reading order of text sources.
+        sources.sort(key=lambda source: source["page"])
         for index, source in enumerate(sources, 1):
             source["id"] = index
+            source["block_id"] = f"p{source['page']}-b{index}"
+            source["reading_order"] = index
         return {
             "title": metadata.get("title", ""), "author": metadata.get("author", ""),
             "pages": len(pdf.pages), "sources": sources, "warnings": warnings,

@@ -5,13 +5,13 @@ from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from docling_source import normalize_document, page_anchor, prepare_pdf, table_grid
+from docling_source import make_converter, normalize_document, page_anchor, prepare_pdf, table_grid
 from extraction_core import export_result, load_profile, run
 from test_solar import ROOT, synthetic_pdf
 
@@ -51,6 +51,78 @@ def fixture():
 
 
 class DoclingAdapterTest(unittest.TestCase):
+    def test_converter_enables_builtin_formula_and_script_recovery(self):
+        options = SimpleNamespace(script_position_options=SimpleNamespace(enabled=False))
+        modules = {name: ModuleType(name) for name in (
+            "docling.datamodel.base_models", "docling.datamodel.pipeline_options", "docling.document_converter",
+        )}
+        modules["docling.datamodel.base_models"].InputFormat = SimpleNamespace(PDF="pdf")
+        pipeline = modules["docling.datamodel.pipeline_options"]
+        pipeline.PdfPipelineOptions = lambda: options
+        pipeline.TesseractCliOcrOptions = Mock()
+        converter = modules["docling.document_converter"]
+        converter.PdfFormatOption = lambda **kwargs: SimpleNamespace(**kwargs)
+        converter.DocumentConverter = Mock()
+        with patch.dict(sys.modules, modules):
+            make_converter(ocr="off")
+        self.assertTrue(options.do_formula_enrichment)
+        self.assertTrue(options.script_position_options.enabled)
+        configured = converter.DocumentConverter.call_args.kwargs["format_options"]["pdf"].pipeline_options
+        self.assertIs(configured, options)
+
+    def test_body_reference_order_preserves_columns_and_interleaved_tables(self):
+        raw = fixture()
+        first = deepcopy(raw["texts"][0])
+        first["text"] = "Left column bottom"
+        first["prov"][0]["bbox"].update(l=20, r=250, b=100, t=120)
+        second = deepcopy(raw["texts"][0])
+        second["text"] = "Right column top"
+        second["prov"][0]["bbox"].update(l=300, r=550, b=700, t=720)
+        raw["texts"] = [first, second]
+        raw["groups"] = [{"label": "section", "children": [{"$ref": "#/texts/0"}, {"$ref": "#/tables/0"}]}]
+        raw["body"] = {"children": [{"$ref": "#/groups/0"}, {"$ref": "#/texts/1"}, {"$ref": "#/pictures/0"}]}
+        document, _ = normalize_document(raw)
+        self.assertEqual([s["quote"] for s in document["sources"]],
+                         ["Left column bottom", "Device | PCE (%)", "A | 20", "Right column top"])
+        self.assertEqual([s["reading_order"] for s in document["sources"]], [1, 2, 3, 4])
+
+    def test_docling_inline_script_runs_reconstruct_parent_without_duplicate_indices(self):
+        raw = fixture()
+        parent = raw["texts"][0]
+        parent.update(text="", children=[{"$ref": "#/groups/0"}])
+        runs = []
+        for text, script in (("SrCl", "baseline"), ("2", "sub"), ("-doped CsPbI", "baseline"),
+                             ("2", "sub"), ("Br", "baseline")):
+            item = deepcopy(parent)
+            item.pop("children")
+            item.update(text=text, formatting={"script": script})
+            raw["texts"].append(item)
+            runs.append({"$ref": f"#/texts/{len(raw['texts']) - 1}"})
+        raw["groups"] = [{"label": "inline", "children": runs}]
+        raw["body"] = {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"}]}
+        document, _ = normalize_document(raw)
+        source = next(s for s in document["sources"] if s["docling_ref"] == "#/texts/0")
+        self.assertEqual(source["quote"], "SrCl2-doped CsPbI2Br")
+        self.assertEqual(source["display_text"], "SrCl_{2}-doped CsPbI_{2}Br")
+        self.assertEqual(len(source["inline_runs"]), 5)
+        self.assertFalse(any(s["quote"] == "2" for s in document["sources"]))
+
+    def test_formula_label_keeps_enriched_latex_as_unverified_parser_text(self):
+        raw = fixture()
+        raw["texts"][0].update(label="formula", text=r"E=\frac{hc}{\lambda}")
+        document, _ = normalize_document(raw)
+        source = next(s for s in document["sources"] if s["kind"] == "equation")
+        self.assertEqual(source["latex"], r"E=\frac{hc}{\lambda}")
+        self.assertEqual(source["verification"], "parser_text_only")
+        self.assertTrue(source["requires_review"])
+
+    def test_cyclic_body_reference_rejected(self):
+        raw = fixture()
+        raw["groups"] = [{"label": "section", "children": [{"$ref": "#/groups/0"}]}]
+        raw["body"] = {"children": [{"$ref": "#/groups/0"}]}
+        with self.assertRaisesRegex(ValueError, "Цикл"):
+            normalize_document(raw)
+
     def test_coordinate_origin_and_table_scope(self):
         document, assets = normalize_document(fixture(), charts=True)
         text = next(source for source in document["sources"] if source["kind"] == "text")

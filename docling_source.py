@@ -34,6 +34,10 @@ def make_converter(*, ocr="auto", charts=False):
     except ImportError:
         raise ValueError("Docling недоступен. Установите requirements-docling.txt в отдельном окружении Python 3.11+.") from None
     options = PdfPipelineOptions()
+    options.do_formula_enrichment = True
+    if not hasattr(options, "script_position_options"):
+        raise ValueError("Установленный Docling не поддерживает восстановление индексов; установите requirements-docling.txt.")
+    options.script_position_options.enabled = True
     options.do_ocr = ocr != "off"
     options.generate_picture_images = True
     options.generate_page_images = False
@@ -140,21 +144,99 @@ def table_metadata(data):
     return {key: data[key] for key in ("num_rows", "num_cols", "table_cells", "orientation") if key in data}
 
 
+def document_structure(raw):
+    """Resolve Docling's own body tree and inline formatting, without re-layout."""
+    nodes = {}
+    for collection in ("texts", "tables", "pictures", "groups"):
+        values = raw.get(collection, [])
+        if not isinstance(values, list):
+            raise ValueError("Неверная коллекция DoclingDocument.")
+        for index, item in enumerate(values):
+            if not isinstance(item, dict):
+                raise ValueError("Неверный элемент DoclingDocument.")
+            nodes[f"#/{collection}/{index}"] = item
+
+    def children(item):
+        refs = item.get("children", [])
+        if not isinstance(refs, list):
+            raise ValueError("Неверные children DoclingDocument.")
+        for reference in refs:
+            pointer = reference.get("$ref", reference.get("cref")) if isinstance(reference, dict) else None
+            if not isinstance(pointer, str) or pointer not in nodes:
+                raise ValueError("Неизвестная ссылка в структуре DoclingDocument.")
+            yield pointer
+
+    order, visited, active = {}, set(), set()
+
+    def visit(pointer, depth=0):
+        if depth > 100 or pointer in active:
+            raise ValueError("Цикл или слишком глубокая структура DoclingDocument.")
+        if pointer in visited:
+            return
+        visited.add(pointer)
+        active.add(pointer)
+        order[pointer] = len(order)
+        for child in children(nodes[pointer]):
+            visit(child, depth + 1)
+        active.remove(pointer)
+
+    body = raw.get("body")
+    if body is not None:
+        if not isinstance(body, dict):
+            raise ValueError("Неверный body DoclingDocument.")
+        for child in children(body):
+            visit(child)
+
+    # ScriptPositionModel leaves the original text item in the body and moves
+    # its text into inline-group runs, each carrying formatting.script.
+    consumed, inline = set(), {}
+
+    def runs(pointer, active_refs):
+        if pointer in active_refs or len(active_refs) > 100:
+            raise ValueError("Цикл в inline-группе DoclingDocument.")
+        item = nodes[pointer]
+        consumed.add(pointer)
+        if pointer.startswith("#/texts/"):
+            text = item.get("text", "")
+            if not isinstance(text, str):
+                raise ValueError("Неверный текст inline-элемента Docling.")
+            if text:
+                yield {"text": text, "formatting": item.get("formatting") or {}, "ref": pointer,
+                       "prov": item.get("prov", []), "orig": item.get("orig", text)}
+        for child in children(item):
+            yield from runs(child, active_refs | {pointer})
+
+    for pointer, item in nodes.items():
+        if not pointer.startswith("#/texts/"):
+            continue
+        groups = [child for child in children(item) if nodes[child].get("label") == "inline"]
+        if groups:
+            inline[pointer] = [run for group in groups for run in runs(group, set())]
+    return order, consumed, inline, body is not None
+
+
 def normalize_document(raw, *, charts=False):
     """Normalize the versioned DoclingDocument JSON contract, not inferred text."""
     if not isinstance(raw, dict) or not isinstance(raw.get("pages"), dict) or not raw["pages"]:
         raise ValueError("Docling не вернул страницы документа.")
     sources, tables, figures, visual_candidates, warnings, assets = [], [], [], [], [], {}
     pages = {str(key): value for key, value in raw["pages"].items()}
+    order, consumed, inline, has_body = document_structure(raw)
     for collection in ("texts", "tables", "pictures"):
         if not isinstance(raw.get(collection, []), list):
             raise ValueError("Неверная коллекция DoclingDocument.")
-    for item in raw.get("texts", []):
+    for text_index, item in enumerate(raw.get("texts", [])):
+        reference = f"#/texts/{text_index}"
+        if reference in consumed:
+            continue
         if not isinstance(item, dict):
             raise ValueError("Неверный текстовый элемент Docling.")
         text = item.get("text", "")
         if not isinstance(text, str):
             raise ValueError("Неверный текст Docling.")
+        formatted_runs = inline.get(reference, [])
+        if formatted_runs:
+            text += "".join(run["text"] for run in formatted_runs)
         if not text.strip():
             continue
         try:
@@ -162,7 +244,23 @@ def normalize_document(raw, *, charts=False):
         except ValueError as error:
             warnings.append(f"Текст пропущен: {error}")
             continue
-        sources.append({**anchor, "quote": text, "kind": "caption" if item.get("label") == "caption" else "text"})
+        label = item.get("label")
+        kind = "caption" if label == "caption" else "equation" if label == "formula" else "text"
+        source = {**anchor, "quote": text, "kind": kind, "docling_ref": reference,
+                  "docling_label": label, "requires_review": True}
+        if kind == "equation":
+            source.update(latex=text, display_text=text)
+        if formatted_runs:
+            pieces = [item.get("text", "")]
+            for run in formatted_runs:
+                formatting = run["formatting"]
+                if not isinstance(formatting, dict):
+                    raise ValueError("Неверное форматирование Docling.")
+                script = formatting.get("script", "baseline")
+                value = run["text"]
+                pieces.append(("_{" + value + "}") if script == "sub" else ("^{" + value + "}") if script == "super" else value)
+            source.update(display_text="".join(pieces), inline_runs=formatted_runs)
+        sources.append(source)
     for index, item in enumerate(raw.get("tables", []), 1):
         if not isinstance(item, dict):
             raise ValueError("Неверный табличный элемент Docling.")
@@ -174,13 +272,14 @@ def normalize_document(raw, *, charts=False):
             continue
         path = f"assets/tables/table-{index:04}.csv"
         assets[path] = csv_bytes(grid)
-        tables.append({**anchor, "id": index, "csv": path, "data": table_metadata(item["data"]),
+        tables.append({**anchor, "id": index, "docling_ref": f"#/tables/{index - 1}", "csv": path, "data": table_metadata(item["data"]),
                        "status": "requires_review"})
         for row_index, row in enumerate(grid, 1):
             if any(row):
                 cells = [{**anchor, "quote": text, "kind": "cell", "bbox_scope": "table"} if text else None for text in row]
                 sources.append({**anchor, "bbox_scope": "table", "quote": " | ".join(row),
-                                "kind": "table", "table": index, "row": row_index, "cells": cells})
+                                "kind": "table", "table": index, "row": row_index, "cells": cells,
+                                "docling_ref": f"#/tables/{index - 1}"})
     for index, item in enumerate(raw.get("pictures", []), 1):
         if not isinstance(item, dict):
             raise ValueError("Неверное изображение Docling.")
@@ -202,7 +301,8 @@ def normalize_document(raw, *, charts=False):
                 if position < len(raw.get("texts", [])):
                     captions.append(raw["texts"][position].get("text", ""))
         figure = {**anchor, "id": index, "image": f"assets/figures/figure-{index:04}.png",
-                  "caption": " ".join(captions), "status": "requires_review"}
+                  "caption": " ".join(captions), "status": "requires_review",
+                  "docling_ref": f"#/pictures/{index - 1}"}
         figures.append(figure)
         metadata = item.get("meta") or {}
         if not isinstance(metadata, dict):
@@ -233,9 +333,19 @@ def normalize_document(raw, *, charts=False):
         raise ValueError("Таблицы/графики превышают лимит артефактов 32 МиБ.")
     if charts and not visual_candidates:
         warnings.append("Chart extraction запрошен, но числовые данные графиков не получены. Это не доказательство отсутствия графиков.")
-    sources.sort(key=lambda source: (source["page"], source["bbox"][1], source["bbox"][0]))
+    if has_body:
+        if any(source["docling_ref"] not in order for source in sources):
+            warnings.append("Некоторые блоки отсутствуют в Docling body: они сохранены после основного текста; их порядок требует проверки.")
+        sources.sort(key=lambda source: order.get(source["docling_ref"], len(order)))
+        for collection in (tables, figures):
+            collection.sort(key=lambda item: order.get(item["docling_ref"], len(order)))
+    else:
+        warnings.append("Docling body отсутствует: порядок чтения не подтверждён; использован порядок координат.")
+        sources.sort(key=lambda source: (source["page"], source["bbox"][1], source["bbox"][0]))
     for index, source in enumerate(sources, 1):
         source["id"] = index
+        source["block_id"] = source["docling_ref"]
+        source["reading_order"] = index
     return {
         "pages": len(pages), "sources": sources, "tables": tables, "figures": figures,
         "visual_candidates": visual_candidates, "warnings": warnings,
@@ -299,6 +409,7 @@ def prepare_pdf(name, data, *, ocr="auto", charts=False, converter=None):
     }
     parser_output["parser"] = {
         "name": "docling", "version": installed, "ocr": ocr, "charts_requested": charts,
+        "formula_enrichment": True, "script_position_recovery": True,
         "conversion_status": status, "document_schema_version": raw.get("version", ""),
         "elapsed_seconds": round(monotonic() - started, 6),
     }

@@ -221,6 +221,9 @@ class DocumentApiTest(unittest.TestCase):
     """The Solar document endpoints must serve what the envelope actually holds."""
 
     def setUp(self):
+        catalog_parse = mock.patch("server.Handler.start_catalog_parse", return_value="test-docling-job")
+        catalog_parse.start()
+        self.addCleanup(catalog_parse.stop)
         from library import Library
         from server import Handler, ThreadingHTTPServer
         from test_solar_offline import TABLE_PAGE, make_pdf

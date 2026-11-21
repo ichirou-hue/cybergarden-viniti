@@ -40,6 +40,7 @@ class Line:
     x1: float
     y1: float
     words: tuple[Word, ...] = ()
+    column: int = 0  # 0: full-width/unknown; 1: left, 2: right
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,7 @@ class Document:
 
 
 def _page_lines(page) -> tuple[Line, ...]:
-    """Строки с координатами: слова группируются по вертикали, затем по x."""
+    """Строки с координатами; устойчивый пробел между колонками разделяет прозу."""
     words = [
         (float(x0), float(y0), float(x1), float(y1), text)
         for x0, y0, x1, y1, text, _block_no, _line_no, _word_no in page.get_text("words")
@@ -105,22 +106,54 @@ def _page_lines(page) -> tuple[Line, ...]:
         else:
             rows.append({"center": center, "words": [(x0, y0, x1, y1, text)]})
 
+    # Table cells often have large gaps, too. Only repeated prose rows can
+    # establish a column gutter; numeric table rows never vote for a split.
+    def prose(items):
+        return len(items) >= 6 and sum(any(c.isdigit() for c in item[4]) for item in items) < len(items) / 3
+
+    gaps = []
+    for row_index, row in enumerate(rows):
+        items = sorted(row["words"], key=lambda item: item[0])
+        if not prose(items):
+            continue
+        for left, right in zip(items, items[1:]):
+            if right[0] - left[2] >= max(24, 2 * max(left[3] - left[1], right[3] - right[1])):
+                gaps.append((left[2], right[0], row_index))
+    cuts = []
+    for left, right, _ in gaps:
+        cut = (left + right) / 2
+        support = {index for lo, hi, index in gaps if lo + 4 <= cut <= hi - 4}
+        if len(support) >= 3:
+            cuts.append((len(support), cut))
+    gutter = max(cuts)[1] if cuts else None
+
     lines: list[Line] = []
     for row in rows:
-        items = tuple(
-            Word(text=text, x0=x0, y0=y0, x1=x1, y1=y1)
-            for x0, y0, x1, y1, text in sorted(row["words"], key=lambda item: item[0])
-        )
-        lines.append(
-            Line(
-                text=" ".join(item.text for item in items),
-                x0=min(item.x0 for item in items),
-                y0=min(item.y0 for item in items),
-                x1=max(item.x1 for item in items),
-                y1=max(item.y1 for item in items),
-                words=items,
+        ordered = sorted(row["words"], key=lambda item: item[0])
+        groups = [ordered]
+        numeric = sum(any(c.isdigit() for c in item[4]) for item in ordered)
+        table_row = numeric >= 2 and numeric >= len(ordered) / 3
+        if gutter is not None and not table_row:
+            left = [item for item in ordered if item[2] <= gutter]
+            right = [item for item in ordered if item[0] >= gutter]
+            if left and right and len(left) + len(right) == len(ordered):
+                groups = [left, right]
+        for group in groups:
+            items = tuple(Word(text=text, x0=x0, y0=y0, x1=x1, y1=y1)
+                          for x0, y0, x1, y1, text in group)
+            x0, x1 = min(item.x0 for item in items), max(item.x1 for item in items)
+            column = 0 if gutter is None or x0 < gutter < x1 else 1 if x1 <= gutter else 2
+            lines.append(
+                Line(
+                    text=" ".join(item.text for item in items),
+                    x0=x0,
+                    y0=min(item.y0 for item in items),
+                    x1=x1,
+                    y1=max(item.y1 for item in items),
+                    words=items,
+                    column=column,
+                )
             )
-        )
     lines.sort(key=lambda line: (round(line.y0, 1), line.x0))
     return tuple(lines)
 

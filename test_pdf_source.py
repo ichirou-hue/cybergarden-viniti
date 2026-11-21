@@ -52,6 +52,53 @@ class FindTablesTest(unittest.TestCase):
 
 
 class PageTextTest(unittest.TestCase):
+    def test_indices_stay_with_their_formula_in_sources(self):
+        from reportlab.pdfgen import canvas
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer)
+        pdf.setFont("Helvetica", 12)
+        pdf.drawString(60, 700, "J")
+        pdf.setFont("Helvetica", 8)
+        pdf.drawString(66, 696, "SC")
+        pdf.setFont("Helvetica", 12)
+        pdf.drawString(81, 700, " = 12 mA/cm")
+        pdf.setFont("Helvetica", 8)
+        pdf.drawString(152, 706, "2")
+        pdf.save()
+        sources = pdf_source.extract(buffer.getvalue())["sources"]
+        self.assertEqual(len(sources), 1)
+        self.assertIn("J_{SC}", sources[0]["display_text"])
+        self.assertIn("^{2}", sources[0]["display_text"])
+        self.assertEqual({span["position"] for span in sources[0]["math_spans"]}, {"subscript", "superscript"})
+
+    def test_offset_column_baselines_still_read_column_by_column(self):
+        from reportlab.pdfgen import canvas
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=(612, 792))
+        for index in range(5):
+            pdf.drawString(45, 700 - index * 20, f"Left paragraph line {index} ends here.")
+            pdf.drawString(335, 692 - index * 20, f"Right paragraph line {index} ends here.")
+        pdf.save()
+        lines = pdf_source.extract(buffer.getvalue())["sources"]
+        self.assertEqual([s["column"] for s in lines], [1] * 5 + [2] * 5)
+
+    def test_columns_are_separate_in_reading_order(self):
+        from reportlab.pdfgen import canvas
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=(612, 792))
+        for index in range(5):
+            pdf.drawString(45, 700 - index * 18, f"Left paragraph line {index} ends here.")
+            pdf.drawString(335, 700 - index * 18, f"Right paragraph line {index} ends here.")
+        pdf.save()
+        document = pdf_source.extract(buffer.getvalue())
+        lines = document["sources"]
+        self.assertEqual(len(lines), 10)
+        self.assertTrue(all(s["column_count"] == 2 for s in lines))
+        self.assertEqual([s["column"] for s in lines], [1] * 5 + [2] * 5)
+        self.assertTrue(all("Right" not in s["quote"] for s in lines[:5]))
+        self.assertTrue(all("Left" not in s["quote"] for s in lines[5:]))
+        self.assertEqual(len({s["block_id"] for s in lines}), 10)
+
     def test_page_texts_are_numbered_from_one(self):
         data = ruled_pdf([600, 570, 540])
         texts = pdf_source.page_texts(data)

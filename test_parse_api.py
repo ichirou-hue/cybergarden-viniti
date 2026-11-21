@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from threading import Thread
 from time import sleep, time
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -182,16 +183,23 @@ class ParseApiTest(unittest.TestCase):
 
     def test_parse_rejects_charts_without_docling(self):
         status, _ = send(self.base + "/api/parse", tiny_pdf(), {
-            "Content-Type": "application/pdf", "X-Profile": "solar", "X-Charts": "1"})
+            "Content-Type": "application/pdf", "X-Profile": "solar", "X-Parser": "pdfplumber", "X-Charts": "1"})
         self.assertEqual(status, 400)
 
     def test_parse_file_route_refuses_traversal(self):
         status, body = send(self.base + "/api/parse", tiny_pdf(), {
-            "Content-Type": "application/pdf", "X-Profile": "solar"})
+            "Content-Type": "application/pdf", "X-Profile": "solar", "X-Parser": "pdfplumber"})
         job = json.loads(body)
         self.wait(job["id"])
         status, _ = get(f"{self.base}/api/parse/{job['id']}/file/assets/../../job.json")
         self.assertIn(status, {400, 404})
+
+    def test_default_parse_selects_local_docling_without_api_credentials(self):
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "", "OPENROUTER_VISION_MODEL": ""}), patch.object(Handler, "run_parse"):
+            status, body = send(self.base + "/api/parse", tiny_pdf(), {
+                "Content-Type": "application/pdf", "X-Profile": "solar"})
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["parser"], "docling")
 
 
 if __name__ == "__main__":

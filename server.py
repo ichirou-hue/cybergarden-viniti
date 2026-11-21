@@ -47,7 +47,7 @@ from rag_api import (
     render_anchor_png,
     sources as list_sources,
 )
-from solar_api import SolarStore, solar_sources
+from solar_api import SolarStore, solar_sources, RECOGNITION_REVISION
 from solar_api import MAX_BYTES as SOLAR_MAX_BYTES
 
 
@@ -103,7 +103,7 @@ ASSETS = {
     "/tracks/solar.js": ("tracks/solar.js", "text/javascript; charset=utf-8"),
 }
 PAPER = re.compile(r"/api/papers/([0-9a-f]{64})(?:/(pdf|sources|facts|headers)(?:/([1-9][0-9]{0,8})\.png)?)?")
-HEAVY_FIELDS = {"entities", "results", "issues", "anchors", "text_sources"}
+HEAVY_FIELDS = {"entities", "results", "issues", "anchors", "text_sources", "recognized_sources", "recognition_warnings"}
 log = logging.getLogger(__name__)
 
 
@@ -236,11 +236,16 @@ class Handler(BaseHTTPRequestHandler):
         if data is None:
             return
         name = (self.headers.get("X-Profile") or "solar").strip()
-        parser = (self.headers.get("X-Parser") or "pdfplumber").strip().lower()
+        parser = (self.headers.get("X-Parser") or "auto").strip().lower()
+        if parser == "auto":
+            parser = "docling"
         ocr = (self.headers.get("X-OCR") or "auto").strip().lower()
         raw_charts = (self.headers.get("X-Charts") or "").strip().lower()
-        if parser not in {"pdfplumber", "docling"}:
-            self.error("Парсер должен быть pdfplumber или docling.", 400)
+        if parser not in {"auto", "vision", "pdfplumber", "docling"}:
+            self.error("Парсер должен быть auto, vision, pdfplumber или docling.", 400)
+            return
+        if parser == "vision" and (not os.environ.get("OPENROUTER_API_KEY") or not os.environ.get("OPENROUTER_VISION_MODEL")):
+            self.error("Для явного vision-разбора задайте OPENROUTER_API_KEY и OPENROUTER_VISION_MODEL на сервере.", 503)
             return
         if ocr not in {"auto", "full", "off"}:
             self.error("OCR должен быть auto, full или off.", 400)
@@ -329,6 +334,7 @@ class Handler(BaseHTTPRequestHandler):
             completed = subprocess.run(
                 command, cwd=ROOT, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
+                env={**os.environ, "HF_HOME": os.environ.get("HF_HOME") or str(ROOT / "data" / "solar" / "docling-models")},
             )
             self.write_log(folder, completed)
             job = self.read_job(folder)
@@ -344,6 +350,9 @@ class Handler(BaseHTTPRequestHandler):
                     summary = {}
                 if isinstance(summary, dict):
                     summary.pop("output", None)
+                if job.get("document_id", "").startswith("solar:"):
+                    recognized = json.loads((folder / "bundle" / "result.json").read_text(encoding="utf-8"))
+                    self.solar_store().attach_recognition(job["document_id"], recognized)
                 job.update(status="ok", summary=summary)
             job.update(updated_at=round(time(), 3), elapsed_seconds=round(time() - started, 3))
             self.write_job(folder, job)
@@ -375,6 +384,23 @@ class Handler(BaseHTTPRequestHandler):
             (folder / "parse.log").write_text(text[-64000:], encoding="utf-8")
         except OSError:
             log.warning("Не удалось записать parse.log")
+
+    def start_catalog_parse(self, document_id, filename, data):
+        """Run recognition independently of scientific result extraction."""
+        run_id = uuid.uuid4().hex[:16]
+        folder = self.parses_root() / run_id
+        folder.mkdir(parents=True, exist_ok=False)
+        (folder / "input.pdf").write_bytes(data)
+        job = {"id": run_id, "status": "queued", "profile": "solar", "profile_source": "builtin",
+               "document_id": document_id, "parser": "docling", "ocr": "auto", "charts": False,
+               "filename": Path(filename.replace("\\", "/")).name,
+               "sha256": sha256(data).hexdigest(), "bytes": len(data),
+               "created_at": round(time(), 3), "updated_at": round(time(), 3)}
+        self.write_job(folder, job)
+        threading.Thread(target=self.run_parse,
+                         args=(folder, ROOT / "profiles" / "solar.json", "docling", "auto", False),
+                         daemon=True).start()
+        return run_id
 
     def parse_get(self, path):
         segments = [unquote(part) for part in path.split("/") if part]
@@ -953,8 +979,16 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if not data.startswith(b"%PDF-"):
                         raise ValueError("Invalid PDF")
-                    result = extract(data)
-                except (PDFSyntaxError, PDFPasswordIncorrect, ValueError):
+                    parser = (self.headers.get("X-Parser") or "pdfplumber").strip().lower()
+                    if parser in {"auto", "vision"}:
+                        raise ValueError("Автоматический vision-разбор доступен через фоновый POST /api/parse.")
+                    elif parser == "pdfplumber":
+                        result = extract(data)
+                    else:
+                        raise ValueError("Неизвестный парсер.")
+                except ValueError as error:
+                    self.error(str(error), 422)
+                except (PDFSyntaxError, PDFPasswordIncorrect):
                     self.error("Не удалось прочитать PDF. Проверьте формат, пароль и число страниц.", 422)
                 except Exception:
                     log.exception("Manual profile PDF extraction failed")
@@ -1012,6 +1046,9 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if track == "solar":
                     summary = self.solar_store().ingest(name, data)
+                    recognition = summary.get("recognition", {})
+                    if recognition.get("status") != "done" or recognition.get("revision") != RECOGNITION_REVISION:
+                        summary["recognition_job_id"] = self.start_catalog_parse(summary["document_id"], name, data)
                 elif track == "rag":
                     summary = self.rag_store().ingest(name, data, track=track)
                 else:

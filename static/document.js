@@ -16,6 +16,19 @@ const TABS = [
 
 const KIND_LABELS = {text: "Текст", table: "Таблица", caption: "Подпись", equation: "Формула"};
 
+function sourceContent(source) {
+  const runs = source.inline_runs;
+  if (Array.isArray(runs) && runs.length
+      && runs.map(run => run.text || "").join("") === (source.fragment || source.quote || "")) {
+    return runs.map(run => {
+      const script = run.formatting?.script;
+      return script === "sub" ? el("sub", {text: run.text})
+        : script === "super" ? el("sup", {text: run.text}) : run.text;
+    });
+  }
+  return source.display_text || source.fragment || source.quote || "";
+}
+
 let keepTabFocus = false;
 
 export async function renderDocument(root, ctx) {
@@ -939,9 +952,10 @@ async function renderSources(body, ctx, summary) {
       )),
       el("tbody", {}, data.items.map(item => el("tr", {},
         el("td", {text: kinds[item.kind] || item.kind}),
-        el("td", {class: "quote", text: item.fragment || item.quote || ""}),
+        el("td", {class: "quote"}, sourceContent(item)),
         el("td", {}, el("button", {
-          type: "button", class: "secondary", text: `Стр. ${item.page}`,
+          type: "button", class: "secondary", text: `Стр. ${item.page}`
+            + (item.column_count > 1 && item.column ? ` · колонка ${item.column}` : ""),
           onclick: evidenceAction(ctx, {docId: ctx.docId, source: item}),
         })),
       ))),

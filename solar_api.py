@@ -11,6 +11,7 @@ import hashlib
 import csv
 import io
 import json
+import math
 import sqlite3
 import time
 from contextlib import closing
@@ -24,6 +25,8 @@ import solar_version
 
 MAX_BYTES = 32 * 1024 * 1024
 TRACK = "solar"
+RECOGNITION_REVISION = "docling-source-1"
+RECOGNITION_SOURCE_BASE = 1_000_000
 
 
 def _anchor(source):
@@ -44,6 +47,7 @@ def _anchor(source):
         "kind": source.get("kind") or "text",
         "table": source.get("table", ""),
         "fragment": source.get("quote", ""),
+        **{key: source[key] for key in ("bbox", "column", "column_count", "block_id", "layout_band", "reading_order", "display_text", "math_spans", "original_lines", "extraction_method", "verification", "requires_review", "source_ref", "docling_ref", "docling_label", "inline_runs", "latex") if key in source},
         "quote": source.get("quote", ""),
         "bbox": boxes[0] if boxes else None,
         "bboxes": boxes,
@@ -123,6 +127,7 @@ def _text_sources(sources):
         "page": source["page"],
         "kind": source.get("kind") or "text",
         "fragment": source.get("quote", ""),
+        **{key: source[key] for key in ("bbox", "column", "column_count", "block_id", "layout_band", "reading_order", "display_text", "math_spans", "original_lines") if key in source},
     } for source in sources if (source.get("kind") or "text") != "table"]
 
 
@@ -133,11 +138,17 @@ def solar_sources(envelope, kind="", needle=""):
     across the two lists, so prose anchors repeat and captions disappear.
     """
     items, seen = [], set()
-    for row in envelope.get("results", []):
-        source = row.get("source")
-        if source:
-            items.append(source)
-    items.extend(envelope.get("text_sources", []))
+    recognized = envelope.get("recognized_sources")
+    if recognized is not None:
+        # The fragments tab shows recognition blocks in their document order.
+        # Scientific result anchors remain on the result rows and in anchors.
+        items.extend(recognized)
+    else:
+        for row in envelope.get("results", []):
+            source = row.get("source")
+            if source:
+                items.append(source)
+        items.extend(envelope.get("text_sources", []))
     unique = []
     for source in items:
         source_id = source.get("source_id")
@@ -151,13 +162,15 @@ def solar_sources(envelope, kind="", needle=""):
     if needle:
         unique = [source for source in unique
                   if needle in str(source.get("fragment") or source.get("quote") or "").lower()]
-    unique.sort(key=lambda source: (int(source.get("page") or 0), int(source.get("source_id") or 0)))
+    if recognized is None:
+        unique.sort(key=lambda source: (int(source.get("page") or 0), int(source.get("source_id") or 0)))
     return [{
         "source_id": source["source_id"],
         "page": source.get("page"),
         "kind": source.get("kind") or "text",
         "fragment": source.get("fragment") or source.get("quote") or "",
         "quote": source.get("fragment") or source.get("quote") or "",
+        **{key: source[key] for key in ("bbox", "column", "column_count", "block_id", "layout_band", "reading_order", "display_text", "math_spans", "original_lines", "extraction_method", "verification", "requires_review", "source_ref", "docling_ref", "docling_label", "inline_runs", "latex") if key in source},
     } for source in unique]
 
 
@@ -189,6 +202,72 @@ class SolarStore:
         with closing(self._connect()) as conn:
             row = conn.execute("SELECT pdf FROM solar_documents WHERE document_id=?", (document_id,)).fetchone()
         return row["pdf"] if row else None
+
+    def attach_recognition(self, document_id, parse_result):
+        """Attach Docling blocks without changing scientifically verified rows.
+
+        ``parse_result`` is a completed extraction_core result.json. Recognition
+        anchors get an independent numeric namespace so existing result links
+        and literal evidence keep referring to their original source.
+        """
+        if not isinstance(parse_result, dict):
+            raise ValueError("Некорректный результат распознавания.")
+        document = parse_result.get("document")
+        parser_output = parse_result.get("parser_output")
+        parser = parser_output.get("parser", {}) if isinstance(parser_output, dict) else {}
+        sources = parse_result.get("sources")
+        warnings = parse_result.get("warnings", [])
+        if (not isinstance(document, dict) or not isinstance(parser, dict)
+                or parser.get("name") != "docling" or not isinstance(sources, list)
+                or len(sources) > 50000 or not isinstance(warnings, list)
+                or any(not isinstance(warning, str) for warning in warnings)):
+            raise ValueError("Нужен завершённый результат Docling с источниками.")
+        pages = document.get("pages")
+        if type(pages) is not int or pages < 1:
+            raise ValueError("Некорректное число страниц распознавания.")
+        recognized = []
+        for index, source in enumerate(sources, 1):
+            if not isinstance(source, dict):
+                raise ValueError("Некорректный блок распознавания.")
+            page, quote, box = source.get("page"), source.get("quote"), source.get("bbox")
+            if (type(page) is not int or not 1 <= page <= pages
+                    or not isinstance(quote, str) or not quote.strip()
+                    or not isinstance(box, (list, tuple)) or len(box) != 4
+                    or any(type(value) not in {int, float} or not math.isfinite(value) for value in box)
+                    or not 0 <= box[0] < box[2] or not 0 <= box[1] < box[3]):
+                raise ValueError("Неверный текст, страница или координаты блока распознавания.")
+            recognized.append(_anchor({**source, "id": RECOGNITION_SOURCE_BASE + index,
+                                       "reading_order": index, "verification": "parser_text_only",
+                                       "requires_review": True, "extraction_method": "docling"}))
+        with closing(self._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT content_hash, envelope FROM solar_documents WHERE document_id=?",
+                               (document_id,)).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            envelope = json.loads(row["envelope"])
+            if document.get("sha256") != row["content_hash"] or pages != envelope.get("pages"):
+                raise ValueError("Распознавание относится к другому PDF.")
+            anchors = dict(envelope.get("anchors", {}))
+            previous = {str(source["source_id"]) for source in envelope.get("recognized_sources", [])}
+            for source_id in previous:
+                anchors.pop(source_id, None)
+            if any(str(source["source_id"]) in anchors for source in recognized):
+                raise ValueError("Идентификатор распознавания пересекается с научным источником.")
+            anchors.update({str(source["source_id"]): source for source in recognized})
+            envelope.update(anchors=anchors, recognized_sources=recognized,
+                            recognition={"status": "done", "revision": RECOGNITION_REVISION,
+                                         "parser": parser, "sources": len(recognized)},
+                            recognition_warnings=warnings,
+                            ocr_used=bool(envelope.get("scanned") and recognized) or envelope.get("ocr_used", False),
+                            updated_at=datetime.now(UTC).isoformat())
+            heavy = {"entities", "results", "issues", "anchors", "text_sources", "recognized_sources",
+                     "publication", "counts", "run", "export", "warnings", "recognition_warnings"}
+            summary = {key: value for key, value in envelope.items() if key not in heavy}
+            conn.execute("UPDATE solar_documents SET summary=?, envelope=?, updated_at=? WHERE document_id=?",
+                         (json.dumps(summary, ensure_ascii=False), json.dumps(envelope, ensure_ascii=False),
+                          envelope["updated_at"], document_id))
+        return summary
 
     def export_csv(self, document_id):
         envelope = self.get(document_id)
@@ -280,7 +359,24 @@ class SolarStore:
             # The checked pipeline: literal citations, normalized units and the
             # deterministic consistency issues. A ValueError means the paper did
             # not pass verification, not that the upload is malformed.
-            result = solar_offline.extract_pdf(path, publication_id)
+            try:
+                result = solar_offline.extract_pdf(path, publication_id)
+            except ValueError as error:
+                if str(error) != "Нет текстового слоя. OCR в solar-1 пока не реализован.":
+                    raise
+                # An image-only PDF still needs a catalogue card so its Docling
+                # recognition job can start. No scientific facts are inferred
+                # from the absence of native text.
+                from pypdf import PdfReader
+                from solar_schema import TABLES
+                pages = len(PdfReader(io.BytesIO(data)).pages)
+                result = {
+                    "publication_id": publication_id, "sha256": content_hash,
+                    "pages": pages, "sources": [], "evidence": {},
+                    "tables": {table: [] for table in TABLES},
+                    "warnings": ["Исходный текстовый слой пуст; требуется OCR Docling. "
+                                 "Научные результаты без буквального источника не извлекались."],
+                }
         envelope = self._envelope(document_id, name, result, started)
         summary_keys = {k: v for k, v in envelope.items() if k not in {"entities", "results", "issues", "anchors", "text_sources", "publication", "counts", "run", "export", "warnings"}}
         with closing(self._connect()) as conn, conn:
