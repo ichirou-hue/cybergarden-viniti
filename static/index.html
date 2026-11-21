@@ -3,81 +3,59 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Конструктор выгрузки · ВИНИТИ</title>
+  <title>ВИНИТИ · Каталог результатов</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="/constructor.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">ВИНИТИ <span>конструктор выгрузки</span></div>
-  <div class="area-switch" role="tablist" aria-label="Область">
-    <button id="areaSolar" type="button" class="area" data-area="solar" role="tab">solar</button>
-    <button id="areaRag" type="button" class="area" data-area="rag" role="tab">rag</button>
+<a class="skip" href="#view" onclick="event.preventDefault(); document.getElementById('view').focus()">К содержанию</a>
+<header class="top">
+  <div class="wrap masthead">
+    <a class="brand" href="#/"><span class="mark" aria-hidden="true">✳</span>ВИНИТИ РАН<span>CyberGarden</span></a>
+    <span class="context" id="context">Проверка научных данных · каталог результатов</span>
   </div>
 </header>
+<div class="wrap toolbar">
+  <div class="track-switch" role="group" aria-label="Разделы">
+    <div class="tracks" id="tracks"></div>
+    <a class="track" id="passportLink" href="#/passport">Паспорт</a>
+  </div>
+  <form id="upload" class="upload">
+    <label class="file"><span id="fileName">Загрузить PDF</span>
+      <input id="file" type="file" accept=".pdf,application/pdf">
+    </label>
+    <button type="submit">Разобрать</button>
+    <button type="button" id="demo" class="secondary">Демо</button>
+    <label class="file">Импорт паспорта JSON
+      <input id="passport" type="file" accept=".json,application/json">
+    </label>
+    <span id="uploadState" class="upload-state" role="status"></span>
+  </form>
+</div>
 
-<main class="layout">
-  <aside class="controls">
-    <section class="control">
-      <label class="field-label" for="tableSelect">Таблица</label>
-      <select id="tableSelect"></select>
-    </section>
+<main class="wrap" id="view" tabindex="-1"></main>
+<p id="status" class="status" role="status"></p>
+<noscript><p class="notice bad wrap">Для работы интерфейса нужен JavaScript.</p></noscript>
+<p id="bootError" class="notice bad wrap" hidden>
+  Не удалось загрузить интерфейс. Обновите страницу; если ошибка повторяется —
+  запустите сервер: <code>.venv/bin/python tools/mock_api.py</code>.
+</p>
 
-    <section class="control">
-      <div class="control-head">
-        <span class="field-label">Колонки</span>
-        <div class="btn-row">
-          <button id="allCols" type="button" class="mini">Все</button>
-          <button id="reqCols" type="button" class="mini">Обязат.</button>
-          <button id="resetCols" type="button" class="mini">Сброс</button>
-        </div>
-      </div>
-      <div id="columns" class="columns"></div>
-    </section>
-
-    <section class="control">
-      <span class="field-label">Фильтры</span>
-      <div id="filters" class="filters"></div>
-      <button id="addFilter" type="button" class="mini">+ Фильтр</button>
-    </section>
-
-    <section class="control">
-      <span class="field-label">Сортировка</span>
-      <div class="sort-row">
-        <select id="sortField"></select>
-        <select id="sortDir" aria-label="Направление">
-          <option value="asc">по возр.</option>
-          <option value="desc">по убыв.</option>
-        </select>
-      </div>
-    </section>
-
-    <section class="control">
-      <label class="field-label" for="limit">Лимит строк (0 - без предела)</label>
-      <input id="limit" type="number" min="0" step="1" value="500">
-    </section>
-
-    <div class="actions">
-      <button id="apply" type="button" class="primary">Применить</button>
-      <a id="download" class="btn" href="#">Скачать CSV</a>
-      <a id="downloadFull" class="btn ghost" href="#">Скачать полную сдачу</a>
-      <p class="hint" id="exportHint"></p>
-    </div>
-  </aside>
-
-  <section class="result">
-    <div class="result-head">
-      <span id="count" class="count"></span>
-      <span id="status" class="status" role="status" aria-live="polite"></span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead id="thead"></thead>
-        <tbody id="tbody"></tbody>
-      </table>
-      <div id="empty" class="empty" hidden></div>
-    </div>
-  </section>
-</main>
+<dialog id="evidence" aria-labelledby="evidenceTitle">
+  <div class="bar">
+    <h2 id="evidenceTitle"></h2>
+    <a id="evidencePdf" href="#" target="_blank" rel="noopener">Открыть PDF</a>
+    <button type="button" id="evidenceClose" class="secondary">Закрыть</button>
+  </div>
+  <p id="evidenceQuote"></p>
+  <p id="imageError" hidden>Превью недоступно. Номер страницы и цитата указаны выше.</p>
+  <img id="preview" alt="Страница PDF с подсветкой источника">
+</dialog>
+<script>
+  setTimeout(function () {
+    var view = document.getElementById("view");
+    if (view && !view.children.length) document.getElementById("bootError").hidden = false;
+  }, 4000);
+</script>
 </body>
 </html>

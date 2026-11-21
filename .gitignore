@@ -14,3 +14,4 @@ out_test/
 # Мусор macOS: .DS_Store и AppleDouble-файлы рядом с настоящими
 .DS_Store
 ._*
+node_modules/

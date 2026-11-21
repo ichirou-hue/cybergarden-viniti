@@ -1,50 +1,62 @@
+"""HTTP-сервер CyberGarden / ВИНИТИ.
+
+Два поколения API живут рядом:
+
+* ``/api/papers…`` — старый экран одной статьи (``library.py`` + ``rag_facts``);
+* ``/api/documents…`` — контракт каталога и карточки (ADR-0008), который
+  наполняет RAG-модуль ``rag`` через ``rag_api.py``.
+
+Фронтенд в ``static/`` обслуживается с этого же адреса, поэтому CORS не нужен.
+"""
+
 import argparse
 import csv
 import io
 import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import logging
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import sqlite3
 from urllib.parse import parse_qs, unquote, urlsplit
 
+import db as storage
+import export_csv as result_export
+
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 
-import db as storage
-import export_csv
-from demo import demo_pdf
+from demo import demo_pdf as legacy_demo_pdf  # noqa: F401  (совместимость старых импортов)
 from library import Library, MAX_BYTES
 from pdf_source import render
+from rag_api import (
+    MAX_BYTES as RAG_MAX_BYTES,
+    RagStore,
+    demo_pdf as rag_demo_pdf,
+    export_csv,
+    facets,
+    filter_results,
+    render_anchor_png,
+    sources as list_sources,
+)
 
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = (ROOT / "static").resolve()
 STATIC_TYPES = {
-    ".html": "text/html; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".ico": "image/x-icon",
+    ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml",
+    ".png": "image/png", ".ico": "image/x-icon",
 }
-PAPER = re.compile(r"/api/papers/([0-9a-f]{64})(?:/(pdf|sources|facts|headers)(?:/([1-9][0-9]{0,8})\.png)?)?")
 AREAS = {"solar", "rag"}
 JOB_STATUSES = ("ok", "error", "skipped", "running", "queued")
-log = logging.getLogger(__name__)
 
 
 def static_file(path):
-    """Resolve a URL path to a servable file inside static/, or None.
-
-    Only the root of static/ is served, and only the extensions in STATIC_TYPES.
-    The resolved path must stay inside static/, so '..' and nested paths fall
-    through to the normal 404 instead of leaking a file from the repository.
-    """
     name = "index.html" if path in ("", "/") else unquote(path).lstrip("/")
-    if not name or "/" in name or "\\" in name or name in (".", ".."):
+    parts = Path(name).parts
+    if not name or name.startswith("/") or "\\" in name or any(part in ("", ".", "..") for part in parts):
         return None
     if Path(name).suffix.lower() not in STATIC_TYPES:
         return None
@@ -53,12 +65,29 @@ def static_file(path):
         candidate.relative_to(STATIC_DIR)
     except ValueError:
         return None
-    if not candidate.is_file():
-        return None
-    return candidate
+    return candidate if candidate.is_file() else None
+ASSETS = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/api.js": ("api.js", "text/javascript; charset=utf-8"),
+    "/catalog.js": ("catalog.js", "text/javascript; charset=utf-8"),
+    "/document.js": ("document.js", "text/javascript; charset=utf-8"),
+    "/dom.js": ("dom.js", "text/javascript; charset=utf-8"),
+    "/evidence.js": ("evidence.js", "text/javascript; charset=utf-8"),
+    "/passport.js": ("passport.js", "text/javascript; charset=utf-8"),
+    "/solar.mjs": ("solar.mjs", "text/javascript; charset=utf-8"),
+    "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/tracks/index.js": ("tracks/index.js", "text/javascript; charset=utf-8"),
+    "/tracks/rag.js": ("tracks/rag.js", "text/javascript; charset=utf-8"),
+}
+PAPER = re.compile(r"/api/papers/([0-9a-f]{64})(?:/(pdf|sources|facts|headers)(?:/([1-9][0-9]{0,8})\.png)?)?")
+HEAVY_FIELDS = {"entities", "results", "issues", "anchors", "text_sources"}
+log = logging.getLogger(__name__)
 
 
 class Handler(BaseHTTPRequestHandler):
+    # --- ответы ---------------------------------------------------------
     def send_data(self, data, media_type, status=200, **headers):
         self.send_response(status)
         self.send_header("Content-Type", media_type)
@@ -74,227 +103,392 @@ class Handler(BaseHTTPRequestHandler):
         self.send_data(json.dumps(document, ensure_ascii=False).encode(),
                        "application/json; charset=utf-8", status, **headers)
 
+    def error(self, message, status=400):
+        self.send_json({"error": message}, status)
+
+    def pick_area(self, raw):
+        area = (raw or "rag").strip() or "rag"
+        if area not in AREAS:
+            self.error(f"Недопустимая область: {area}. Допустимы: solar, rag.", 400)
+            return None
+        return area
+
+    def data_connection(self):
+        path = getattr(self.server, "data", None)
+        if path is None or not Path(path).exists():
+            self.error("База результатов не подключена. Запустите python db.py --init и "
+                       "python import_gold.py, затем перезапустите сервер.", 503)
+            return None
+        return storage.connect(path)
+
     def csv_slice(self, area, spec, columns, rows):
-        """Render a user slice with the area's own byte conventions (BOM and CRLF)."""
         buffer = io.StringIO(newline="")
         writer = csv.writer(buffer, lineterminator=spec["newline"])
         writer.writerow(columns)
         for row in rows:
             writer.writerow(["" if row[name] is None else str(row[name]) for name in columns])
-        text = buffer.getvalue()
-        if spec["bom"]:
-            return b"\xef\xbb\xbf" + text.encode("utf-8")
-        return text.encode("utf-8")
-
-    def pick_area(self, raw):
-        area = (raw or "rag").strip() or "rag"
-        if area not in AREAS:
-            self.send_json({"error": f"Недопустимая область: {area}. Допустимы: solar, rag."}, 400)
-            return None
-        return area
-
-    def data_connection(self):
-        """Open the results database for this request, or answer 503 and return None."""
-        path = getattr(self.server, "data", None)
-        if path is None or not Path(path).exists():
-            self.send_json({"error": "База результатов не подключена. Запустите python db.py --init "
-                                      "и python import_gold.py, затем перезапустите сервер."}, 503)
-            return None
-        return storage.connect(path)
+        data = buffer.getvalue().encode("utf-8")
+        return b"\xef\xbb\xbf" + data if spec["bom"] else data
 
     def slice_arguments(self, query, area):
-        """Read the constructor query into arguments for export_csv.select_rows."""
         table = (query.get("table") or ["results"])[0]
         spec = storage.load_passport()["areas"][area]
         meta = spec["tables"].get(table)
         if meta is None:
-            self.send_json({"error": f"Нет таблицы {table} в области {area}. "
-                                      f"Доступны: {', '.join(spec['tables'])}"}, 400)
+            self.error(f"Нет таблицы {table} в области {area}. Доступны: {', '.join(spec['tables'])}", 400)
             return None
-        columns = ",".join(query.get("col") or [])
-        if not columns:
-            columns = ",".join(meta["columns"])
-        chosen = [name.strip() for name in columns.split(",") if name.strip()]
-        unknown = [name for name in chosen if name not in meta["columns"]]
+        chosen = [x.strip() for x in ",".join(query.get("col") or []).split(",") if x.strip()]
+        chosen = chosen or list(meta["columns"])
+        unknown = [x for x in chosen if x not in meta["columns"]]
         if unknown:
-            self.send_json({"error": f"Нет таких полей: {', '.join(unknown)}"}, 400)
+            self.error(f"Нет таких полей: {', '.join(unknown)}", 400)
             return None
-        for required in export_csv.ALWAYS_KEPT:
+        for required in result_export.ALWAYS_KEPT:
             if required in meta["columns"] and required not in chosen:
                 chosen.append(required)
         try:
-            limit = int((query.get("limit") or ["0"])[0])
+            limit = max(0, int((query.get("limit") or ["0"])[0]))
         except ValueError:
-            self.send_json({"error": "limit должен быть числом."}, 400)
+            self.error("limit должен быть числом.", 400)
             return None
-        return {
-            "table": table, "spec": spec, "meta": meta, "columns": chosen,
-            "wheres": query.get("where") or [],
-            "order": (query.get("order") or [""])[0],
-            "limit": max(0, limit),
-        }
+        return {"table": table, "spec": spec, "meta": meta, "columns": chosen,
+                "wheres": query.get("where") or [],
+                "order": (query.get("order") or [""])[0], "limit": limit}
 
     def issue_arguments(self, query, area):
-        """Read the issues query into exact-value filters plus a clamped limit."""
         columns = storage.load_passport()["areas"][area]["tables"]["issues"]["columns"]
         filters = {}
         for name, values in query.items():
             if name in ("area", "limit"):
                 continue
             if name not in columns:
-                self.send_json({"error": f"Нет такого фильтра {name}. Допустимы: "
-                                          f"{', '.join(columns)}, limit."}, 400)
+                self.error(f"Нет такого фильтра {name}. Допустимы: {', '.join(columns)}, limit.", 400)
                 return None
             filters[name] = values[0]
         try:
-            limit = int((query.get("limit") or ["100"])[0])
+            limit = max(0, min(int((query.get("limit") or ["100"])[0]), 1000))
         except ValueError:
-            self.send_json({"error": "limit должен быть числом."}, 400)
+            self.error("limit должен быть числом.", 400)
             return None
-        return {"filters": filters, "limit": max(0, min(limit, 1000))}
-
-    def table_count(self, conn, area, table):
-        return conn.execute(
-            f"SELECT COUNT(*) FROM {storage.quote(storage.table_name(area, table))} "
-            f"WHERE area = ?", (area,)).fetchone()[0]
+        return filters, limit
 
     def stats_document(self, conn):
-        """Per-area row counts, job statuses and document totals, straight from the schema."""
         passport = storage.load_passport()
-        areas = {}
+        result = {}
         for area, spec in passport["areas"].items():
-            tables = {table: self.table_count(conn, area, table) for table in spec["tables"]}
+            tables = {name: conn.execute(
+                f"SELECT COUNT(*) FROM {storage.quote(storage.table_name(area, name))} WHERE area = ?", (area,)
+            ).fetchone()[0] for name in spec["tables"]}
             jobs = {status: 0 for status in JOB_STATUSES}
-            for status, number in conn.execute(
-                    "SELECT status, COUNT(*) FROM jobs WHERE area = ? GROUP BY status", (area,)):
-                jobs[status] = number
+            for status, count in conn.execute("SELECT status, COUNT(*) FROM jobs WHERE area=? GROUP BY status", (area,)):
+                jobs[status] = count
             total, pages, chars = conn.execute(
-                "SELECT COUNT(*), COALESCE(SUM(page_count), 0), COALESCE(SUM(text_chars), 0) "
-                "FROM documents WHERE area = ?", (area,)).fetchone()
-            by_status = {status: number for status, number in conn.execute(
-                "SELECT parser_status, COUNT(*) FROM documents WHERE area = ? "
-                "GROUP BY parser_status", (area,))}
-            # "Разобрано" - всё, что перестало быть pending и не упало с ошибкой.
-            parsed = sum(number for status, number in by_status.items()
-                         if status not in ("", "pending", "error"))
-            areas[area] = {
-                "publications": tables.get("publications", 0),
-                "tables": tables,
-                "jobs": jobs,
-                "documents": {"total": total, "parsed": parsed, "pages": pages,
-                              "chars": chars, "parser_status": by_status},
-            }
-        return {"areas": areas}
+                "SELECT COUNT(*), COALESCE(SUM(page_count),0), COALESCE(SUM(text_chars),0) FROM documents WHERE area=?", (area,)
+            ).fetchone()
+            statuses = {status: count for status, count in conn.execute(
+                "SELECT parser_status, COUNT(*) FROM documents WHERE area=? GROUP BY parser_status", (area,))}
+            result[area] = {"publications": tables.get("publications", 0), "tables": tables,
+                            "jobs": jobs, "documents": {"total": total, "parsed": sum(v for k, v in statuses.items() if k not in ("", "pending", "error")), "pages": pages, "chars": chars, "parser_status": statuses}}
+        return {"areas": result}
 
+    # --- хранилища ------------------------------------------------------
+    def rag_store(self) -> RagStore:
+        store = getattr(self.server, "rag_store", None)
+        if store is None:
+            # В тестах Handler создают без rag_store: кладём базу рядом
+            # с библиотекой, чтобы не писать в рабочий каталог репозитория.
+            base = getattr(self.server, "library", None)
+            path = Path(base.path).parent / "rag.sqlite3" if base else ROOT / "data" / "rag.sqlite3"
+            store = RagStore(path)
+            self.server.rag_store = store
+        return store
+
+    # --- общие помощники ------------------------------------------------
+    @staticmethod
+    def _int(query, name, default, minimum=0, maximum=None):
+        raw = (query.get(name) or [""])[0]
+        if raw == "":
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Параметр {name} должен быть целым числом.") from error
+        if value < minimum:
+            raise ValueError(f"Параметр {name} не может быть меньше {minimum}.")
+        return min(value, maximum) if maximum is not None else value
+
+    @staticmethod
+    def _page(query, default=50, maximum=200):
+        return Handler._int(query, "limit", default, 1, maximum), Handler._int(query, "offset", 0, 0)
+
+    # --- GET ------------------------------------------------------------
     def do_GET(self):
-        split = urlsplit(self.path)
-        path = split.path
-        query = parse_qs(split.query)
-        area_raw = (query.get("area") or [None])[0]
+        parts = urlsplit(self.path)
+        path = parts.path
+        query = parse_qs(parts.query)
+        single = {key: values[0] for key, values in query.items()}
+
         target = static_file(path)
         if target is not None:
             self.send_data(target.read_bytes(), STATIC_TYPES[target.suffix.lower()])
             return
+
+        area_raw = (query.get("area") or [None])[0]
         if path == "/api/passport":
             passport = storage.load_passport()
             if area_raw is None:
                 self.send_json(passport)
-                return
-            area = self.pick_area(area_raw)
-            if area is None:
-                return
-            self.send_json({"version": passport["version"], "area": area,
-                            **passport["areas"][area]})
+            else:
+                area = self.pick_area(area_raw)
+                if area is not None:
+                    self.send_json({"version": passport["version"], "area": area, **passport["areas"][area]})
             return
+
         if path in ("/api/results", "/api/results.csv"):
             area = self.pick_area(area_raw)
             if area is None:
                 return
-            arguments = self.slice_arguments(query, area)
-            if arguments is None:
+            args = self.slice_arguments(query, area)
+            if args is None:
                 return
             conn = self.data_connection()
             if conn is None:
                 return
             try:
-                rows = export_csv.select_rows(
-                    conn, area, arguments["table"], arguments["meta"],
-                    arguments["columns"], arguments["wheres"],
-                    arguments["order"], arguments["limit"])
+                rows = result_export.select_rows(conn, area, args["table"], args["meta"], args["columns"], args["wheres"], args["order"], args["limit"])
             except SystemExit as error:
-                self.send_json({"error": str(error)}, 400)
+                self.error(str(error), 400)
                 return
             finally:
                 conn.close()
-            if path == "/api/results.csv":
-                self.send_data(self.csv_slice(area, arguments["spec"],
-                                              arguments["columns"], rows),
-                               "text/csv; charset=utf-8",
-                               Content_Disposition="attachment")
-                return
-            self.send_json({
-                "area": area, "table": arguments["table"],
-                "columns": arguments["columns"], "count": len(rows),
-                "rows": [{name: row[name] for name in arguments["columns"]} for row in rows],
-            })
+            if path.endswith(".csv"):
+                self.send_data(self.csv_slice(area, args["spec"], args["columns"], rows), "text/csv; charset=utf-8", Content_Disposition="attachment")
+            else:
+                self.send_json({"area": area, "table": args["table"], "columns": args["columns"], "count": len(rows), "rows": [{name: row[name] for name in args["columns"]} for row in rows]})
             return
+
         if path == "/api/issues":
             area = self.pick_area(area_raw)
             if area is None:
                 return
-            arguments = self.issue_arguments(query, area)
-            if arguments is None:
+            args = self.issue_arguments(query, area)
+            if args is None:
                 return
+            filters, limit = args
             conn = self.data_connection()
             if conn is None:
                 return
-            sql = (f"SELECT * FROM {storage.quote(storage.table_name(area, 'issues'))} "
-                   f"WHERE area = ?")
+            sql = f"SELECT * FROM {storage.quote(storage.table_name(area, 'issues'))} WHERE area=?"
             params = [area]
-            for column, value in arguments["filters"].items():
-                sql += f" AND {storage.quote(column)} = ?"
+            for column, value in filters.items():
+                sql += f" AND {storage.quote(column)}=?"
                 params.append(value)
             sql += " ORDER BY _line LIMIT ?"
-            params.append(arguments["limit"])
+            params.append(limit)
             try:
                 rows = conn.execute(sql, params).fetchall()
-            except sqlite3.OperationalError as error:
-                self.send_json({"error": f"Таблица issues недоступна: {error}"}, 500)
-                return
             finally:
                 conn.close()
-            self.send_json({"area": area, "count": len(rows),
-                            "issues": [dict(row) for row in rows]})
+            self.send_json({"area": area, "count": len(rows), "issues": [dict(row) for row in rows]})
             return
+
         if path == "/api/stats":
             conn = self.data_connection()
             if conn is None:
                 return
             try:
-                document = self.stats_document(conn)
-            except sqlite3.OperationalError as error:
-                self.send_json({"error": f"Схема базы неполна: {error}"}, 500)
-                return
+                self.send_json(self.stats_document(conn))
             finally:
                 conn.close()
-            self.send_json(document)
             return
+
+        if path == "/api/documents" or path.startswith("/api/documents/"):
+            self.documents_get(path, query, single)
+            return
+
+        if path == "/api/jobs":
+            self.jobs(single)
+            return
+
         if path == "/api/papers":
-            area = self.pick_area(area_raw)
-            if area is None:
-                return
-            self.send_json(self.server.library.list(area))
+            self.send_json(self.server.library.list())
             return
+
+        if path.startswith("/api/papers/"):
+            self.legacy_paper(path, parts.query)
+            return
+
+        self.error("Маршрут не найден.", 404)
+
+    def documents_get(self, path, query, single):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if segments == ["api", "documents"]:
+            try:
+                limit, offset = self._page(query)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = self.rag_store().list(single.get("track", "rag"))
+            q = (single.get("q") or "").strip().lower()
+            if q:
+                items = [
+                    doc for doc in items
+                    if q in " ".join([
+                        str(doc.get("publication_id", "")), str(doc.get("title", "")),
+                        str(doc.get("year", "")), " ".join(doc.get("authors") or []),
+                    ]).lower()
+                ]
+            status = single.get("status")
+            if status:
+                items = [doc for doc in items if doc.get("status") == status]
+            sort = single.get("sort", "")
+            key = {
+                "status": lambda doc: doc.get("status", ""),
+                "issues": lambda doc: -int(doc.get("issues_count", 0)),
+                "results": lambda doc: -int(doc.get("results_count", 0)),
+            }.get(sort, lambda doc: doc.get("publication_id", ""))
+            items.sort(key=key)
+            self.send_json({"total": len(items), "items": items[offset: offset + limit]})
+            return
+
+        if len(segments) < 3 or segments[:2] != ["api", "documents"]:
+            self.error("Маршрут не найден.", 404)
+            return
+
+        document_id = segments[2]
+        envelope = self.rag_store().get(document_id)
+        if envelope is None:
+            self.error("Документ не найден.", 404)
+            return
+
+        resource = segments[3] if len(segments) > 3 else ""
+        key = segments[4] if len(segments) > 4 else ""
+
+        if not resource:
+            self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
+            return
+
+        if resource == "facets":
+            self.send_json(facets(envelope))
+            return
+
+        if resource == "pdf":
+            pdf = self.rag_store().pdf(document_id)
+            if pdf is None:
+                self.error("PDF не найден.", 404)
+                return
+            self.send_data(pdf, "application/pdf", Content_Disposition="inline")
+            return
+
+        if resource == "results":
+            try:
+                limit, offset = self._page(query)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            rows = filter_results(envelope, single)
+            self.send_json({"total": len(rows), "items": rows[offset: offset + limit]})
+            return
+
+        if resource == "issues":
+            try:
+                limit, offset = self._page(query, default=200, maximum=500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            issues = envelope.get("issues", [])
+            self.send_json({"total": len(issues), "items": issues[offset: offset + limit]})
+            return
+
+        if resource == "sources":
+            try:
+                limit = self._int(query, "limit", 200, 1, 500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = list_sources(envelope, single)
+            self.send_json({"total": len(items), "items": items[:limit]})
+            return
+
+        if resource == "entities":
+            kind = single.get("type", "configurations")
+            items = envelope.get("entities", {}).get(kind, [])
+            self.send_json({"total": len(items), "items": items})
+            return
+
+        if resource == "anchors" and (key.endswith(".json") or key.endswith(".png")):
+            try:
+                source_id = int(key.rsplit(".", 1)[0])
+            except ValueError:
+                self.error("Идентификатор источника должен быть числом.", 400)
+                return
+            anchor = envelope.get("anchors", {}).get(str(source_id))
+            if anchor is None:
+                self.error("Источник не найден.", 404)
+                return
+            if key.endswith(".json"):
+                self.send_json(anchor)
+                return
+            pdf = self.rag_store().pdf(document_id)
+            if pdf is None:
+                self.error("PDF не найден.", 404)
+                return
+            self.send_data(
+                render_anchor_png(pdf, anchor.get("page", 1), anchor.get("bbox")),
+                "image/png",
+            )
+            return
+
+        if resource == "export.json":
+            self.send_data(
+                json.dumps(envelope, ensure_ascii=False).encode(),
+                "application/json; charset=utf-8",
+                Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.json\"",
+            )
+            return
+
+        if resource == "export.csv":
+            self.send_data(
+                export_csv(envelope),
+                "text/csv; charset=utf-8",
+                Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.csv\"",
+            )
+            return
+
+        self.error("Маршрут не найден.", 404)
+
+    def jobs(self, single):
+        docs = self.rag_store().list(single.get("track", "rag"))
+        done = sum(doc.get("status") == "done" for doc in docs)
+        partial = sum(doc.get("status") == "partial" for doc in docs)
+        failed = sum(doc.get("status") == "failed" for doc in docs)
+        total = len(docs)
+        self.send_json({
+            "state": "done" if total and done + partial + failed >= total else "running",
+            "total": total,
+            "done": done,
+            "partial": partial,
+            "failed": failed,
+            "items": [
+                {
+                    "document_id": doc.get("document_id"),
+                    "status": doc.get("status"),
+                    "error": doc.get("error", ""),
+                }
+                for doc in docs
+            ],
+        })
+
+    def legacy_paper(self, path, raw_query):
         try:
             paper_id, resource, key = PAPER.fullmatch(path).groups()
-            area = self.pick_area(area_raw)
-            if area is None:
-                return
             if not resource:
-                self.send_json(self.server.library.get(paper_id, area=area),
-                               Content_Disposition="attachment" if "download" in query else "inline")
+                self.send_json(
+                    self.server.library.get(paper_id),
+                    Content_Disposition="attachment" if raw_query == "download" else "inline",
+                )
                 return
-            document, data = self.server.library.get(paper_id, with_pdf=True, area=area)
+            document, data = self.server.library.get(paper_id, with_pdf=True)
             if resource == "pdf" and key is None:
                 self.send_data(data, "application/pdf", Content_Disposition="attachment")
                 return
@@ -308,38 +502,86 @@ class Handler(BaseHTTPRequestHandler):
                 anchor = fact["header" if resource == "headers" else "evidence"]
             if anchor is None:
                 raise KeyError(path)
-        except (KeyError, IndexError, AttributeError, ValueError):
+        except (KeyError, IndexError, AttributeError):
             self.send_json({"error": "Источник не найден."}, 404)
             return
         self.send_data(render(data, anchor["page"], anchor["bbox"]), "image/png")
 
+    # --- POST -----------------------------------------------------------
     def do_POST(self):
-        if self.path == "/api/demo":
-            result = self.server.library.ingest("retrieval-demo.pdf", demo_pdf())
-            self.send_json(result, 201)
+        path = urlsplit(self.path).path
+        if path in {"/api/documents", "/api/demo"}:
+            self.documents_post(path)
             return
-        if self.path != "/api/papers":
-            self.send_json({"error": "Маршрут не найден."}, 404)
+        if path == "/api/papers":
+            self.legacy_upload()
             return
+        self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def documents_post(self, path):
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = 0
+        if path == "/api/documents" and length == 0:
+            self.error("Нужен PDF размером до 20 МиБ.", 413)
+            return
+        if length > RAG_MAX_BYTES:
+            self.error("Файл больше 20 МиБ.", 413)
+            return
+        if path == "/api/documents":
+            if self.headers.get_content_type() != "application/pdf":
+                self.error("Ожидается application/pdf.", 415)
+                return
+            data = self.rfile.read(length)
+            track = self.headers.get("X-Track", "rag")
+            if track != "rag":
+                self.error("Эта область ещё не подключена.", 400)
+                return
+            name = unquote(self.headers.get("X-Filename", "article.pdf"))
+            try:
+                summary = self.rag_store().ingest(name, data, track=track)
+            except ValueError as error:
+                self.error(str(error), 422)
+                return
+            except Exception:
+                log.exception("RAG ingest failed")
+                self.error("Ошибка обработки PDF. Подробности в консоли сервера.", 500)
+                return
+            self.send_json(summary, 201)
+            return
+
+        # Демо-статья: генерируем PDF с настоящей таблицей и прогоняем экстрактор.
+        track = self.headers.get("X-Track", "rag")
+        if track != "rag":
+            self.error("Демо для этой области ещё не подключено.", 404)
+            return
+        summary = self.rag_store().ingest(
+            "retrieval-demo.pdf",
+            rag_demo_pdf(),
+            track="rag",
+            publication_id="DEMO",
+            forced_id="rag:demo",
+        )
+        self.send_json(summary, 201)
+
+    def legacy_upload(self):
         if self.headers.get_content_type() != "application/pdf":
             self.send_json({"error": "Ожидается application/pdf."}, 415)
-            return
-        area = self.pick_area(self.headers.get("X-Area"))
-        if area is None:
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             size = 0
         if not 0 < size <= MAX_BYTES:
-            self.send_json({"error": "Нужен PDF размером до 32 МиБ."}, 413)
+            self.send_json({"error": "Нужен PDF размером до 20 МиБ."}, 413)
             return
         data = self.rfile.read(size)
         try:
             result = self.server.library.ingest(
-                unquote(self.headers.get("X-Filename", "article.pdf")), data, area=area)
+                unquote(self.headers.get("X-Filename", "article.pdf")), data)
         except (PDFSyntaxError, PDFPasswordIncorrect, ValueError):
-            self.send_json({"error": "Не удалось прочитать PDF. Проверьте формат, пароль и лимит 250 страниц."}, 422)
+            self.send_json({"error": "Не удалось прочитать PDF. Проверьте формат, пароль и лимит 150 страниц."}, 422)
             return
         except Exception:
             log.exception("PDF processing failed")
@@ -348,20 +590,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(result, 201)
 
 
+
 def main():
     parser = argparse.ArgumentParser(description="VINITI PDF evidence workspace")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db", type=Path, default=ROOT / "data" / "papers.sqlite3")
-    parser.add_argument("--data", type=Path, default=storage.DEFAULT_DB,
-                        help="база результатов для /api/results (db.py --init)")
+    parser.add_argument("--data", type=Path, default=ROOT / "data" / "viniti.sqlite3")
     args = parser.parse_args()
     with ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:
         server.library = Library(args.db)
+        server.rag_store = RagStore(args.db)
         server.data = args.data
         print(f"http://127.0.0.1:{server.server_port}", flush=True)
-        if not args.data.exists():
-            print(f"нет базы результатов {args.data}: /api/results вернёт 503, "
-                  f"запустите python db.py --init и python import_gold.py", flush=True)
         server.serve_forever()
 
 
