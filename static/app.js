@@ -3,7 +3,7 @@ import { tracks } from "./tracks/index.js";
 import { renderCatalog } from "./catalog.js";
 import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
-import { uploadPDF, openDemo } from "./api.js";
+import { uploadPDF, uploadPDFWithProgress, openDemo } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
 
 const view = document.getElementById("view");
@@ -88,7 +88,7 @@ function message(title, detail, extra) {
   fill(view, el("div", {class: "empty"},
     el("h1", {class: "empty-title", text: title}),
     detail ? el("p", {class: "muted", text: detail}) : null,
-    extra || el("p", {}, el("a", {href: "#/", text: "К каталогу"})),
+    extra || el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
   ));
 }
 
@@ -167,7 +167,7 @@ async function route() {
       message(
         `Раздел «${label}» пока не подключён.`,
         "Обработчик области недоступен.",
-      el("p", {}, el("a", {href: "#/?track=rag", text: "Перейти в каталог RAG"})),
+      el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
     );
     return;
   }
@@ -218,7 +218,7 @@ async function route() {
     fill(view, el("div", {class: "notice bad", role: "alert"},
       el("strong", {text: "Не удалось загрузить данные"}),
       el("p", {text: error.message}),
-      el("p", {}, el("a", {href: "#/", text: "Вернуться в каталог"})),
+      el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
     ));
     say(error.message, true);
   }
@@ -287,8 +287,8 @@ function renderWizard() {
   dropZone.hidden = ready;
   profileStep.hidden = !ready;
   document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Профиль" : "Шаг 1 из 2 · Документ";
-  document.getElementById("wizardTitle").textContent = ready ? "Как обработать статью?" : "Загрузите научную статью";
-  document.getElementById("wizardHint").textContent = ready ? "Выберите существующий профиль или создайте свой." : "Перетащите PDF в область ниже или выберите файл на устройстве.";
+  document.getElementById("wizardTitle").textContent = ready ? "Выберите профиль обработки" : "Начните с PDF";
+  document.getElementById("wizardHint").textContent = ready ? "Готовый профиль или свой вариант для этой статьи." : "RAG: до 20 МиБ, Solar: до 32 МиБ.";
   document.getElementById("selectedFile").textContent = ready ? selectedPDF.name : "";
   fill(document.getElementById("profileChoices"), ...["solar", "rag"].map(track => {
     const available = app.descriptors.some(item => item.track === track);
@@ -307,8 +307,8 @@ function selectPDF(file) {
     error.hidden = false;
     return;
   }
-  if (file.size > 20 * 1024 * 1024) {
-    error.textContent = "Файл больше 20 МиБ. Выберите PDF меньшего размера.";
+  if (file.size > 32 * 1024 * 1024) {
+    error.textContent = "Файл больше 32 МиБ. Выберите PDF меньшего размера.";
     error.hidden = false;
     return;
   }
@@ -333,12 +333,29 @@ document.getElementById("wizardBack").addEventListener("click", () => {
 document.getElementById("wizardSubmit").addEventListener("click", async () => {
   const track = document.querySelector('input[name="wizardProfile"]:checked')?.value;
   if (!selectedPDF || !track) return;
+  if (track === "rag" && selectedPDF.size > 20 * 1024 * 1024) {
+    const error = document.getElementById("wizardError");
+    error.textContent = "Для RAG нужен PDF размером до 20 МиБ. Выберите Solar или другой PDF.";
+    error.hidden = false;
+    return;
+  }
   const button = document.getElementById("wizardSubmit");
   button.disabled = true;
   const error = document.getElementById("wizardError"); error.hidden = true;
-  const result = await busy("Обработка PDF…", () => uploadPDF(selectedPDF, track));
+  const progress = document.getElementById("processingProgress");
+  const bar = document.getElementById("progressBar");
+  progress.hidden = false;
+  bar.value = 0;
+  document.getElementById("progressLabel").textContent = "Передача PDF…";
+  document.getElementById("progressCount").textContent = "0 из 4 этапов";
+  const result = await busy("Обработка PDF…", () => uploadPDFWithProgress(selectedPDF, track, event => {
+    bar.value = event.completed;
+    document.getElementById("progressLabel").textContent = event.label;
+    document.getElementById("progressCount").textContent = `${event.completed} из ${event.total} этапов`;
+  }));
   button.disabled = false;
   if (!result) { error.textContent = uploadState.textContent; error.hidden = false; return; }
+  progress.hidden = true;
   selectedPDF = null;
   openDocument(result);
 });

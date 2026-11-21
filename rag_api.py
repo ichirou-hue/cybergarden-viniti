@@ -446,13 +446,16 @@ def build_envelope(
     pdf: bytes,
     publication_id: str,
     duration_ms: int,
+    progress=None,
 ) -> dict[str, Any]:
     """Извлечь PDF и собрать конверт, который понимает фронтенд."""
     with TemporaryDirectory() as tmp:
         path = Path(tmp) / "article.pdf"
         path.write_bytes(pdf)
         document = load_document(path)
+        if progress: progress(1, "Страницы PDF прочитаны")
         extraction = extract_document(publication_id, document)
+        if progress: progress(2, "Результаты извлечены")
 
     tables = extraction.tables
     publication_row = dict((tables.get("publications") or [{}])[0])
@@ -686,6 +689,7 @@ class RagStore:
         track: str = TRACK,
         publication_id: str | None = None,
         forced_id: str | None = None,
+        progress=None,
     ) -> dict[str, Any]:
         if len(data) > MAX_BYTES or not data.startswith(b"%PDF-"):
             raise ValueError("Нужен PDF размером до 20 МиБ.")
@@ -705,6 +709,7 @@ class RagStore:
                 pdf=data,
                 publication_id=pid.upper(),
                 duration_ms=0,
+                progress=progress,
             )
         except Exception as error:  # noqa: BLE001 - статус ошибки нужен каталогу
             envelope = failed_envelope(
@@ -716,6 +721,7 @@ class RagStore:
             )
         envelope["duration_ms"] = int((time.monotonic() - started) * 1000)
         envelope["run"]["duration_ms"] = envelope["duration_ms"]
+        if progress: progress(3, "Карточка собрана")
         return self.save(envelope, data, content_hash)
 
     def meta(self, document_id: str) -> dict[str, Any] | None:

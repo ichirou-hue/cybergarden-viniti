@@ -161,7 +161,9 @@ class IngestTest(unittest.TestCase):
 
     def test_ingest_uses_the_deterministic_parser(self):
         store = self.store()
-        summary = store.ingest("S1.pdf", self.pdf)
+        stages = []
+        summary = store.ingest("S1.pdf", self.pdf, progress=lambda step, label: stages.append(step))
+        self.assertEqual(stages, [1, 2, 3])
         envelope = store.get(summary["document_id"])
         self.assertEqual(envelope["status"], "done")
         self.assertGreater(envelope["counts"]["results"], 0)

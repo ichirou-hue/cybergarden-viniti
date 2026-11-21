@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom";
 const base = process.env.MOCK_URL || "http://127.0.0.1:8799";
 const root = new URL("../../static/", import.meta.url);
 const html = readFileSync(new URL("index.html", root), "utf8");
-const dom = new JSDOM(html, { url: `${base}/#/`, pretendToBeVisual: true });
+const dom = new JSDOM(html, { url: `${base}/#/catalog?track=rag`, pretendToBeVisual: true });
 
 for (const key of [
   "window", "document", "location", "history", "HTMLElement", "Node",
@@ -53,7 +53,7 @@ check("каталог: баннер пакета", text(".banner").includes("О�
 check("каталог: частично в баннере", /\d+ частично/.test(text(".banner")), text(".banner"));
 check("каталог: ошибка видна", text(".banner").includes("ошибка"), text(".banner"));
 check("каталог: статусы текстом", text("#view").includes("частично") && text("#view").includes("в очереди"));
-check("каталог: переключатель области", document.querySelectorAll("#tracks .track").length === 1);
+check("каталог: переключатель области", document.querySelectorAll("#tracks .track").length === 2);
 
 // Поиск по каталогу
 const search = document.querySelector(".filters input[type=search]");
@@ -186,7 +186,7 @@ check("область: document_id приоритетнее", text(".doc-main h1
 // Несуществующий документ
 location.hash = "#/doc/rag:nope?track=rag";
 await waitFor(() => text("#view").includes("Не удалось загрузить данные"), "404 документа");
-check("404: ссылка в каталог", text("#view").includes("Вернуться в каталог"), text("#view"));
+check("404: ссылка на загрузку", text("#view").includes("Добавить PDF"), text("#view"));
 
 const failed = results.filter(item => !item.ok);
 console.log(`\n${results.length - failed.length}/${results.length} проверок пройдено`);

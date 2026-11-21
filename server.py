@@ -784,6 +784,10 @@ class Handler(BaseHTTPRequestHandler):
                 # request loop as an unhandled exception.
                 self.error(str(error), 400)
                 return
+            except (ImportError, RuntimeError):
+                log.exception("PNG preview rendering failed")
+                self.error("Не удалось создать PNG-превью. Откройте PDF напрямую.", 503)
+                return
             self.send_data(png, "image/png")
             return
 
@@ -875,6 +879,10 @@ class Handler(BaseHTTPRequestHandler):
                 # request loop.
                 self.error(str(error), 400)
                 return
+            except (ImportError, RuntimeError):
+                log.exception("Solar PNG preview rendering failed")
+                self.error("Не удалось создать PNG-превью. Откройте PDF напрямую.", 503)
+                return
             self.send_data(png, "image/png")
         elif resource == "export.json":
             self.send_data(json.dumps(envelope, ensure_ascii=False).encode(), "application/json; charset=utf-8", Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.json\"")
@@ -965,6 +973,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in {"/api/documents", "/api/demo"}:
             self.documents_post(path)
             return
+        if path == "/api/documents/stream":
+            self.documents_stream()
+            return
         if path.startswith("/api/profiles/"):
             self.profiles_put(path)
             return
@@ -989,6 +1000,51 @@ class Handler(BaseHTTPRequestHandler):
             self.profiles_delete(path)
             return
         self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def documents_stream(self):
+        track = self.headers.get("X-Track", "rag").strip().lower()
+        if track not in AREAS:
+            self.error("Недопустимая область. Допустимы: rag, solar.", 400)
+            return
+        limit = SOLAR_MAX_BYTES if track == "solar" else RAG_MAX_BYTES
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if not 0 < length <= limit or self.headers.get_content_type() != "application/pdf":
+            self.error(f"Нужен PDF размером до {limit // (1024 * 1024)} МиБ.", 400)
+            return
+        data = self.rfile.read(length)
+        if not data.startswith(b"%PDF-"):
+            self.error("Файл не является PDF.", 422)
+            return
+        name = unquote(self.headers.get("X-Filename", "article.pdf"))
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.close_connection = True
+
+        def emit(completed, label, result=None, error=None):
+            message = {"completed": completed, "total": 4, "label": label}
+            if result is not None: message["result"] = result
+            if error is not None: message["error"] = error
+            self.wfile.write((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            emit(0, "PDF загружен")
+            if track == "solar":
+                result = self.solar_store().ingest(name, data, progress=emit)
+            else:
+                result = self.rag_store().ingest(name, data, track=track, progress=emit)
+            emit(4, "Обработка завершена", result=result)
+        except ValueError as error:
+            emit(0, "Ошибка обработки", error=str(error))
+        except Exception:
+            log.exception("Streaming PDF ingest failed")
+            emit(0, "Ошибка обработки", error="Ошибка обработки PDF. Подробности в консоли сервера.")
 
     def documents_post(self, path):
         track = self.headers.get("X-Track", "rag").strip().lower()

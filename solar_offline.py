@@ -1980,7 +1980,7 @@ def project(tables):
     return cart
 
 
-def extract_pdf(path, publication_id=None, *, model=""):
+def extract_pdf(path, publication_id=None, *, model="", progress=None):
     """Document plus the seven tables, validated by :mod:`solar_facts`."""
     from pathlib import Path
 
@@ -1990,12 +1990,14 @@ def extract_pdf(path, publication_id=None, *, model=""):
 
     data = Path(path).read_bytes()
     document = solar_facts.prepare_pdf(publication_id or Path(path).name, data)
+    if progress: progress(1, "Страницы PDF прочитаны")
     try:
         tables = project(build(data, document["publication_id"]))
     except PdfminerException:
         # prepare_pdf parsed the same bytes, so this is a table-layer failure,
         # not a different file; report it the same way.
         raise ValueError("PDF повреждён, зашифрован или не может быть разобран.") from None
+    if progress: progress(2, "Результаты извлечены")
     return solar_facts.finalize(tables, document, model=model)
 
 
