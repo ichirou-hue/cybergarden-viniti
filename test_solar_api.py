@@ -6,7 +6,8 @@ tests build the mapping from a crafted parser result, and run one real ingest
 over a synthetic PDF, so they need no corpus on disk.
 """
 
-from contextlib import closing`r`nfrom io import BytesIO
+from contextlib import closing
+from io import BytesIO
 import json
 import sqlite3
 from pathlib import Path
