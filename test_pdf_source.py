@@ -4,6 +4,9 @@ Run:  python -X utf8 -m unittest test_pdf_source -v
 """
 from io import BytesIO
 import unittest
+from unittest import mock
+
+import pdfplumber
 
 import pdf_source
 
@@ -59,6 +62,75 @@ class PageTextTest(unittest.TestCase):
         document = pdf_source.extract(ruled_pdf([600, 570, 540]))
         self.assertIn("page_texts", document)
         self.assertEqual(sorted(document["page_texts"]), [1])
+
+
+class PyMuPDFFallbackTest(unittest.TestCase):
+    def test_pymupdf_word_helper_returns_coords_on_synthetic_pdf(self):
+        fake_page = mock.Mock()
+        fake_page.get_text.return_value = [(10, 20, 30, 30, "Voc", 0, 0, 0), (35, 20, 50, 30, "1.2", 0, 0, 1)]
+        fake_doc = mock.MagicMock()
+        fake_doc.__enter__.return_value = [fake_page]
+        fake_doc.__len__.return_value = 1
+        fake_fitz = mock.Mock()
+        fake_fitz.open.return_value = fake_doc
+        with mock.patch.dict("sys.modules", {"fitz": fake_fitz}):
+            words = pdf_source._pymupdf_page_words(b"%PDF-1.4 fake", 1)
+        self.assertEqual(len(words), 2)
+        self.assertTrue(all(set(word) >= {"x0", "top", "x1", "bottom", "text"} for word in words))
+        self.assertEqual(" ".join(word["text"] for word in words), "Voc 1.2")
+
+    def test_line_sources_from_pymupdf_words_are_structured(self):
+        words = [
+            {"x0": 10, "top": 10, "x1": 30, "bottom": 20, "text": "Table", "_block": 1, "_line": 1},
+            {"x0": 35, "top": 10, "x1": 45, "bottom": 20, "text": "1.", "_block": 1, "_line": 1},
+            {"x0": 10, "top": 30, "x1": 30, "bottom": 40, "text": "PCE", "_block": 1, "_line": 2},
+            {"x0": 35, "top": 30, "x1": 55, "bottom": 40, "text": "18%", "_block": 1, "_line": 2},
+        ]
+        sources = pdf_source._pymupdf_line_sources(words, 3)
+        self.assertEqual([s["kind"] for s in sources], ["caption", "text"])
+        self.assertEqual(sources[0]["page"], 3)
+        self.assertEqual(sources[0]["quote"], "Table 1.")
+        self.assertEqual(len(sources[0]["bbox"]), 4)
+
+    def test_extract_falls_back_when_pdfplumber_words_empty(self):
+        data = ruled_pdf([600, 570, 540], texts=[(500, "Voc 1.2 V")])
+        original = pdfplumber.page.Page.extract_words
+        original_fallback = pdf_source._pymupdf_page_words
+
+        def empty_words(self, *args, **kwargs):
+            return []
+
+        try:
+            pdfplumber.page.Page.extract_words = empty_words
+            pdf_source._pymupdf_page_words = lambda *args, **kwargs: [
+                {"x0": 110, "top": 282, "x1": 160, "bottom": 294,
+                 "text": "Voc", "_block": 1, "_line": 1},
+                {"x0": 165, "top": 282, "x1": 190, "bottom": 294,
+                 "text": "1.2", "_block": 1, "_line": 1},
+                {"x0": 195, "top": 282, "x1": 205, "bottom": 294,
+                 "text": "V", "_block": 1, "_line": 1},
+            ]
+            document = pdf_source.extract(data)
+        finally:
+            pdfplumber.page.Page.extract_words = original
+            pdf_source._pymupdf_page_words = original_fallback
+        self.assertFalse(any("текстовый слой пуст" in warning for warning in document["warnings"]))
+        self.assertTrue(any("Voc" in source.get("quote", "") for source in document["sources"]))
+        self.assertEqual(document["fallback_pages"], [1])
+
+    def test_extract_warns_when_both_extractors_fail(self):
+        data = ruled_pdf([600, 570, 540], texts=[(500, "Voc 1.2 V")])
+        original_words = pdfplumber.page.Page.extract_words
+        original_fallback = pdf_source._pymupdf_page_words
+        try:
+            pdfplumber.page.Page.extract_words = lambda self, *a, **k: []
+            pdf_source._pymupdf_page_words = lambda *a, **k: []
+            document = pdf_source.extract(data)
+        finally:
+            pdfplumber.page.Page.extract_words = original_words
+            pdf_source._pymupdf_page_words = original_fallback
+        self.assertTrue(any("текстовый слой пуст" in warning for warning in document["warnings"]))
+        self.assertEqual(document["fallback_pages"], [])
 
 
 class RenderTest(unittest.TestCase):

@@ -32,6 +32,86 @@ def is_inside(word, box):
     return box[0] <= x <= box[2] and box[1] <= y <= box[3]
 
 
+def _pymupdf_page_words(data, page_number):
+    """Fallback word extraction for pages pdfplumber cannot parse into words.
+
+    Returns word dicts compatible with the source shape used by this module:
+    x0/top/x1/bottom/text. Coordinates use the same top-origin page space as
+    pdfplumber. Any import/runtime failure returns an empty list so callers can
+    keep the existing empty-text warning behavior.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        return []
+    try:
+        with fitz.open(stream=data, filetype="pdf") as doc:
+            if not 1 <= page_number <= len(doc):
+                return []
+            page = doc[page_number - 1]
+            raw = page.get_text("words") or []
+    except Exception:
+        return []
+    words = []
+    for item in raw:
+        if len(item) < 5:
+            continue
+        x0, y0, x1, y1, text = item[:5]
+        text = str(text).strip()
+        if not text:
+            continue
+        words.append({
+            "x0": float(x0), "top": float(y0), "x1": float(x1), "bottom": float(y1),
+            "text": text,
+            "_block": int(item[5]) if len(item) > 5 else 0,
+            "_line": int(item[6]) if len(item) > 6 else 0,
+        })
+    words.sort(key=lambda word: (word["_block"], word["_line"], word["top"], word["x0"]))
+    return words
+
+
+def _pymupdf_line_sources(words, page_number):
+    """Build line-level text sources from PyMuPDF words.
+
+    Grouping uses PyMuPDF block/line ids when present, then falls back to top
+    proximity. This is only used when pdfplumber word extraction is empty; table
+    detection stays with pdfplumber and OCR is still absent.
+    """
+    if not words:
+        return []
+    groups = []
+    current = [words[0]]
+    current_key = (words[0].get("_block"), words[0].get("_line"))
+    current_top = words[0]["top"]
+    for word in words[1:]:
+        key = (word.get("_block"), word.get("_line"))
+        same_line = key == current_key
+        if key == (0, 0) and current_key == (0, 0):
+            same_line = abs(word["top"] - current_top) <= 2.5
+        if same_line:
+            current.append(word)
+        else:
+            groups.append(current)
+            current = [word]
+            current_key = key
+            current_top = word["top"]
+    groups.append(current)
+
+    sources = []
+    for group in groups:
+        group = sorted(group, key=lambda word: word["x0"])
+        quote = " ".join(word["text"] for word in group).strip()
+        if not quote:
+            continue
+        kind = "caption" if CAPTION.match(quote) else "equation" if EQUATION.match(quote) else "text"
+        clean = [{"x0": w["x0"], "top": w["top"], "x1": w["x1"], "bottom": w["bottom"], "text": w["text"]}
+                 for w in group]
+        sources.append({
+            "page": page_number, "bbox": bounds(clean), "quote": quote, "kind": kind,
+        })
+    return sources
+
+
 def table_rows(tables, words, page):
     for table_index, table in enumerate(tables, 1):
         for row_index, row in enumerate(table.rows, 1):
@@ -112,7 +192,7 @@ def page_texts(data):
 
 
 def extract(data):
-    sources, warnings = [], []
+    sources, warnings, fallback_pages = [], [], []
     with pdfplumber.open(BytesIO(data)) as pdf:
         if not 1 <= len(pdf.pages) <= MAX_PAGES:
             raise ValueError(f"Поддерживаются PDF от 1 до {MAX_PAGES} страниц.")
@@ -124,7 +204,14 @@ def extract(data):
             deduped = page.dedupe_chars()
             words = deduped.extract_words(x_tolerance=X_TOLERANCE)
             if not words:
-                warnings.append(f"Страница {page.page_number}: текстовый слой пуст или отсутствует.")
+                fallback_words = _pymupdf_page_words(data, page.page_number)
+                fallback_sources = _pymupdf_line_sources(fallback_words, page.page_number)
+                if fallback_sources:
+                    fallback_pages.append(page.page_number)
+                    sources.extend(fallback_sources)
+                else:
+                    warnings.append(f"Страница {page.page_number}: текстовый слой пуст или отсутствует.")
+                page.close()
                 continue
             tables = find_tables(deduped)
             sources.extend(table_rows(tables, words, page))
@@ -150,7 +237,7 @@ def extract(data):
         return {
             "title": metadata.get("title", ""), "author": metadata.get("author", ""),
             "pages": len(pdf.pages), "sources": sources, "warnings": warnings,
-            "page_texts": texts,
+            "page_texts": texts, "fallback_pages": fallback_pages,
         }
 
 

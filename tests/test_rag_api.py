@@ -8,11 +8,22 @@ import unittest
 from urllib.request import Request, urlopen
 
 from library import Library
-from rag_api import RagStore, build_envelope, demo_pdf, export_csv
+from rag_api import RagStore, build_envelope, demo_pdf, export_csv, _anchor
 from server import Handler, ThreadingHTTPServer
 
 
 class AdapterTest(unittest.TestCase):
+    def test_csv_escapes_formula_values(self):
+        envelope = {"publication_id": "=pdf", "results": [{"metric_name": "@metric", "metric_value": "-1"}]}
+        text = export_csv(envelope).decode("utf-8-sig")
+        self.assertIn("'=pdf", text)
+        self.assertIn("'@metric", text)
+        self.assertIn("'-1", text)
+
+    def test_csv_escapes_formula_values_in_source(self):
+        envelope = {"publication_id": "P", "results": [{"metric_name": "M", "source": {"fragment": "=cite"}}]}
+        self.assertIn("'=cite", export_csv(envelope).decode("utf-8-sig"))
+
     def test_demo_envelope_has_results_and_anchors(self):
         envelope = build_envelope(
             document_id="rag:demo",

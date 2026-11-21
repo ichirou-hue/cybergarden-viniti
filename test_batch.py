@@ -180,12 +180,12 @@ class BatchTest(unittest.TestCase):
         legacy.assert_called_once_with("rag", "P001", "b.pdf")
 
     def test_solar_has_its_own_extractor_revision(self):
+        import extract
         import solar_offline
 
         self.assertEqual(batch.default_revision("solar"), solar_offline.PARSER_VERSION)
-        self.assertEqual(batch.default_revision("rag"), batch.DEFAULT_EXTRACTOR_REVISION)
-        self.assertNotEqual(solar_offline.PARSER_VERSION,
-                            batch.DEFAULT_EXTRACTOR_REVISION)
+        self.assertEqual(batch.default_revision("rag"), extract.PARSER_VERSION)
+        self.assertNotEqual(solar_offline.PARSER_VERSION, extract.PARSER_VERSION)
 
 
 if __name__ == "__main__":

@@ -47,6 +47,8 @@ from rag_api import (
     render_anchor_png,
     sources as list_sources,
 )
+from solar_api import SolarStore
+from solar_api import MAX_BYTES as SOLAR_MAX_BYTES
 
 
 ROOT = Path(__file__).resolve().parent
@@ -98,6 +100,7 @@ ASSETS = {
     "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
     "/tracks/index.js": ("tracks/index.js", "text/javascript; charset=utf-8"),
     "/tracks/rag.js": ("tracks/rag.js", "text/javascript; charset=utf-8"),
+    "/tracks/solar.js": ("tracks/solar.js", "text/javascript; charset=utf-8"),
 }
 PAPER = re.compile(r"/api/papers/([0-9a-f]{64})(?:/(pdf|sources|facts|headers)(?:/([1-9][0-9]{0,8})\.png)?)?")
 HEAVY_FIELDS = {"entities", "results", "issues", "anchors", "text_sources"}
@@ -513,6 +516,15 @@ class Handler(BaseHTTPRequestHandler):
             self.server.rag_store = store
         return store
 
+    def solar_store(self) -> SolarStore:
+        store = getattr(self.server, "solar_store", None)
+        if store is None:
+            base = getattr(self.server, "library", None)
+            path = Path(base.path).parent / "solar.sqlite3" if base else ROOT / "data" / "solar.sqlite3"
+            store = SolarStore(path)
+            self.server.solar_store = store
+        return store
+
     # --- общие помощники ------------------------------------------------
     @staticmethod
     def _int(query, name, default, minimum=0, maximum=None):
@@ -647,6 +659,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.error(str(error), 400)
                 return
             items = self.rag_store().list(single.get("track", "rag"))
+            if single.get("track", "rag") == "solar":
+                items = self.solar_store().list()
             q = (single.get("q") or "").strip().lower()
             if q:
                 items = [
@@ -674,6 +688,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         document_id = segments[2]
+        if document_id.startswith("solar:"):
+            self.solar_documents_get(document_id, segments[3:], query, single)
+            return
         envelope = self.rag_store().get(document_id)
         if envelope is None:
             self.error("Документ не найден.", 404)
@@ -751,10 +768,20 @@ class Handler(BaseHTTPRequestHandler):
             if pdf is None:
                 self.error("PDF не найден.", 404)
                 return
-            self.send_data(
-                render_anchor_png(pdf, anchor.get("page", 1), anchor.get("bbox")),
-                "image/png",
-            )
+            try:
+                png = render_anchor_png(
+                    pdf,
+                    anchor.get("page", 1),
+                    anchor.get("bbox"),
+                    bboxes=anchor.get("bboxes"),
+                )
+            except (IndexError, TypeError, ValueError) as error:
+                # A stale or malformed anchor is data, not a server error.
+                # In particular, never let page=0/out-of-range reach the
+                # request loop as an unhandled exception.
+                self.error(str(error), 400)
+                return
+            self.send_data(png, "image/png")
             return
 
         if resource == "export.json":
@@ -775,8 +802,47 @@ class Handler(BaseHTTPRequestHandler):
 
         self.error("Маршрут не найден.", 404)
 
+    def solar_documents_get(self, document_id, resources, query, single):
+        envelope = self.solar_store().get(document_id)
+        if envelope is None:
+            self.error("Документ не найден.", 404)
+            return
+        resource = resources[0] if resources else ""
+        if not resource:
+            self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
+        elif resource == "facets":
+            self.send_json({"metrics": [], "ks": [], "datasets": [], "configs": [], "statuses": []})
+        elif resource == "results":
+            items = envelope.get("results", [])
+            limit, offset = self._page(query)
+            self.send_json({"total": len(items), "items": items[offset:offset + limit]})
+        elif resource == "issues":
+            self.send_json({"total": 0, "items": []})
+        elif resource == "sources":
+            items = [row.get("source") for row in envelope.get("results", []) if row.get("source")]
+            self.send_json({"total": len(items), "items": items[:self._int(query, "limit", 200, 1, 500)]})
+        elif resource == "entities":
+            self.send_json({"total": 0, "items": []})
+        elif resource == "export.json":
+            self.send_data(json.dumps(envelope, ensure_ascii=False).encode(), "application/json; charset=utf-8", Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.json\"")
+        elif resource == "export.csv":
+            data = self.solar_store().export_csv(document_id)
+            if data is None:
+                self.error("Документ не найден.", 404)
+            else:
+                self.send_data(data, "text/csv; charset=utf-8", Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.csv\"")
+        elif resource == "pdf":
+            data = self.solar_store().pdf(document_id)
+            if data is None:
+                self.error("PDF не найден.", 404)
+            else:
+                self.send_data(data, "application/pdf", Content_Disposition="inline")
+        else:
+            self.error("Маршрут не найден.", 404)
+
     def jobs(self, single):
-        docs = self.rag_store().list(single.get("track", "rag"))
+        track = single.get("track", "rag")
+        docs = self.solar_store().list() if track == "solar" else self.rag_store().list(track)
         done = sum(doc.get("status") == "done" for doc in docs)
         partial = sum(doc.get("status") == "partial" for doc in docs)
         failed = sum(doc.get("status") == "failed" for doc in docs)
@@ -872,28 +938,32 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": "Маршрут не найден."}, 404)
 
     def documents_post(self, path):
+        track = self.headers.get("X-Track", "rag").strip().lower()
+        max_bytes = SOLAR_MAX_BYTES if track == "solar" else RAG_MAX_BYTES
         try:
             length = int(self.headers.get("Content-Length", "0") or 0)
         except ValueError:
             length = 0
         if path == "/api/documents" and length == 0:
-            self.error("Нужен PDF размером до 20 МиБ.", 413)
+            self.error(f"Нужен PDF размером до {max_bytes // (1024 * 1024)} МиБ.", 413)
             return
-        if length > RAG_MAX_BYTES:
-            self.error("Файл больше 20 МиБ.", 413)
+        if length > max_bytes:
+            self.error(f"Файл больше {max_bytes // (1024 * 1024)} МиБ.", 413)
             return
         if path == "/api/documents":
             if self.headers.get_content_type() != "application/pdf":
                 self.error("Ожидается application/pdf.", 415)
                 return
             data = self.rfile.read(length)
-            track = self.headers.get("X-Track", "rag")
-            if track != "rag":
-                self.error("Эта область ещё не подключена.", 400)
-                return
             name = unquote(self.headers.get("X-Filename", "article.pdf"))
             try:
-                summary = self.rag_store().ingest(name, data, track=track)
+                if track == "solar":
+                    summary = self.solar_store().ingest(name, data)
+                elif track == "rag":
+                    summary = self.rag_store().ingest(name, data, track=track)
+                else:
+                    self.error("Недопустимая область. Допустимы: rag, solar.", 400)
+                    return
             except ValueError as error:
                 self.error(str(error), 422)
                 return

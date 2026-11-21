@@ -38,14 +38,12 @@ CORPUS_ROOTS = {
     "rag": ROOT / "_corpus" / "rag" / "RAG_ВИНИТИ_участникам_2026-11-20",
 }
 
-# Bump together with the extractor. Kept local on purpose: importing
-# library.py pulls in rag_facts and is not needed by the harness.
-DEFAULT_EXTRACTOR_REVISION = 1
-# Solar is served by the deterministic ``solar_offline`` extractor, which writes
-# all seven submission tables and has nothing in common with the filler-based
-# result rows. Its revision lives in that module (``PARSER_VERSION``) so the
-# documents row and the jobs row cannot drift apart; it differs from the filler
-# revision, otherwise --resume would skip everything the old extractor marked ok.
+# Keep resume invalidation tied to the actual extractor revision. A separate
+# constant silently lets batch reuse rows after extract.py changes. The import
+# stays lazy: extract pulls in pdfplumber, and the harness must import without it.
+def default_extractor_revision():
+    import extract
+    return extract.PARSER_VERSION
 
 # Return this from a processor to record the publication as deliberately
 # skipped instead of ok.
@@ -103,7 +101,7 @@ def default_revision(area):
         import solar_offline
 
         return solar_offline.PARSER_VERSION
-    return DEFAULT_EXTRACTOR_REVISION
+    return default_extractor_revision()
 
 
 def load_processor(spec):
@@ -189,8 +187,8 @@ def _is_done(row, revision):
 
 
 def run(area, split, *, db_path=db.DEFAULT_DB, resume=False, limit=None,
-        timeout=0.0, dry_run=False, process=None,
-        revision=None, log=print, tracebacks=False):
+        timeout=0.0, dry_run=False, process=None, revision=None,
+        log=print, tracebacks=False):
     """Process one split. Returns a summary dict; never raises per-file errors."""
     process = process or default_process
     if revision is None:

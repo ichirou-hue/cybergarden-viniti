@@ -214,6 +214,14 @@ function noticeBlock(summary) {
   if (Array.isArray(summary.warnings) && summary.warnings.length) {
     blocks.push(el("ul", {class: "warnings"}, summary.warnings.map(warning => el("li", {text: warning}))));
   }
+  if ((summary.results_count ?? summary.counts?.results ?? 0) === 0
+      && summary.status !== "failed" && summary.status !== "queued"
+      && summary.status !== "running" && !summary.scanned) {
+    blocks.push(el("div", {class: "notice warn"},
+      el("strong", {text: "Подтверждённых результатов не найдено"}),
+      el("p", {text: "CSV создан, но он может быть пустым. Это не означает, что статья разобрана полностью: текущий baseline извлекает только поддерживаемые структуры и проверенные цитаты."}),
+    ));
+  }
   return blocks;
 }
 

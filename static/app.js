@@ -150,9 +150,9 @@ async function route() {
   if (!descriptor) {
     setUploadEnabled(false);
     const label = desired === "solar" ? "Solar" : desired;
-    message(
-      `Раздел «${label}» пока не подключён.`,
-      "Обработчик области ещё не добавлен. Каталог RAG работает; Solar появится отдельным дескриптором.",
+      message(
+        `Раздел «${label}» пока не подключён.`,
+        "Обработчик области недоступен.",
       el("p", {}, el("a", {href: "#/?track=rag", text: "Перейти в каталог RAG"})),
     );
     return;
