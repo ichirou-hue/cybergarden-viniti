@@ -1,5 +1,8 @@
 .venv/
+.venv-docling/
+.DS_Store
 __pycache__/
 *.py[cod]
 .env
 data/
+docs/materials/

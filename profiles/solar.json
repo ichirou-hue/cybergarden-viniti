@@ -1,0 +1,20 @@
+{
+  "id": "solar",
+  "version": "1",
+  "adapter": "solar_csv",
+  "description": "Экспериментальные однопереходные тонкоплёночные солнечные элементы. Семь таблиц шаблона участников.",
+  "instructions": "Не строй граф цитирований. Включай только подтверждённые связи прибора, материала и измерения. Не объединяй работы по совпадению чисел. Сохраняй разные условия отдельно.",
+  "metrics": {
+    "PCE": ["PCE", "power conversion efficiency"],
+    "Voc": ["Voc", "V_oc", "open-circuit voltage"],
+    "Jsc": ["Jsc", "J_sc", "short-circuit current density"],
+    "FF": ["FF", "fill factor"],
+    "Rs": ["Rs"],
+    "Rsh": ["Rsh"],
+    "HI": ["HI", "hysteresis index"],
+    "Jsc_EQE": ["Jsc_EQE"],
+    "stabilized_PCE": ["stabilized PCE"],
+    "T80": ["T80"],
+    "retained_PCE": ["retained PCE"]
+  }
+}
