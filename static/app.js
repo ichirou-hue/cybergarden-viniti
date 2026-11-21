@@ -6,6 +6,8 @@ import { openEvidence, dismissEvidence } from "./evidence.js";
 import { uploadPDF, uploadPDFWithProgress, openDemo } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
 import { stashProfilePDF } from "./pending.js";
+import { mountAuthScreen, currentAccount, isSignedIn, recordActivity, signOutAccount } from "./auth.js";
+import { mountAccountMenu, renderProfile } from "./account.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -23,7 +25,15 @@ const dropZone = document.getElementById("dropZone");
 const profileStep = document.getElementById("profileStep");
 let selectedPDF = null;
 
-const app = {descriptors: [], track: "rag", controller: null};
+const authScreen = mountAuthScreen(document.getElementById("authScreen"), {
+  onEnter: enterApp,
+});
+const accountMenu = mountAccountMenu({
+  navigate: hash => { location.hash = hash; },
+  onLogout: () => leaveAccount(),
+});
+
+const app = {descriptors: [], track: "rag", controller: null, started: false};
 let booted = false;
 let lastPath = "";
 
@@ -67,7 +77,7 @@ function say(message, isError = false) {
 function renderTracks(active = app.track) {
   fill(trackBar, app.descriptors.map(item => el("a", {
     class: "track",
-    href: buildHash("/", {track: item.track}),
+    href: buildHash("/catalog", {track: item.track}),
     "aria-current": item.track === active ? "page" : null,
     text: item.label || item.track,
   })));
@@ -106,6 +116,11 @@ function splitDocId(raw) {
 
 async function route() {
   let {path, params} = parse();
+  if (!isSignedIn()) {
+    wizard.hidden = true;
+    authScreen.show();
+    return;
+  }
   const legacyTab = path.match(/^\/doc\/([^/]+)\/(issues|entities|sources)$/);
   if (legacyTab) {
     path = `/doc/${legacyTab[1]}`;
@@ -122,6 +137,9 @@ async function route() {
   document.body.classList.toggle("wizard-active", wizardActive);
   if (wizardActive) {
     app.controller?.abort();
+    setUploadEnabled(true);
+    document.body.dataset.view = "";
+    document.title = "ВИНТИ · Каталог результатов";
     renderWizard();
     booted = true;
     document.getElementById("bootError").hidden = true;
@@ -143,6 +161,25 @@ async function route() {
     setUploadEnabled(true);
     renderTracks("");
     renderPassport(view, {say, go, patch, params});
+    if (booted && pathChanged) focusView();
+    booted = true;
+    document.getElementById("bootError").hidden = true;
+    return;
+  }
+
+  if (path === "/profile") {
+    app.controller?.abort();
+    document.body.dataset.view = "profile";
+    passportLink.removeAttribute("aria-current");
+    renderTracks("");
+    setUploadEnabled(true);
+    renderProfile(view, {
+      account: currentAccount(),
+      params,
+      navigate: hash => { location.hash = hash; },
+      onLogout: leaveAccount,
+      onSave: updated => accountMenu.sync(updated),
+    });
     if (booted && pathChanged) focusView();
     booted = true;
     document.getElementById("bootError").hidden = true;
@@ -370,9 +407,18 @@ document.getElementById("wizardSubmit").addEventListener("click", async () => {
   openDocument(result);
 });
 
-function openDocument(item) {
+function openDocument(item, kind = "upload") {
   const track = item.track || app.track;
   const id = item.document_id || `${track}:${item.id}`;
+  const account = currentAccount();
+  if (account) {
+    const updated = recordActivity(account, {
+      title: kind === "demo" ? "Открыт демо-документ" : "Разобран PDF",
+      detail: [id, track ? `область ${track}` : ""].filter(Boolean).join(" · "),
+      kind: kind === "demo" ? "account" : "upload",
+    });
+    accountMenu.sync(updated || account);
+  }
   location.hash = `#/doc/${encodeURIComponent(id)}?track=${encodeURIComponent(track)}`;
 }
 
@@ -396,18 +442,83 @@ demoButton.addEventListener("click", async () => {
   const result = await busy("Открываю демо…", () => openDemo(app.track));
   if (!result) return;
   say("");
-  openDocument(result);
+  openDocument(result, "demo");
 });
 
-app.descriptors = await tracks();
-if (!app.descriptors.length) {
-  setUploadEnabled(false);
-  message(
-    "Не удалось загрузить интерфейс.",
-    "Модули областей недоступны. Запустите сервер: .venv/bin/python tools/mock_api.py",
-  );
-} else {
+async function startApp() {
+  if (app.started) return;
+  app.started = true;
+  app.descriptors = await tracks();
+  if (!app.descriptors.length) {
+    setUploadEnabled(false);
+    message(
+      "Не удалось загрузить интерфейс.",
+      "Модули областей недоступны. Запустите сервер: .venv/bin/python tools/mock_api.py",
+    );
+    return;
+  }
   if (!location.hash) history.replaceState(null, "", buildHash("/", {track: app.track}));
   window.addEventListener("hashchange", route);
   await route();
 }
+
+let toastTimer = null;
+
+function toast(message) {
+  const node = document.getElementById("toast");
+  if (!node || !message) return;
+  node.textContent = message;
+  node.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { node.hidden = true; }, 4000);
+}
+
+function focusAfterAuth() {
+  if (document.body.classList.contains("wizard-active")) {
+    document.getElementById("wizardTitle")?.focus?.({preventScroll: true});
+  } else {
+    focusView();
+  }
+}
+
+async function enterApp(account, notice = "") {
+  accountMenu.sync(account);
+  authScreen.hide();
+  lastPath = "";
+  // Адрес не трогаем: глубокая ссылка должна открыться и при первом,
+  // и при повторном входе.
+  if (!app.started) await startApp();
+  else await route();
+  focusAfterAuth();
+  if (notice) toast(notice);
+}
+
+function leaveAccount() {
+  signOutAccount();
+  app.controller?.abort();
+  accountMenu.sync(null);
+  selectedPDF = null;
+  fileInput.value = "";
+  fileName.textContent = "Загрузить PDF";
+  fileName.title = "";
+  lastPath = "";
+  booted = false;
+  fill(view);
+  say("");
+  setUploadEnabled(false);
+  authScreen.reset();
+  authScreen.show("Вы вышли из аккаунта.", false);
+}
+
+async function boot() {
+  const account = currentAccount();
+  if (!account) {
+    document.getElementById("bootError").hidden = true;
+    authScreen.show();
+    return;
+  }
+  accountMenu.sync(account);
+  await startApp();
+}
+
+await boot();

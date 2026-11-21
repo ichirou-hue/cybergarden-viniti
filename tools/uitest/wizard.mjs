@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
+import { seedWindow } from "./account.mjs";
 
 const root = new URL("../../static/", import.meta.url);
 const dom = new JSDOM(readFileSync(new URL("index.html", root), "utf8"), {
@@ -10,6 +11,9 @@ for (const key of ["window", "document", "location", "history", "HTMLElement", "
   Object.defineProperty(globalThis, key, {value: dom.window[key], configurable: true});
 }
 globalThis.fetch = async () => { throw new Error("На первом этапе запрос к серверу не нужен"); };
+// Мастер живёт за экраном первого входа: подкладываем готовый аккаунт.
+globalThis.localStorage = dom.window.localStorage;
+seedWindow(dom.window);
 await import(new URL("app.js", root).href);
 
 const $ = id => document.getElementById(id);

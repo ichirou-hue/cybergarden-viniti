@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright-core";
+import { seedContext } from "./account.mjs";
 
 const base = process.env.MOCK_URL || "http://127.0.0.1:8799";
 const results = [];
@@ -12,6 +13,9 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH || chromium.executablePath(),
 });
 const context = await browser.newContext({acceptDownloads: true});
+// Корень сайта закрыт экраном первого входа: для проверки передачи PDF
+// нужен готовый аккаунт в localStorage.
+await seedContext(context);
 const page = await context.newPage();
 const pdf = {name: "article.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 mock")};
 

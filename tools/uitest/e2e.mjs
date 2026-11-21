@@ -1,5 +1,6 @@
 import { chromium } from "playwright-core";
 import { writeFileSync } from "node:fs";
+import { seedContext } from "./account.mjs";
 
 const base = process.env.MOCK_URL || "http://127.0.0.1:8799";
 const out = [];
@@ -12,12 +13,16 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH || chromium.executablePath(),
 });
 const context = await browser.newContext({viewport: {width: 1366, height: 900}, acceptDownloads: true});
+// Экран первого входа обязателен: сразу кладём готовый аккаунт, иначе
+// каталог закрыт регистрацией.
+await seedContext(context);
 const page = await context.newPage();
 let alertFired = false;
 page.on("dialog", dialog => { alertFired = true; dialog.dismiss(); });
 
-// Каталог и сортировка по замечаниям
-await page.goto(`${base}/#/`, {waitUntil: "networkidle"});
+// Каталог и сортировка по замечаниям.
+// Корень "/" открывает мастер загрузки, поэтому каталог проверяем на /catalog.
+await page.goto(`${base}/#/catalog?track=rag`, {waitUntil: "networkidle"});
 await page.selectOption('.filters select[aria-label="Сортировка"]', "issues");
 await page.waitForTimeout(400);
 const firstPub = await page.locator("#view tbody tr td .pub strong").first().textContent();
@@ -119,7 +124,8 @@ check("result=: сообщение о ненайденной записи",
 // Загрузка PDF
 const response = await context.request.get(`${base}/api/documents/rag%3Ad020/pdf`);
 writeFileSync("/tmp/viniti-uitest-upload.pdf", await response.body());
-await page.goto(`${base}/#/`, {waitUntil: "networkidle"});
+// Загрузка идёт из тулбара каталога: корень "/" открывает мастер.
+await page.goto(`${base}/#/catalog?track=rag`, {waitUntil: "networkidle"});
 await page.setInputFiles("#file", "/tmp/viniti-uitest-upload.pdf");
 await page.click('#upload button[type="submit"]');
 await page.waitForTimeout(800);
