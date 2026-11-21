@@ -366,7 +366,9 @@ _SOLAR_UNITS = {
     "%": ("percent", "ratio", True),
     "percent": ("percent", "ratio", True),
     "pct": ("percent", "ratio", True),
+    "fraction": ("percent", "ratio", True),
     "v": ("volt", "voltage", True),
+    "mv": ("volt", "voltage", True),
     "volt": ("volt", "voltage", True),
     "volts": ("volt", "voltage", True),
     "ma/cm2": ("mA/cm2", "current_density", True),
@@ -591,8 +593,15 @@ def normalize_metric(area, metric_name, value_text, unit_text=""):
             "reason": "" if comparable else "unit not comparable",
         })
         if family == "ratio":
-            result["as_fraction"] = value / Decimal(100)
-            result["as_percent"] = value
+            if key == "fraction":
+                result["as_fraction"] = value
+                result["as_percent"] = value * Decimal(100)
+                result["value"] = result["as_percent"]
+            else:
+                result["as_fraction"] = value / Decimal(100)
+                result["as_percent"] = value
+        elif family == "voltage" and key == "mv":
+            result["value"] = value / Decimal(1000)
         return result
 
     if area_key == "rag":

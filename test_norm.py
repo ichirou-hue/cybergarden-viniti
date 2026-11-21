@@ -91,6 +91,14 @@ class ParseQuantityTest(unittest.TestCase):
             self.assertEqual(norm.parse_quantity(text), (None, ""), repr(text))
 
 
+class UnitKeyTest(unittest.TestCase):
+    def test_solar_caret_units_share_canonical_keys(self):
+        self.assertEqual(norm.unit_key("mA/cm^2"), norm.unit_key("mA/cm2"))
+        self.assertEqual(norm.unit_key("Ohm*cm^2"), norm.unit_key("ohm*cm2"))
+        self.assertTrue(norm.normalize_metric("solar", "Jsc", "1", "mA/cm^2")["comparable"])
+        self.assertTrue(norm.normalize_metric("solar", "Rs", "1", "Ohm*cm^2")["comparable"])
+
+
 class IrradianceTest(unittest.TestCase):
     def test_three_forms_of_one_sun_are_equal(self):
         mw = norm.normalize_irradiance("100", "mW/cm2")
@@ -190,6 +198,25 @@ class MetricTest(unittest.TestCase):
             result = norm.normalize_metric("solar", metric, value, unit)
             self.assertEqual(result["unit_canonical"], expected, unit)
             self.assertTrue(result["comparable"], unit)
+
+    def test_solar_millivolts_are_canonical_volts(self):
+        result = norm.normalize_metric("solar", "Voc", "960", "mV")
+        self.assertEqual(result["value"], Decimal("0.960"))
+        self.assertEqual(result["unit_canonical"], "volt")
+        self.assertTrue(result["comparable"])
+
+    def test_solar_fraction_requires_explicit_unit(self):
+        fraction = norm.normalize_metric("solar", "PCE", "0.70", "fraction")
+        self.assertEqual(fraction["value"], Decimal("70.00"))
+        self.assertEqual(fraction["unit_canonical"], "percent")
+        self.assertFalse(norm.normalize_metric("solar", "PCE", "0.70", "")["comparable"])
+
+    def test_solar_unknown_unit_and_printed_precision(self):
+        unknown = norm.normalize_metric("solar", "Voc", "1.200", "furlongs")
+        self.assertFalse(unknown["comparable"])
+        exact = norm.normalize_metric("solar", "Voc", "960", "mV")
+        self.assertEqual(exact["original_value"], "960")
+        self.assertEqual(exact["original_unit"], "mV")
 
     def test_solar_empty_unit_is_not_comparable(self):
         result = norm.normalize_metric("solar", "FF", "71.0", "")

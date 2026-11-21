@@ -258,6 +258,30 @@ class WindowTest(unittest.TestCase):
 
 
 class TableFillerTest(unittest.TestCase):
+    def test_metric_in_prose_is_extracted_as_verifiable_evidence(self):
+        item = {"id": 1, "page": 2, "kind": "text",
+                "quote": "The champion device reached a PCE of 18.42 %."}
+        rows = extract.TableFiller().fill(
+            {"items": [item], "page": 2, "sources": [1], "text": ""}, {})
+        self.assertEqual([(row["metric_name"], row["metric_value"], row["metric_unit"])
+                          for row in rows], [("PCE", "18.42", "%")])
+        ok, reason = verify.verify_record(rows[0], [item])
+        self.assertTrue(ok, reason)
+
+    def test_prose_does_not_invent_a_number_from_a_distant_line(self):
+        items = [{"id": 1, "page": 2, "kind": "text", "quote": "PCE was reported."},
+                 {"id": 2, "page": 2, "kind": "text", "quote": "The value was 18.42 %."}]
+        rows = extract.TableFiller().fill(
+            {"items": items, "page": 2, "sources": [1, 2], "text": ""}, {})
+        self.assertEqual(rows, [])
+
+    def test_prose_requires_an_explicit_solar_metric_phrase(self):
+        item = {"id": 1, "page": 2, "kind": "text",
+                "quote": "The material showed excellent efficiency close to 23%."}
+        rows = extract.TableFiller().fill(
+            {"items": [item], "page": 2, "sources": [1], "text": ""}, {})
+        self.assertEqual(rows, [])
+
     def test_header_and_row_are_paired_and_verifiable(self):
         header = ("Sample |  | J | SC | (mA cm\u22122) | V | OC (mV) | FF | PCE (%)")
         row = "Pristine |  |  |  | 15.28 |  | 1,197 | 0.71 | 12.89"

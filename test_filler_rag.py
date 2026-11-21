@@ -151,6 +151,22 @@ class RagTableFillerTest(unittest.TestCase):
         self.assertEqual(filler.fill(None, {}), [])
         self.assertEqual(filler.fill({"items": [{"kind": "table"}]}, {}), [])
 
+    def test_known_metric_in_prose_is_extracted_with_local_evidence(self):
+        item = {"id": 1, "page": 5, "kind": "text",
+                "quote": "ConfigA on dataset D1 achieved MRR of 0.88."}
+        rows = RagTableFiller(TEST_VOCAB).fill(window([item]), {})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["metric_name"], "MRR")
+        self.assertEqual(rows[0]["metric_value"], "0.88")
+        self.assertEqual(rows[0]["source_fragment"], item["quote"])
+
+    def test_prose_does_not_borrow_value_from_another_source(self):
+        items = [
+            {"id": 1, "page": 5, "kind": "text", "quote": "MRR was reported."},
+            {"id": 2, "page": 5, "kind": "text", "quote": "The value was 0.88."},
+        ]
+        self.assertEqual(RagTableFiller(TEST_VOCAB).fill(window(items), {}), [])
+
 
 class RagTableFillerRunTest(unittest.TestCase):
     def test_run_on_synthetic_pdf_never_raises_and_writes_the_envelope(self):

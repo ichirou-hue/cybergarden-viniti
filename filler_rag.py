@@ -40,6 +40,13 @@ NORMALIZE = re.compile(r"\s+|-")
 # ("58.5k", "0.4 ms"). The whole cell must match; "accuracy 0.9" is not a value.
 NUMBER = r"(?:\d[\d\s]*(?:[.,]\d+)?|[.,]\d+)(?:[eE][+\-]?\d+)?"
 VALUE_LIKE = re.compile(rf"^[−+\-]?\s*{NUMBER}\s*(?:%|[A-Za-z][A-Za-z0-9./]*)?\s*$")
+PROSE_VALUE = re.compile(rf"(?P<value>[−+\-]?\s*{NUMBER}\s*(?:%|[A-Za-z][A-Za-z0-9./]*)?)")
+ID_PATTERNS = {
+    "config_id": re.compile(r"\b(?:config(?:uration)?|model)\s*[:=]?\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", re.I),
+    "dataset_id": re.compile(r"\bdataset\s*[:=]?\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", re.I),
+    "task_id": re.compile(r"\btask\s*[:=]?\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", re.I),
+    "experiment_id": re.compile(r"\bexperiment\s*[:=]?\s*([A-Za-z0-9][A-Za-z0-9_.-]*)", re.I),
+}
 
 
 def split_cells(quote):
@@ -137,12 +144,46 @@ class RagTableFiller:
             })
         return results
 
+    def _prose_candidates(self, item):
+        """Extract known metric/value pairs from one text source only."""
+        quote = (item.get("quote") or "").strip()
+        if not quote:
+            return []
+        results = []
+        for name, stats in self._stats.items():
+            metric_pattern = re.escape(name).replace(r"\ ", r"\s+")
+            pattern = re.compile(
+                rf"(?<![\w@]){metric_pattern}(?![\w@])"
+                rf"\s*(?:is|was|of|at|around|approximately|=|:)\s*"
+                rf"{PROSE_VALUE.pattern}", re.I)
+            for match in pattern.finditer(quote):
+                row = {
+                    "metric_name": name,
+                    "metric_value": " ".join(match.group("value").split()),
+                    "metric_unit": stats.get("metric_unit") or "",
+                    "metric_group": stats.get("metric_group") or "",
+                    "metric_direction": stats.get("metric_direction") or "",
+                    "source_page": item.get("page"),
+                    "source_fragment": quote,
+                    "source_table": "", "source_figure": "",
+                    "extraction_status": "extracted",
+                    "note": "RagTableFiller prose rule",
+                }
+                for field, identifier in ID_PATTERNS.items():
+                    found = identifier.search(quote)
+                    row[field] = found.group(1) if found else ""
+                results.append(row)
+        return results
+
     def fill(self, window, spec):
         headers = {}
         results = []
         if not isinstance(window, dict):
             return results
         for item in window.get("items") or []:
+            if item.get("kind") == "text":
+                results.extend(self._prose_candidates(item))
+                continue
             if item.get("kind") != "table":
                 continue
             cells = split_cells(item.get("quote"))

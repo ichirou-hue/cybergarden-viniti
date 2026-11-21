@@ -75,6 +75,7 @@ import sys
 from typing import Protocol
 
 import db as storage
+import norm
 import pdf_source
 import verify
 
@@ -82,7 +83,7 @@ DEFAULT_BUDGET = 6000
 DEFAULT_OVERLAP = 1
 # Bump when the parse itself changes (pdf_source, the envelope), so a stored
 # parser_version says which code produced the documents/blocks rows.
-PARSER_VERSION = 1
+PARSER_VERSION = 4
 # Extractor rows use their own id space so a rerun can clear them without ever
 # touching rows imported from dev_gold (which are R### / R#-#).
 RESULT_PREFIX = "X"
@@ -170,6 +171,14 @@ TOKEN = re.compile(r"[A-Za-z\u03b7]+")
 NUMERIC = re.compile(r"^[-\u2212+]?\s*\d[\d\s]*(?:[.,]\d+)?\s*%?$")
 PARENS = re.compile(r"\(([^)]*)\)")
 UNIT_HINT = re.compile(r"^(%|mV|V|A/W|mA\s*/?\s*cm\s*[-\u2212]?\s*2|cm\s*2\s*/\s*Vs)$", re.I)
+# Conservative prose form: metric and printed number must occur in one source.
+# The verifier remains the final evidence gate.
+PROSE_METRIC = re.compile(
+    r"(?i)\b(?P<name>pce|power\s+conversion\s+efficiency|eta|voc|v\s*oc|jsc|j\s*sc|ff|eqe|iqe)\b"
+    r"(?P<between>(?:\s+(?:of|is|was|reached|at|around|about|close\s+to|approximately|to)\s*|\s*[:=]\s*))"
+    r"(?P<value>[-+]?\d+(?:[\s,]\d{3})*(?:[.,]\d+)?)"
+    r"(?P<unit>\s*(?:mV|V|mA\s*/?\s*cm\s*[-\u2212]?\s*2|%|A/W))?"
+)
 
 
 def split_cells(quote):
@@ -229,6 +238,45 @@ def is_header(cells):
     return bool(parse_header(cells))
 
 
+def prose_rows(items):
+    """Extract metric/value pairs only when both are in one text source."""
+    aliases = {"power conversion efficiency": "PCE", "eta": "PCE",
+               "v oc": "Voc", "j sc": "Jsc"}
+    for item in items:
+        if item.get("kind") != "text":
+            continue
+        quote = (item.get("quote") or "").strip()
+        for match in PROSE_METRIC.finditer(quote):
+            raw_name = match.group("name").lower().replace("  ", " ")
+            name = aliases.get(raw_name, raw_name.upper())
+            value = " ".join(match.group("value").split())
+            unit = " ".join((match.group("unit") or "").replace("\u2212", "-").split())
+            yield {
+                "metric_name": name, "metric_value": value, "metric_unit": unit,
+                "source_page": item.get("page"), "source_fragment": quote,
+                "source_section": "", "source_table": "", "source_figure": "",
+                "extraction_status": "extracted", "note": "TableFiller prose rule",
+            }
+
+
+def _normalized_metric(row):
+    """Return conservative derived solar normalization for an extracted row.
+
+    The printed value/unit remain authoritative and untouched.  In particular,
+    an absent unit is not treated as a ratio or guessed from the metric name.
+    """
+    if not row.get("metric_value") or not row.get("metric_unit"):
+        return {}
+    info = norm.normalize_metric("solar", row.get("metric_name", ""),
+                                row.get("metric_value"), row.get("metric_unit"))
+    if not info.get("comparable") or info.get("value") is None:
+        return {}
+    return {
+        "normalized_value": format(info["value"], "f"),
+        "normalized_unit": info.get("unit_canonical", ""),
+    }
+
+
 class TableFiller:
     """Model-free baseline: read table rows pdf_source already structured.
 
@@ -246,6 +294,9 @@ class TableFiller:
 
     def fill(self, window, spec):
         rows, headers = [], {}
+        for row in prose_rows(window.get("items") or []):
+            row.update(_normalized_metric(row))
+            rows.append(row)
         for item in window.get("items") or []:
             if item.get("kind") != "table":
                 continue
@@ -271,6 +322,9 @@ class TableFiller:
                     "source_table": f"таблица {item.get('table')}, строка {item.get('row')}",
                     "extraction_status": "extracted",
                     "note": "TableFiller (baseline)",
+                    **_normalized_metric({"metric_name": name,
+                                          "metric_value": value,
+                                          "metric_unit": unit}),
                 })
         return rows
 

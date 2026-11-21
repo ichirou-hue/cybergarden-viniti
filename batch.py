@@ -38,9 +38,14 @@ CORPUS_ROOTS = {
     "rag": ROOT / "_corpus" / "rag" / "RAG_ВИНИТИ_участникам_2026-11-20",
 }
 
-# Bump together with the extractor. Kept local on purpose: importing
-# library.py pulls in rag_facts and is not needed by the harness.
-DEFAULT_EXTRACTOR_REVISION = 1
+# Keep resume invalidation tied to the actual extractor revision. A separate
+# constant silently lets batch reuse rows after extract.py changes.
+def default_extractor_revision():
+    import extract
+    return extract.PARSER_VERSION
+
+
+DEFAULT_EXTRACTOR_REVISION = None
 
 # Return this from a processor to record the publication as deliberately
 # skipped instead of ok.
@@ -170,10 +175,12 @@ def _is_done(row, revision):
 
 
 def run(area, split, *, db_path=db.DEFAULT_DB, resume=False, limit=None,
-        timeout=0.0, dry_run=False, process=None,
-        revision=DEFAULT_EXTRACTOR_REVISION, log=print, tracebacks=False):
+        timeout=0.0, dry_run=False, process=None, revision=None,
+        log=print, tracebacks=False):
     """Process one split. Returns a summary dict; never raises per-file errors."""
     process = process or default_process
+    if revision is None:
+        revision = default_extractor_revision()
     if limit is not None and limit < 0:
         raise ValueError("--limit не может быть отрицательным")
     if timeout is not None and timeout < 0:

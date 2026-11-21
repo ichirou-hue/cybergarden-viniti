@@ -26,6 +26,7 @@ from typing import Any, Iterable
 from rag.extract import extract_document
 from rag.pdf import Document, load_document
 from rag.text import norm
+from csv_safe import safe_csv_value
 
 MAX_BYTES = 20 * 1024 * 1024
 HANDLER_REVISION = 1
@@ -101,41 +102,89 @@ def _status_for(document: Document, results: int) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _rect_for(document: Document, page_number: int, fragment: str, raw: str = "") -> list[float] | None:
-    """Приблизительный bbox: сначала ищем напечатанное число, затем строку."""
+def _rects_for(document: Document, page_number: int, fragment: str, raw: str = "") -> list[list[float]]:
+    """Найти прямоугольники фрагмента, включая переходы между строками."""
     try:
         page = document.page(page_number)
     except (IndexError, ValueError):
-        return None
+        return []
 
     raw_tokens = [token for token in re.split(r"[\s,;]+", raw.strip()) if token]
     for token in raw_tokens:
         cleaned = token.strip("()[]{}.,;:%")
         if not cleaned:
             continue
-        for word in page.words:
-            if word.text.strip("()[]{}.,;:%") == cleaned:
-                return [word.x0, word.y0, word.x1, word.y1]
+        for line in page.lines:
+            for word in line.words:
+                if word.text.strip("()[]{}.,;:%") == cleaned:
+                    return [[word.x0, word.y0, word.x1, word.y1]]
 
     target = _fold(fragment)
     if target:
+        tokens = target.split()
+        # Search within a line, then continue only on the immediately
+        # following visual line. Flattening all words would cross unrelated
+        # columns and produce a misleading wide highlight.
+        lines = list(page.lines)
+        # A fragment may contain a physical line break. Match its token
+        # stream against adjacent lines, never against the whole page.
+        for line_index in range(len(lines) - 1):
+            first, second = lines[line_index], lines[line_index + 1]
+            first_words = [_fold(word.text) for word in first.words]
+            second_words = [_fold(word.text) for word in second.words]
+            for split in range(1, len(tokens)):
+                if first_words[-split:] + second_words[:len(tokens) - split] == tokens:
+                    groups = [first.words[-split:], second.words[:len(tokens) - split]]
+                    return [[min(w.x0 for w in group), min(w.y0 for w in group),
+                             max(w.x1 for w in group), max(w.y1 for w in group)]
+                            for group in groups if group]
+        for line_index, line in enumerate(lines):
+            for start in range(len(line.words)):
+                matched: list[Any] = []
+                cursor = line_index
+                word_index = start
+                while len(matched) < len(tokens) and cursor < len(lines):
+                    current = lines[cursor]
+                    if cursor != line_index and (current.y0 <= lines[cursor - 1].y0
+                                                  or current.x0 > line.x1):
+                        break
+                    while word_index < len(current.words) and len(matched) < len(tokens):
+                        if _fold(current.words[word_index].text) != tokens[len(matched)]:
+                            break
+                        matched.append(current.words[word_index])
+                        word_index += 1
+                    if len(matched) < len(tokens):
+                        if word_index != len(current.words):
+                            break
+                        cursor += 1
+                        word_index = 0
+                    else:
+                        by_line: dict[float, list[Any]] = {}
+                        for word in matched:
+                            by_line.setdefault(word.y0, []).append(word)
+                        return [[min(w.x0 for w in group), min(w.y0 for w in group),
+                                 max(w.x1 for w in group), max(w.y1 for w in group)]
+                                for group in by_line.values()]
         for line in page.lines:
             line_text = _fold(line.text)
             if target[:40] and (target[:40] in line_text or line_text[:40] in target):
-                return [line.x0, line.y0, line.x1, line.y1]
-        tokens = target.split()[:6]
-        for line in page.lines:
-            words = [_fold(word.text) for word in line.words]
-            for start in range(max(1, len(words) - len(tokens) + 1)):
-                if words[start : start + len(tokens)] == tokens:
+                return [[line.x0, line.y0, line.x1, line.y1]]
+            line_words = [_fold(word.text) for word in line.words]
+            for start in range(max(1, len(line_words) - len(tokens) + 1)):
+                if line_words[start : start + len(tokens)] == tokens:
                     matched = line.words[start : start + len(tokens)]
-                    return [
-                        min(word.x0 for word in matched),
-                        min(word.y0 for word in matched),
-                        max(word.x1 for word in matched),
-                        max(word.y1 for word in matched),
-                    ]
-    return None
+                    return [[min(word.x0 for word in matched), min(word.y0 for word in matched),
+                             max(word.x1 for word in matched), max(word.y1 for word in matched)]]
+    return []
+
+
+def _rect_for(document: Document, page_number: int, fragment: str, raw: str = "") -> list[float] | None:
+    """Backward-compatible union bbox for callers using the old API."""
+    rects = _rects_for(document, page_number, fragment, raw)
+    if not rects:
+        return None
+    return [min(rect[0] for rect in rects), min(rect[1] for rect in rects),
+            max(rect[2] for rect in rects), max(rect[3] for rect in rects)]
 
 
 def _anchor(
@@ -148,8 +197,14 @@ def _anchor(
     table: str = "",
     section: str = "",
 ) -> dict[str, Any]:
-    page_number = _int(page) or 1
+    # Do not use ``or 1`` here: page zero is an explicit invalid page and
+    # must not silently point at the first page.  Keeping it in the envelope
+    # makes the bad source visible, while _rects_for leaves it without a bbox
+    # so it cannot accidentally be rendered as a valid highlight.
+    page_number = _int(page)
     fragment = _text(fragment)
+    bboxes = _rects_for(document, page_number, fragment) if page_number is not None else []
+    bbox = _rect_for(document, page_number, fragment) if page_number is not None else None
     return {
         "source_id": source_id,
         "page": page_number,
@@ -157,21 +212,27 @@ def _anchor(
         "table": table,
         "figure": "",
         "fragment": fragment,
-        "bbox": _rect_for(document, page_number, fragment),
+        "bbox": bbox,
+        "bboxes": bboxes,
         "kind": kind,
     }
 
 
-def render_anchor_png(pdf: bytes, page: int, bbox: list[float] | None, dpi: int = 150) -> bytes:
+def render_anchor_png(pdf: bytes, page: int, bbox: list[float] | None = None,
+                      dpi: int = 150, bboxes: list[list[float]] | None = None) -> bytes:
     """Отрендерить страницу и подсветить найденный прямоугольник."""
     import pymupdf
 
     with pymupdf.open(stream=pdf, filetype="pdf") as document:
-        target = document[max(0, min(page - 1, len(document) - 1))]
-        if bbox and len(bbox) == 4:
-            rect = pymupdf.Rect(*bbox)
-            # Толщина в пунктах PDF; при рендере масштабируется вместе со страницей.
-            target.draw_rect(rect, color=(0.78, 0.29, 0.18), width=2.2)
+        if not 1 <= page <= len(document):
+            raise ValueError(f"страница {page} вне диапазона 1..{len(document)}")
+        target = document[page - 1]
+        rectangles = bboxes or ([bbox] if bbox else [])
+        for box in rectangles:
+            if box and len(box) == 4:
+                rect = pymupdf.Rect(*box)
+                # Толщина в пунктах PDF; при рендере масштабируется вместе со страницей.
+                target.draw_rect(rect, color=(0.78, 0.29, 0.18), width=2.2)
         pixmap = target.get_pixmap(dpi=dpi)
         return pixmap.tobytes("png")
 
@@ -834,7 +895,7 @@ def export_csv(envelope: dict[str, Any]) -> bytes:
     writer.writerow(columns)
     for row in envelope.get("results", []):
         source = row.get("source") or {}
-        writer.writerow([
+        writer.writerow([safe_csv_value(value) for value in [
             envelope.get("publication_id", ""), row.get("result_id", ""),
             row.get("experiment_id", ""), row.get("config_id", ""),
             row.get("dataset_id", ""), row.get("task_id", ""),
@@ -849,7 +910,7 @@ def export_csv(envelope: dict[str, Any]) -> bytes:
             source.get("figure", ""), source.get("fragment", ""),
             row.get("extraction_status", ""), row.get("duplicate_of", ""),
             row.get("note", ""),
-        ])
+        ]])
     return output.getvalue().encode("utf-8-sig")
 
 
