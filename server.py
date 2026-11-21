@@ -36,7 +36,7 @@ from pdfminer.pdfparser import PDFSyntaxError
 
 from demo import demo_pdf as legacy_demo_pdf  # noqa: F401  (совместимость старых импортов)
 from library import Library, MAX_BYTES
-from pdf_source import render
+from pdf_source import extract, render
 from rag_api import (
     MAX_BYTES as RAG_MAX_BYTES,
     RagStore,
@@ -70,6 +70,8 @@ PARSE_KINDS = {"tables", "figures", "charts"}
 
 
 def static_file(path):
+    if path == "/manual-profile":
+        path = "/solar.html"
     name = "index.html" if path in ("", "/") else unquote(path).lstrip("/")
     parts = Path(name).parts
     if not name or name.startswith("/") or "\\" in name or any(part in ("", ".", "..") for part in parts):
@@ -826,6 +828,21 @@ class Handler(BaseHTTPRequestHandler):
     # --- POST -----------------------------------------------------------
     def do_POST(self):
         path = urlsplit(self.path).path
+        if path == "/api/profile/source":
+            data = self.payload(MAX_BYTES, "application/pdf")
+            if data is not None:
+                try:
+                    if not data.startswith(b"%PDF-"):
+                        raise ValueError("Invalid PDF")
+                    result = extract(data)
+                except (PDFSyntaxError, PDFPasswordIncorrect, ValueError):
+                    self.error("Не удалось прочитать PDF. Проверьте формат, пароль и число страниц.", 422)
+                except Exception:
+                    log.exception("Manual profile PDF extraction failed")
+                    self.error("Ошибка обработки PDF.", 500)
+                else:
+                    self.send_json(result)
+            return
         if path in {"/api/documents", "/api/demo"}:
             self.documents_post(path)
             return
