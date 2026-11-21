@@ -1,5 +1,8 @@
 * { box-sizing: border-box; }
 .profile { margin-top: 18px; }
+.profile-help { color: #b6cacc; margin: 0 0 12px; }
+.profile-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.profile-presets [aria-pressed="true"] { background: #d5ff83; color: #1e2716; }
 .profile form { padding: 18px; }
 .profile fieldset, .profile details { border: 1px solid #405358; border-radius: 8px; margin: 12px 0; padding: 12px; min-width: 0; }
 .profile label { display: block; margin: 5px 0; }

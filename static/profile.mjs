@@ -6,6 +6,11 @@ const matches = byId("profileMatches");
 const status = byId("profileStatus");
 let documentData;
 let selection;
+const presets = {
+  solar: {title: "Солнечные элементы", types: [{name: "Устройство", aliases: "device, cell, ячейка", fields: ["Структура", "Материал", "Площадь"]}, {name: "Измерение", aliases: "efficiency, PCE, Voc, Jsc, FF, КПД", fields: ["Показатель", "Значение", "Единица", "Условия измерения"]}]},
+  rag: {title: "RAG-система", types: [{name: "Система", aliases: "RAG, retrieval, model, модель", fields: ["Название", "Модель", "Метод поиска"]}, {name: "Результат", aliases: "accuracy, recall, precision, F1, benchmark, dataset", fields: ["Набор данных", "Метрика", "Значение", "Конфигурация"]}]},
+  basic: {title: "Результаты статьи", types: [{name: "Результат", aliases: "result, results, experiment, результат, эксперимент", fields: ["Объект", "Показатель", "Значение", "Условия"]}]},
+};
 
 const value = (row, name) => row.querySelector('[name="' + name + '"]').value.trim();
 const checked = (row, name) => row.querySelector('[name="' + name + '"]').checked;
@@ -24,7 +29,7 @@ function clearMatches() {
   matches.replaceChildren();
 }
 
-function addField(container) {
+function addField(container, name = "") {
   const field = document.createElement("fieldset");
   field.className = "profile-field";
   field.innerHTML = `
@@ -43,10 +48,11 @@ function addField(container) {
     clearMatches();
   };
   container.append(field);
+  field.querySelector('[name="fieldName"]').value = name;
   clearMatches();
 }
 
-function addEntity() {
+function addEntity(preset) {
   const entity = document.createElement("fieldset");
   entity.className = "profile-entity";
   entity.innerHTML = `<legend>Тип сущности</legend>
@@ -64,8 +70,21 @@ function addEntity() {
     clearMatches();
   };
   entities.append(entity);
-  addField(fields);
+  if (preset) {
+    entity.querySelector('[name="entityName"]').value = preset.name;
+    entity.querySelector('[name="aliases"]').value = preset.aliases;
+    preset.fields.forEach(name => addField(fields, name));
+  } else addField(fields);
 }
+function applyPreset(key) {
+  const preset = presets[key];
+  entities.replaceChildren();
+  form.elements.title.value = preset.title;
+  preset.types.forEach(addEntity);
+  document.querySelectorAll('[data-preset]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.preset === key)));
+  status.textContent = "Готовый набор добавлен. Можно изменить названия и поля под статью.";
+}
+document.querySelectorAll('[data-preset]').forEach(button => button.onclick = () => applyPreset(button.dataset.preset));
 
 function readProfile() {
   const types = [...entities.children].map(entity => ({
@@ -130,7 +149,7 @@ function showMatches(profile, browseAll) {
     : "Отметьте подходящие фрагменты. Подсказки основаны на совпадении слов.";
 }
 
-byId("addEntity").onclick = addEntity;
+byId("addEntity").onclick = () => addEntity();
 form.addEventListener("input", event => {
   if (!matches.contains(event.target)) clearMatches();
 });
@@ -164,7 +183,7 @@ upload.onchange = async () => {
     status.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
       + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
     form.hidden = false;
-    if (!entities.children.length) addEntity();
+    if (!entities.children.length) applyPreset("basic");
   } catch (error) {
     status.textContent = error.message;
   } finally {

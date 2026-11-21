@@ -23,11 +23,18 @@
 <section class="panel profile" id="profilePanel" hidden aria-labelledby="profileTitle">
  <header class="panel-head"><div><h2 id="profileTitle">Профиль извлечения</h2><p id="profileStatus" role="status"></p></div></header>
  <form id="profileForm">
+  <p class="profile-help">1. Выберите, что искать в статье. Поля и подсказки появятся автоматически. 2. Проверьте найденные фрагменты. 3. Скачайте результат.</p>
+  <div class="profile-presets" role="group" aria-label="Готовые сценарии">
+    <button class="button" type="button" data-preset="solar">Солнечные элементы</button>
+    <button class="button" type="button" data-preset="rag">RAG-системы</button>
+    <button class="button" type="button" data-preset="basic">Универсальный</button>
+  </div>
   <label>Название профиля <input name="title" required></label>
+  <p class="profile-help">Название нужно только для вашего файла. Список ниже можно менять под конкретную статью.</p>
   <div id="profileEntities"></div>
   <button class="button" type="button" id="addEntity">Добавить тип сущности</button>
-  <button class="button" type="button" id="scanProfile">Найти подсказки в PDF</button>
-  <button class="button" type="button" id="browseProfile">Выбрать из всех фрагментов</button>
+  <button class="button primary" type="button" id="scanProfile">2. Найти фрагменты</button>
+  <button class="button" type="button" id="browseProfile">Показать все фрагменты</button>
   <div id="profileMatches"></div>
   <button class="button primary" type="submit">Скачать профиль и выбранные фрагменты</button>
  </form>
