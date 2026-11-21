@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import db as storage
 import export_csv as result_export
 import profiles_store
+import profile_assistant
 
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
@@ -955,6 +956,19 @@ class Handler(BaseHTTPRequestHandler):
     # --- POST -----------------------------------------------------------
     def do_POST(self):
         path = urlsplit(self.path).path
+        if path == "/api/profile/assist":
+            raw = self.payload(64 * 1024, "application/json")
+            if raw is None:
+                return
+            try:
+                result = profile_assistant.suggest(json.loads(raw))
+            except (ValueError, UnicodeError, json.JSONDecodeError) as error:
+                self.error(str(error), 400)
+            except RuntimeError as error:
+                self.error(str(error), 503)
+            else:
+                self.send_json(result)
+            return
         if path == "/api/profile/source":
             data = self.payload(MAX_BYTES, "application/pdf")
             if data is not None:

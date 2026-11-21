@@ -2,6 +2,7 @@
 [hidden] { display: none !important; }
 :focus-visible { outline: 2px solid #d5ff83; outline-offset: 2px; }
 .profile { margin-top: 18px; }
+<<<<<<< HEAD
 .profile-help { color: #b6cacc; margin: 0; }
 .profile-error { margin: 0; padding: 10px 14px; border: 1px solid #7a5339; border-radius: 8px; background: #493226; color: #ffd1a6; }
 .profile-stale { color: #ffd1a6; margin: 8px 0 0; }
@@ -39,6 +40,43 @@
 .profile details { border: 1px solid #405358; border-radius: 10px; margin: 0; padding: 12px; min-width: 0; }
 .profile details label { display: flex; gap: 8px; align-items: start; padding: 6px 0; overflow-wrap: anywhere; }
 .profile summary { cursor: pointer; font-weight: 600; }
+=======
+.profile-help { color: #e7eded; margin: 0 0 12px; }
+.profile-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.profile-presets [aria-pressed="true"] { background: #d5ff83; color: #1e2716; }
+[hidden] { display: none !important; }
+.profile form { padding: 18px; }
+.profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 390px); gap: 18px; align-items: start; }
+.profile-editor { min-width: 0; }
+.profile-editor h3 { margin: 20px 0 8px; }
+.profile fieldset, .profile details { border: 1px solid #405358; border-radius: 8px; margin: 12px 0; padding: 12px; min-width: 0; }
+.profile label { display: block; margin: 5px 0; }
+.profile input:not([type=checkbox]), .profile select { color: inherit; background: #10191c; border: 1px solid #405358; border-radius: 5px; padding: 6px; max-width: 100%; }
+.profile-field { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.profile details label { padding: 5px; overflow-wrap: anywhere; }
+.profile summary { cursor: pointer; }
+.assistant-panel { position: sticky; top: 18px; min-width: 0; display: flex; flex-direction: column; min-height: 560px; max-height: calc(100vh - 36px); border: 1px solid #405358; border-radius: 14px; background: #101b1f; overflow: hidden; }
+.assistant-entry { display: inline-block; margin: 18px 0; padding: 8px 12px; border: 1px solid #d5ff83; border-radius: 8px; background: #243b27; color: #d5ff83; font-weight: 650; }
+.manual-profile-page .hero { margin-top: 20px; padding: 24px 28px; }
+.manual-profile-page .hero h1 { font-size: clamp(2.4rem, 4vw, 4rem); line-height: 1; margin-bottom: 8px; }
+.manual-profile-page .hero .lede { margin-bottom: 0; max-width: 62ch; }
+.assistant-head { display: flex; gap: 12px; align-items: center; padding: 16px; border-bottom: 1px solid #324248; }
+.assistant-head h3 { margin: 0; }
+.assistant-head p { margin: 2px 0 0; color: #b6cacc; font-size: .85rem; }
+.assistant-avatar { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 12px; background: #d5ff83; color: #1e2716; font-size: 1.3rem; }
+.assistant-messages { display: flex; flex: 1; flex-direction: column; gap: 12px; overflow-y: auto; padding: 16px; }
+.chat-bubble { max-width: 92%; margin: 0; padding: 10px 12px; border-radius: 12px; overflow-wrap: anywhere; }
+.assistant-bubble { align-self: flex-start; background: #203136; }
+.user-bubble { align-self: flex-end; background: #31452d; }
+.assistant-suggestions { padding: 0 16px; overflow-y: auto; }
+.assistant-suggestion { display: block; padding: 12px; border: 1px solid #405358; border-radius: 10px; margin: 8px 0; background: #17262b; }
+.assistant-suggestion small { display: block; color: #b6cacc; margin: 5px 0 0 24px; overflow-wrap: anywhere; }
+.assistant-panel #assistantApply, .assistant-panel #assistantStatus { margin: 8px 16px; }
+.assistant-compose { display: flex; gap: 8px; align-items: end; padding: 14px 16px; border-top: 1px solid #324248; }
+.assistant-compose textarea { flex: 1; min-width: 0; resize: vertical; max-height: 140px; padding: 10px; color: inherit; background: #0e1518; border: 1px solid #405358; border-radius: 8px; font: inherit; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 1050px) { .profile-layout { grid-template-columns: 1fr; } .assistant-panel { position: static; max-height: none; min-height: 400px; } }
+>>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
 .boot-error { color: #ffd1a6; background: #493226; border: 1px solid #7a5339; border-radius: 10px; padding: 10px 16px; margin-top: 18px; }
 :root { color: #e7eded; background: #0e1518; font: 15px/1.5 system-ui, "Segoe UI", sans-serif; color-scheme: dark; }
 body { margin: 0; }
