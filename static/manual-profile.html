@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/solar.css">
 <script type="module" src="/profile.mjs"></script>
 </head>
+<<<<<<< HEAD
 <body>
 <header class="top"><div class="shell masthead">
   <div class="masthead-left">
@@ -15,26 +16,42 @@
   </div>
   <span class="context">Ручной профиль извлечения</span>
 </div></header>
+=======
+<body class="manual-profile-page">
+<header class="top"><div class="shell masthead"><a class="brand" href="/"><span class="mark" aria-hidden="true">✳</span> ВИНИТИ РАН</a></div></header>
+>>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
 <main class="shell">
 <section class="screen-head">
   <div>
+<<<<<<< HEAD
     <h1 class="screen-title">Создать профиль</h1>
     <p class="lede">Опишите, какие сущности и поля нужно извлечь из статьи, отметьте фрагменты-подсказки и скачайте профиль вместе с доказательствами.</p>
+=======
+    <h1>Создать профиль<span>.</span></h1>
+>>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
   </div>
   <div class="actions">
     <label class="button primary" for="profilePdf">Загрузить PDF</label><input id="profilePdf" class="file" type="file" accept=".pdf,application/pdf">
   </div>
 </section>
+<p id="assistantEntry" class="assistant-entry">После загрузки PDF откроется чат-помощник</p>
 <section class="panel profile" id="profilePanel" hidden aria-labelledby="profileTitle">
  <header class="panel-head"><div><h2 id="profileTitle">Профиль извлечения</h2><p id="profileStatus" role="status"></p></div></header>
  <form id="profileForm">
+  <div class="profile-layout">
+   <div class="profile-editor">
   <p id="profileSource" class="profile-help"></p>
+<<<<<<< HEAD
+=======
+  <h3>Что искать в статье</h3>
+>>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
   <div class="profile-presets" role="group" aria-label="Готовые сценарии">
     <span class="presets-label">Готовые наборы</span>
     <button class="button" type="button" data-preset="solar">Солнечные элементы</button>
     <button class="button" type="button" data-preset="rag">RAG-системы</button>
     <button class="button" type="button" data-preset="basic">Универсальный</button>
   </div>
+<<<<<<< HEAD
   <label class="field"><span>Название профиля</span><input name="title" required placeholder="Например, Результаты статьи"></label>
   <datalist id="profileTypes"></datalist>
   <p class="profile-help">Выберите готовый набор или опишите поля сами. Всё, что осталось в списке, будет извлечено; удалённые поля не попадут в профиль.</p>
@@ -50,6 +67,29 @@
   <p id="profileError" class="profile-error" role="alert" tabindex="-1" hidden></p>
   <div class="profile-submit">
     <button class="button primary" type="submit">Скачать профиль и выбранные фрагменты</button>
+=======
+  <label>Название профиля <input name="title" required></label>
+  <div id="profileEntities"></div>
+  <button class="button" type="button" id="addEntity">Добавить тип сущности</button>
+  <h3>Проверка и сохранение</h3>
+  <button class="button primary" type="button" id="scanProfile">Найти фрагменты</button>
+  <button class="button" type="button" id="browseProfile">Показать все фрагменты</button>
+  <div id="profileMatches"></div>
+  <button class="button primary" type="submit">Скачать профиль и выбранные фрагменты</button>
+   </div>
+   <aside class="assistant-panel" aria-labelledby="assistantTitle">
+    <div class="assistant-head"><span class="assistant-avatar" aria-hidden="true">✳</span><h3 id="assistantTitle">Помощник по полям</h3></div>
+    <div id="assistantMessages" class="assistant-messages" role="log" aria-label="Сообщения помощника" aria-live="polite"></div>
+    <div id="assistantSuggestions" class="assistant-suggestions"></div>
+    <button class="button primary" type="button" id="assistantApply" hidden>Добавить отмеченные поля</button>
+    <p id="assistantStatus" role="status" hidden></p>
+    <div class="assistant-compose">
+      <label for="assistantQuestion" class="sr-only">Вопрос по статье</label>
+      <textarea id="assistantQuestion" rows="2" maxlength="600" placeholder="Спросите о поле в этой статье"></textarea>
+      <button class="button primary" type="button" id="assistantAsk">Отправить</button>
+    </div>
+   </aside>
+>>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
   </div>
  </form>
 </section>
