@@ -1,36 +1,111 @@
+"""HTTP-сервер CyberGarden / ВИНИТИ.
+
+Два поколения API живут рядом:
+
+* ``/api/papers…`` — старый экран одной статьи (``library.py`` + ``rag_facts``);
+* ``/api/documents…`` — контракт каталога и карточки (ADR-0008), который
+  наполняет RAG-модуль ``rag`` через ``rag_api.py``.
+
+Фронтенд в ``static/`` обслуживается с этого же адреса, поэтому CORS не нужен.
+"""
+
 import argparse
+import csv
+from hashlib import sha256
+import io
 import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import logging
-from pathlib import Path
+import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path, PurePosixPath
 import re
-from urllib.parse import unquote, urlsplit
+import sqlite3
+import subprocess
+import sys
+import threading
+from time import time
+import uuid
+from urllib.parse import parse_qs, unquote, urlsplit
+
+import db as storage
+import export_csv as result_export
+import profiles_store
 
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 
-from demo import demo_pdf
+from demo import demo_pdf as legacy_demo_pdf  # noqa: F401  (совместимость старых импортов)
 from library import Library, MAX_BYTES
 from pdf_source import extract, render
+from rag_api import (
+    MAX_BYTES as RAG_MAX_BYTES,
+    RagStore,
+    demo_pdf as rag_demo_pdf,
+    export_csv,
+    facets,
+    filter_results,
+    render_anchor_png,
+    sources as list_sources,
+)
 
 
 ROOT = Path(__file__).resolve().parent
+STATIC_DIR = (ROOT / "static").resolve()
+STATIC_TYPES = {
+    ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml",
+    ".png": "image/png", ".ico": "image/x-icon",
+}
+AREAS = {"solar", "rag"}
+JOB_STATUSES = ("ok", "error", "skipped", "running", "queued")
+PARSE_MAX_BYTES = 40 * 1024 * 1024
+PARSE_ID = re.compile(r"[0-9a-f]{16}")
+try:
+    PARSE_TIMEOUT = max(1, int(os.environ.get("VINITI_PARSE_TIMEOUT", "1800")))
+except ValueError:
+    PARSE_TIMEOUT = 1800
+PARSE_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}")
+PARSE_KINDS = {"tables", "figures", "charts"}
+
+
+def static_file(path):
+    if path == "/manual-profile":
+        path = "/solar.html"
+    name = "index.html" if path in ("", "/") else unquote(path).lstrip("/")
+    parts = Path(name).parts
+    if not name or name.startswith("/") or "\\" in name or any(part in ("", ".", "..") for part in parts):
+        return None
+    if Path(name).suffix.lower() not in STATIC_TYPES:
+        return None
+    candidate = (STATIC_DIR / name).resolve()
+    try:
+        candidate.relative_to(STATIC_DIR)
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
 ASSETS = {
-    "/profile.mjs": ("profile.mjs", "text/javascript; charset=utf-8"),
-    "/": ("solar.html", "text/html; charset=utf-8"),
-    "/rag": ("index.html", "text/html; charset=utf-8"),
+    "/": ("index.html", "text/html; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-    "/solar": ("solar.html", "text/html; charset=utf-8"),
-    "/solar.css": ("solar.css", "text/css; charset=utf-8"),
+    "/api.js": ("api.js", "text/javascript; charset=utf-8"),
+    "/catalog.js": ("catalog.js", "text/javascript; charset=utf-8"),
+    "/document.js": ("document.js", "text/javascript; charset=utf-8"),
+    "/dom.js": ("dom.js", "text/javascript; charset=utf-8"),
+    "/evidence.js": ("evidence.js", "text/javascript; charset=utf-8"),
+    "/passport.js": ("passport.js", "text/javascript; charset=utf-8"),
     "/solar.mjs": ("solar.mjs", "text/javascript; charset=utf-8"),
-    "/solar-ui.mjs": ("solar-ui.mjs", "text/javascript; charset=utf-8"),
+    "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/tracks/index.js": ("tracks/index.js", "text/javascript; charset=utf-8"),
+    "/tracks/rag.js": ("tracks/rag.js", "text/javascript; charset=utf-8"),
 }
 PAPER = re.compile(r"/api/papers/([0-9a-f]{64})(?:/(pdf|sources|facts|headers)(?:/([1-9][0-9]{0,8})\.png)?)?")
+HEAVY_FIELDS = {"entities", "results", "issues", "anchors", "text_sources"}
 log = logging.getLogger(__name__)
 
 
 class Handler(BaseHTTPRequestHandler):
+    # --- ответы ---------------------------------------------------------
     def send_data(self, data, media_type, status=200, **headers):
         self.send_response(status)
         self.send_header("Content-Type", media_type)
@@ -46,20 +121,690 @@ class Handler(BaseHTTPRequestHandler):
         self.send_data(json.dumps(document, ensure_ascii=False).encode(),
                        "application/json; charset=utf-8", status, **headers)
 
-    def do_GET(self):
-        path = urlsplit(self.path).path
-        if path in ASSETS:
-            file, media_type = ASSETS[path]
-            self.send_data((ROOT / "static" / file).read_bytes(), media_type)
+    def error(self, message, status=400):
+        self.send_json({"error": message}, status)
+
+    def pick_area(self, raw):
+        area = (raw or "rag").strip() or "rag"
+        if area not in AREAS:
+            self.error(f"Недопустимая область: {area}. Допустимы: solar, rag.", 400)
+            return None
+        return area
+
+    def data_connection(self):
+        path = getattr(self.server, "data", None)
+        if path is None or not Path(path).exists():
+            self.error("База результатов не подключена. Запустите python db.py --init и "
+                       "python import_gold.py, затем перезапустите сервер.", 503)
+            return None
+        return storage.connect(path)
+
+    # --- профили ручного этапа ------------------------------------------
+    def profiles_root(self):
+        return getattr(self.server, "profiles_dir", None)
+
+    def parses_root(self):
+        configured = getattr(self.server, "parse_root", None)
+        return Path(configured) if configured is not None else ROOT / "data" / "parses"
+
+    def payload(self, limit, media=None):
+        if media and self.headers.get_content_type() != media:
+            self.error(f"Ожидается {media}.", 415)
+            return None
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            self.error("Неверная длина тела запроса.", 400)
+            return None
+        if length <= 0:
+            self.error("Пустое тело запроса.", 413)
+            return None
+        if length > limit:
+            self.error(f"Тело больше {limit // (1024 * 1024)} МиБ.", 413)
+            return None
+        return self.rfile.read(length)
+
+    def profiles_get(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if segments == ["api", "profiles"]:
+            self.send_json({"profiles": profiles_store.list_profiles(root=self.profiles_root())})
             return
+        if len(segments) != 3:
+            self.error("Маршрут не найден.", 404)
+            return
+        name = segments[2]
+        try:
+            profile, source, _ = profiles_store.load(name, root=self.profiles_root())
+        except KeyError:
+            self.error("Профиль не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 422)
+            return
+        self.send_json({
+            "profile": profile,
+            "source": source,
+            "summary": profiles_store.summary(profile, source=source, name=name),
+        })
+
+    def profiles_put(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if len(segments) != 3:
+            self.error("Маршрут не найден.", 404)
+            return
+        name = segments[2]
+        if name in profiles_store.BUILTINS:
+            self.error("Встроенный профиль нельзя перезаписать; сохраните копию под другим id.", 409)
+            return
+        data = self.payload(profiles_store.MAX_BYTES, "application/json")
+        if data is None:
+            return
+        try:
+            document = json.loads(data)
+        except (UnicodeError, json.JSONDecodeError):
+            self.error("Тело должно быть корректным JSON в UTF-8.", 400)
+            return
+        try:
+            saved = profiles_store.save(name, document, root=self.profiles_root())
+        except ValueError as error:
+            self.error(str(error), 422)
+            return
+        self.send_json(saved)
+
+    def profiles_delete(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if len(segments) != 3:
+            self.error("Маршрут не найден.", 404)
+            return
+        name = segments[2]
+        try:
+            profiles_store.delete(name, root=self.profiles_root())
+        except KeyError:
+            self.error("Профиль не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 409)
+            return
+        self.send_json({"deleted": name})
+
+    # --- разбор PDF без LLM ---------------------------------------------
+    def parse_post(self):
+        data = self.payload(PARSE_MAX_BYTES, "application/pdf")
+        if data is None:
+            return
+        name = (self.headers.get("X-Profile") or "solar").strip()
+        parser = (self.headers.get("X-Parser") or "pdfplumber").strip().lower()
+        ocr = (self.headers.get("X-OCR") or "auto").strip().lower()
+        raw_charts = (self.headers.get("X-Charts") or "").strip().lower()
+        if parser not in {"pdfplumber", "docling"}:
+            self.error("Парсер должен быть pdfplumber или docling.", 400)
+            return
+        if ocr not in {"auto", "full", "off"}:
+            self.error("OCR должен быть auto, full или off.", 400)
+            return
+        if parser == "pdfplumber" and ocr != "auto":
+            self.error("OCR full/off требует парсер docling.", 400)
+            return
+        if raw_charts not in {"", "0", "1", "false", "true", "no", "yes", "off", "on"}:
+            self.error("X-Charts должен быть 1 или 0.", 400)
+            return
+        charts = raw_charts in {"1", "true", "yes", "on"}
+        if charts and parser != "docling":
+            self.error("Извлечение данных графиков требует парсер docling.", 400)
+            return
+        try:
+            _, source, profile_path = profiles_store.load(name, root=self.profiles_root())
+        except KeyError:
+            self.error("Профиль не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 422)
+            return
+        filename = Path(unquote(self.headers.get("X-Filename", "article.pdf")).replace("\\", "/")).name
+        if not filename or len(filename) > 240:
+            self.error("Некорректное имя файла.", 400)
+            return
+        run_id = uuid.uuid4().hex[:16]
+        folder = self.parses_root() / run_id
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            (folder / "input.pdf").write_bytes(data)
+        except OSError:
+            log.exception("Не удалось создать каталог разбора")
+            self.error("Не удалось сохранить PDF для разбора.", 500)
+            return
+        job = {
+            "id": run_id, "status": "queued", "profile": name, "profile_source": source,
+            "parser": parser, "ocr": ocr if parser == "docling" else "off", "charts": charts,
+            "filename": filename, "sha256": sha256(data).hexdigest(), "bytes": len(data),
+            "created_at": round(time(), 3), "updated_at": round(time(), 3),
+        }
+        self.write_job(folder, job)
+        threading.Thread(
+            target=self.run_parse,
+            args=(folder, profile_path, parser, ocr, charts),
+            daemon=True,
+        ).start()
+        self.send_json(job, 202)
+
+    def read_job(self, folder):
+        try:
+            return json.loads((folder / "job.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def write_job(self, folder, job):
+        temporary = folder / f".job-{uuid.uuid4().hex}.json"
+        temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        os.replace(temporary, folder / "job.json")
+
+    def run_parse(self, folder, profile_path, parser, ocr, charts):
+        slot = getattr(self.server, "docling_slot", None) if parser == "docling" else None
+        slots = getattr(self.server, "parse_slots", None)
+        try:
+            if slots is not None:
+                slots.acquire()
+            if slot is not None:
+                slot.acquire()
+            started = round(time(), 3)
+            job = self.read_job(folder)
+            job.update(status="running", started_at=started, updated_at=started)
+            self.write_job(folder, job)
+            interpreter = sys.executable
+            if parser == "docling":
+                interpreter = os.environ.get("VINITI_DOCLING_PYTHON") or interpreter
+            publication_id = Path(job.get("filename", "article.pdf")).stem or "article"
+            command = [
+                interpreter, "-X", "utf8", str(ROOT / "parse_document.py"), str(folder / "input.pdf"),
+                "--profile", str(profile_path), "--publication-id", publication_id,
+                "-o", str(folder / "bundle"), "--parser", parser,
+            ]
+            if parser == "docling":
+                command += ["--ocr", ocr]
+                if charts:
+                    command.append("--charts")
+            completed = subprocess.run(
+                command, cwd=ROOT, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
+            )
+            self.write_log(folder, completed)
+            job = self.read_job(folder)
+            if completed.returncode:
+                lines = (completed.stderr or completed.stdout or "").strip().splitlines()
+                message = lines[-1] if lines else "Разбор завершился с ошибкой."
+                job.update(status="error", error=message[:500], returncode=completed.returncode)
+            else:
+                lines = (completed.stdout or "").strip().splitlines()
+                try:
+                    summary = json.loads(lines[-1]) if lines else {}
+                except json.JSONDecodeError:
+                    summary = {}
+                if isinstance(summary, dict):
+                    summary.pop("output", None)
+                job.update(status="ok", summary=summary)
+            job.update(updated_at=round(time(), 3), elapsed_seconds=round(time() - started, 3))
+            self.write_job(folder, job)
+        except subprocess.TimeoutExpired:
+            job = self.read_job(folder)
+            job.update(status="error", error=f"Разбор превысил лимит {PARSE_TIMEOUT} с.",
+                       updated_at=round(time(), 3))
+            self.write_job(folder, job)
+        except OSError as error:
+            job = self.read_job(folder)
+            job.update(status="error", error=f"Не удалось запустить разбор: {error}"[:500],
+                       updated_at=round(time(), 3))
+            self.write_job(folder, job)
+        except Exception:
+            log.exception("Разбор PDF завершился внутренней ошибкой")
+            job = self.read_job(folder)
+            job.update(status="error", error="Внутренняя ошибка разбора; подробности в логе сервера.",
+                       updated_at=round(time(), 3))
+            self.write_job(folder, job)
+        finally:
+            if slot is not None:
+                slot.release()
+            if slots is not None:
+                slots.release()
+
+    def write_log(self, folder, completed):
+        text = (completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")
+        try:
+            (folder / "parse.log").write_text(text[-64000:], encoding="utf-8")
+        except OSError:
+            log.warning("Не удалось записать parse.log")
+
+    def parse_get(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if len(segments) < 3 or not PARSE_ID.fullmatch(segments[2]):
+            self.error("Разбор не найден.", 404)
+            return
+        folder = self.parses_root() / segments[2]
+        job = self.read_job(folder)
+        if not job:
+            self.error("Разбор не найден.", 404)
+            return
+        started = job.get("started_at", job.get("created_at", 0))
+        if job.get("status") == "running" and time() - started > PARSE_TIMEOUT + 60:
+            # Не перезаписываем job на диске: рабочий процесс мог ещё завершиться.
+            job.update(status="error", error="Разбор прерван: процесс не завершился за отведённое время.")
+        if len(segments) == 3:
+            self.send_json(job)
+            return
+        if segments[3] == "result":
+            if job.get("status") != "ok":
+                self.error("Результат ещё не готов.", 409)
+                return
+            try:
+                data = (folder / "bundle" / "result.json").read_bytes()
+            except OSError:
+                self.error("Файл результата не найден.", 404)
+                return
+            self.send_data(data, "application/json; charset=utf-8")
+            return
+        if segments[3] == "file" and len(segments) > 4:
+            self.parse_file(folder / "bundle", segments[4:])
+            return
+        self.error("Маршрут не найден.", 404)
+
+    def parse_file(self, base, parts):
+        relative = PurePosixPath(*parts)
+        allowed = relative.parts in {("result.json",), ("parser.json",), ("candidates.csv",)}
+        if not allowed and (
+            len(relative.parts) != 3 or relative.parts[0] != "assets"
+            or relative.parts[1] not in PARSE_KINDS
+            or not PARSE_FILE.fullmatch(relative.parts[2])
+            or relative.suffix not in {".png", ".csv"}
+        ):
+            self.error("Файл не найден.", 404)
+            return
+        base = base.resolve()
+        try:
+            path = (base / relative).resolve()
+            path.relative_to(base)
+        except ValueError:
+            self.error("Файл не найден.", 404)
+            return
+        if not path.is_file():
+            self.error("Файл не найден.", 404)
+            return
+        media = {".json": "application/json; charset=utf-8", ".csv": "text/csv; charset=utf-8",
+                 ".png": "image/png"}.get(path.suffix, "application/octet-stream")
+        self.send_data(path.read_bytes(), media)
+
+    def csv_slice(self, area, spec, columns, rows):
+        buffer = io.StringIO(newline="")
+        writer = csv.writer(buffer, lineterminator=spec["newline"])
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow(["" if row[name] is None else str(row[name]) for name in columns])
+        data = buffer.getvalue().encode("utf-8")
+        return b"\xef\xbb\xbf" + data if spec["bom"] else data
+
+    def slice_arguments(self, query, area):
+        table = (query.get("table") or ["results"])[0]
+        spec = storage.load_passport()["areas"][area]
+        meta = spec["tables"].get(table)
+        if meta is None:
+            self.error(f"Нет таблицы {table} в области {area}. Доступны: {', '.join(spec['tables'])}", 400)
+            return None
+        chosen = [x.strip() for x in ",".join(query.get("col") or []).split(",") if x.strip()]
+        chosen = chosen or list(meta["columns"])
+        unknown = [x for x in chosen if x not in meta["columns"]]
+        if unknown:
+            self.error(f"Нет таких полей: {', '.join(unknown)}", 400)
+            return None
+        for required in result_export.ALWAYS_KEPT:
+            if required in meta["columns"] and required not in chosen:
+                chosen.append(required)
+        try:
+            limit = max(0, int((query.get("limit") or ["0"])[0]))
+        except ValueError:
+            self.error("limit должен быть числом.", 400)
+            return None
+        return {"table": table, "spec": spec, "meta": meta, "columns": chosen,
+                "wheres": query.get("where") or [],
+                "order": (query.get("order") or [""])[0], "limit": limit}
+
+    def issue_arguments(self, query, area):
+        columns = storage.load_passport()["areas"][area]["tables"]["issues"]["columns"]
+        filters = {}
+        for name, values in query.items():
+            if name in ("area", "limit"):
+                continue
+            if name not in columns:
+                self.error(f"Нет такого фильтра {name}. Допустимы: {', '.join(columns)}, limit.", 400)
+                return None
+            filters[name] = values[0]
+        try:
+            limit = max(0, min(int((query.get("limit") or ["100"])[0]), 1000))
+        except ValueError:
+            self.error("limit должен быть числом.", 400)
+            return None
+        return filters, limit
+
+    def stats_document(self, conn):
+        passport = storage.load_passport()
+        result = {}
+        for area, spec in passport["areas"].items():
+            tables = {name: conn.execute(
+                f"SELECT COUNT(*) FROM {storage.quote(storage.table_name(area, name))} WHERE area = ?", (area,)
+            ).fetchone()[0] for name in spec["tables"]}
+            jobs = {status: 0 for status in JOB_STATUSES}
+            for status, count in conn.execute("SELECT status, COUNT(*) FROM jobs WHERE area=? GROUP BY status", (area,)):
+                jobs[status] = count
+            total, pages, chars = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(page_count),0), COALESCE(SUM(text_chars),0) FROM documents WHERE area=?", (area,)
+            ).fetchone()
+            statuses = {status: count for status, count in conn.execute(
+                "SELECT parser_status, COUNT(*) FROM documents WHERE area=? GROUP BY parser_status", (area,))}
+            result[area] = {"publications": tables.get("publications", 0), "tables": tables,
+                            "jobs": jobs, "documents": {"total": total, "parsed": sum(v for k, v in statuses.items() if k not in ("", "pending", "error")), "pages": pages, "chars": chars, "parser_status": statuses}}
+        return {"areas": result}
+
+    # --- хранилища ------------------------------------------------------
+    def rag_store(self) -> RagStore:
+        store = getattr(self.server, "rag_store", None)
+        if store is None:
+            # В тестах Handler создают без rag_store: кладём базу рядом
+            # с библиотекой, чтобы не писать в рабочий каталог репозитория.
+            base = getattr(self.server, "library", None)
+            path = Path(base.path).parent / "rag.sqlite3" if base else ROOT / "data" / "rag.sqlite3"
+            store = RagStore(path)
+            self.server.rag_store = store
+        return store
+
+    # --- общие помощники ------------------------------------------------
+    @staticmethod
+    def _int(query, name, default, minimum=0, maximum=None):
+        raw = (query.get(name) or [""])[0]
+        if raw == "":
+            return default
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Параметр {name} должен быть целым числом.") from error
+        if value < minimum:
+            raise ValueError(f"Параметр {name} не может быть меньше {minimum}.")
+        return min(value, maximum) if maximum is not None else value
+
+    @staticmethod
+    def _page(query, default=50, maximum=200):
+        return Handler._int(query, "limit", default, 1, maximum), Handler._int(query, "offset", 0, 0)
+
+    # --- GET ------------------------------------------------------------
+    def do_GET(self):
+        parts = urlsplit(self.path)
+        path = parts.path
+        query = parse_qs(parts.query)
+        single = {key: values[0] for key, values in query.items()}
+
+        target = static_file(path)
+        if target is not None:
+            self.send_data(target.read_bytes(), STATIC_TYPES[target.suffix.lower()])
+            return
+
+        area_raw = (query.get("area") or [None])[0]
+        if path == "/api/passport":
+            passport = storage.load_passport()
+            if area_raw is None:
+                self.send_json(passport)
+            else:
+                area = self.pick_area(area_raw)
+                if area is not None:
+                    self.send_json({"version": passport["version"], "area": area, **passport["areas"][area]})
+            return
+
+        if path in ("/api/results", "/api/results.csv"):
+            area = self.pick_area(area_raw)
+            if area is None:
+                return
+            args = self.slice_arguments(query, area)
+            if args is None:
+                return
+            conn = self.data_connection()
+            if conn is None:
+                return
+            try:
+                rows = result_export.select_rows(conn, area, args["table"], args["meta"], args["columns"], args["wheres"], args["order"], args["limit"])
+            except SystemExit as error:
+                self.error(str(error), 400)
+                return
+            finally:
+                conn.close()
+            if path.endswith(".csv"):
+                self.send_data(self.csv_slice(area, args["spec"], args["columns"], rows), "text/csv; charset=utf-8", Content_Disposition="attachment")
+            else:
+                self.send_json({"area": area, "table": args["table"], "columns": args["columns"], "count": len(rows), "rows": [{name: row[name] for name in args["columns"]} for row in rows]})
+            return
+
+        if path == "/api/issues":
+            area = self.pick_area(area_raw)
+            if area is None:
+                return
+            args = self.issue_arguments(query, area)
+            if args is None:
+                return
+            filters, limit = args
+            conn = self.data_connection()
+            if conn is None:
+                return
+            sql = f"SELECT * FROM {storage.quote(storage.table_name(area, 'issues'))} WHERE area=?"
+            params = [area]
+            for column, value in filters.items():
+                sql += f" AND {storage.quote(column)}=?"
+                params.append(value)
+            sql += " ORDER BY _line LIMIT ?"
+            params.append(limit)
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            finally:
+                conn.close()
+            self.send_json({"area": area, "count": len(rows), "issues": [dict(row) for row in rows]})
+            return
+
+        if path == "/api/stats":
+            conn = self.data_connection()
+            if conn is None:
+                return
+            try:
+                self.send_json(self.stats_document(conn))
+            finally:
+                conn.close()
+            return
+
+        if path == "/api/profiles" or path.startswith("/api/profiles/"):
+            self.profiles_get(path)
+            return
+
+        if path.startswith("/api/parse/"):
+            self.parse_get(path)
+            return
+
+        if path == "/api/documents" or path.startswith("/api/documents/"):
+            self.documents_get(path, query, single)
+            return
+
+        if path == "/api/jobs":
+            self.jobs(single)
+            return
+
         if path == "/api/papers":
             self.send_json(self.server.library.list())
             return
+
+        if path.startswith("/api/papers/"):
+            self.legacy_paper(path, parts.query)
+            return
+
+        self.error("Маршрут не найден.", 404)
+
+    def documents_get(self, path, query, single):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if segments == ["api", "documents"]:
+            try:
+                limit, offset = self._page(query)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = self.rag_store().list(single.get("track", "rag"))
+            q = (single.get("q") or "").strip().lower()
+            if q:
+                items = [
+                    doc for doc in items
+                    if q in " ".join([
+                        str(doc.get("publication_id", "")), str(doc.get("title", "")),
+                        str(doc.get("year", "")), " ".join(doc.get("authors") or []),
+                    ]).lower()
+                ]
+            status = single.get("status")
+            if status:
+                items = [doc for doc in items if doc.get("status") == status]
+            sort = single.get("sort", "")
+            key = {
+                "status": lambda doc: doc.get("status", ""),
+                "issues": lambda doc: -int(doc.get("issues_count", 0)),
+                "results": lambda doc: -int(doc.get("results_count", 0)),
+            }.get(sort, lambda doc: doc.get("publication_id", ""))
+            items.sort(key=key)
+            self.send_json({"total": len(items), "items": items[offset: offset + limit]})
+            return
+
+        if len(segments) < 3 or segments[:2] != ["api", "documents"]:
+            self.error("Маршрут не найден.", 404)
+            return
+
+        document_id = segments[2]
+        envelope = self.rag_store().get(document_id)
+        if envelope is None:
+            self.error("Документ не найден.", 404)
+            return
+
+        resource = segments[3] if len(segments) > 3 else ""
+        key = segments[4] if len(segments) > 4 else ""
+
+        if not resource:
+            self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
+            return
+
+        if resource == "facets":
+            self.send_json(facets(envelope))
+            return
+
+        if resource == "pdf":
+            pdf = self.rag_store().pdf(document_id)
+            if pdf is None:
+                self.error("PDF не найден.", 404)
+                return
+            self.send_data(pdf, "application/pdf", Content_Disposition="inline")
+            return
+
+        if resource == "results":
+            try:
+                limit, offset = self._page(query)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            rows = filter_results(envelope, single)
+            self.send_json({"total": len(rows), "items": rows[offset: offset + limit]})
+            return
+
+        if resource == "issues":
+            try:
+                limit, offset = self._page(query, default=200, maximum=500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            issues = envelope.get("issues", [])
+            self.send_json({"total": len(issues), "items": issues[offset: offset + limit]})
+            return
+
+        if resource == "sources":
+            try:
+                limit = self._int(query, "limit", 200, 1, 500)
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            items = list_sources(envelope, single)
+            self.send_json({"total": len(items), "items": items[:limit]})
+            return
+
+        if resource == "entities":
+            kind = single.get("type", "configurations")
+            items = envelope.get("entities", {}).get(kind, [])
+            self.send_json({"total": len(items), "items": items})
+            return
+
+        if resource == "anchors" and (key.endswith(".json") or key.endswith(".png")):
+            try:
+                source_id = int(key.rsplit(".", 1)[0])
+            except ValueError:
+                self.error("Идентификатор источника должен быть числом.", 400)
+                return
+            anchor = envelope.get("anchors", {}).get(str(source_id))
+            if anchor is None:
+                self.error("Источник не найден.", 404)
+                return
+            if key.endswith(".json"):
+                self.send_json(anchor)
+                return
+            pdf = self.rag_store().pdf(document_id)
+            if pdf is None:
+                self.error("PDF не найден.", 404)
+                return
+            self.send_data(
+                render_anchor_png(pdf, anchor.get("page", 1), anchor.get("bbox")),
+                "image/png",
+            )
+            return
+
+        if resource == "export.json":
+            self.send_data(
+                json.dumps(envelope, ensure_ascii=False).encode(),
+                "application/json; charset=utf-8",
+                Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.json\"",
+            )
+            return
+
+        if resource == "export.csv":
+            self.send_data(
+                export_csv(envelope),
+                "text/csv; charset=utf-8",
+                Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.csv\"",
+            )
+            return
+
+        self.error("Маршрут не найден.", 404)
+
+    def jobs(self, single):
+        docs = self.rag_store().list(single.get("track", "rag"))
+        done = sum(doc.get("status") == "done" for doc in docs)
+        partial = sum(doc.get("status") == "partial" for doc in docs)
+        failed = sum(doc.get("status") == "failed" for doc in docs)
+        total = len(docs)
+        self.send_json({
+            "state": "done" if total and done + partial + failed >= total else "running",
+            "total": total,
+            "done": done,
+            "partial": partial,
+            "failed": failed,
+            "items": [
+                {
+                    "document_id": doc.get("document_id"),
+                    "status": doc.get("status"),
+                    "error": doc.get("error", ""),
+                }
+                for doc in docs
+            ],
+        })
+
+    def legacy_paper(self, path, raw_query):
         try:
             paper_id, resource, key = PAPER.fullmatch(path).groups()
             if not resource:
-                self.send_json(self.server.library.get(paper_id),
-                               Content_Disposition="attachment" if urlsplit(self.path).query == "download" else "inline")
+                self.send_json(
+                    self.server.library.get(paper_id),
+                    Content_Disposition="attachment" if raw_query == "download" else "inline",
+                )
                 return
             document, data = self.server.library.get(paper_id, with_pdf=True)
             if resource == "pdf" and key is None:
@@ -80,14 +825,100 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_data(render(data, anchor["page"], anchor["bbox"]), "image/png")
 
+    # --- POST -----------------------------------------------------------
     def do_POST(self):
-        if self.path == "/api/demo":
-            result = self.server.library.ingest("retrieval-demo.pdf", demo_pdf())
-            self.send_json(result, 201)
+        path = urlsplit(self.path).path
+        if path == "/api/profile/source":
+            data = self.payload(MAX_BYTES, "application/pdf")
+            if data is not None:
+                try:
+                    if not data.startswith(b"%PDF-"):
+                        raise ValueError("Invalid PDF")
+                    result = extract(data)
+                except (PDFSyntaxError, PDFPasswordIncorrect, ValueError):
+                    self.error("Не удалось прочитать PDF. Проверьте формат, пароль и число страниц.", 422)
+                except Exception:
+                    log.exception("Manual profile PDF extraction failed")
+                    self.error("Ошибка обработки PDF.", 500)
+                else:
+                    self.send_json(result)
             return
-        if self.path not in {"/api/papers", "/api/profile/source"}:
-            self.send_json({"error": "Маршрут не найден."}, 404)
+        if path in {"/api/documents", "/api/demo"}:
+            self.documents_post(path)
             return
+        if path.startswith("/api/profiles/"):
+            self.profiles_put(path)
+            return
+        if path == "/api/parse":
+            self.parse_post()
+            return
+        if path == "/api/papers":
+            self.legacy_upload()
+            return
+        self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def do_PUT(self):
+        path = urlsplit(self.path).path
+        if path.startswith("/api/profiles/"):
+            self.profiles_put(path)
+            return
+        self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def do_DELETE(self):
+        path = urlsplit(self.path).path
+        if path.startswith("/api/profiles/"):
+            self.profiles_delete(path)
+            return
+        self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def documents_post(self, path):
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = 0
+        if path == "/api/documents" and length == 0:
+            self.error("Нужен PDF размером до 20 МиБ.", 413)
+            return
+        if length > RAG_MAX_BYTES:
+            self.error("Файл больше 20 МиБ.", 413)
+            return
+        if path == "/api/documents":
+            if self.headers.get_content_type() != "application/pdf":
+                self.error("Ожидается application/pdf.", 415)
+                return
+            data = self.rfile.read(length)
+            track = self.headers.get("X-Track", "rag")
+            if track != "rag":
+                self.error("Эта область ещё не подключена.", 400)
+                return
+            name = unquote(self.headers.get("X-Filename", "article.pdf"))
+            try:
+                summary = self.rag_store().ingest(name, data, track=track)
+            except ValueError as error:
+                self.error(str(error), 422)
+                return
+            except Exception:
+                log.exception("RAG ingest failed")
+                self.error("Ошибка обработки PDF. Подробности в консоли сервера.", 500)
+                return
+            self.send_json(summary, 201)
+            return
+
+        # Демо-статья: генерируем PDF с настоящей таблицей и прогоняем экстрактор.
+        track = self.headers.get("X-Track", "rag")
+        if track != "rag":
+            self.error("Демо для этой области ещё не подключено.", 404)
+            return
+        summary = self.rag_store().ingest(
+            "retrieval-demo.pdf",
+            rag_demo_pdf(),
+            track="rag",
+            publication_id="DEMO",
+            forced_id="rag:demo",
+        )
+        self.send_json(summary, 201)
+
+    def legacy_upload(self):
         if self.headers.get_content_type() != "application/pdf":
             self.send_json({"error": "Ожидается application/pdf."}, 415)
             return
@@ -100,11 +931,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         data = self.rfile.read(size)
         try:
-            if self.path == "/api/profile/source":
-                if not data.startswith(b"%PDF-"):
-                    raise ValueError("Invalid PDF")
-                self.send_json(extract(data))
-                return
             result = self.server.library.ingest(
                 unquote(self.headers.get("X-Filename", "article.pdf")), data)
         except (PDFSyntaxError, PDFPasswordIncorrect, ValueError):
@@ -117,13 +943,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(result, 201)
 
 
+
 def main():
     parser = argparse.ArgumentParser(description="VINITI PDF evidence workspace")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db", type=Path, default=ROOT / "data" / "papers.sqlite3")
+    parser.add_argument("--data", type=Path, default=ROOT / "data" / "viniti.sqlite3")
     args = parser.parse_args()
     with ThreadingHTTPServer(("127.0.0.1", args.port), Handler) as server:
         server.library = Library(args.db)
+        server.rag_store = RagStore(args.db)
+        server.data = args.data
+        server.profiles_dir = ROOT / "data" / "profiles"
+        server.parse_root = ROOT / "data" / "parses"
+        server.parse_slots = threading.BoundedSemaphore(2)
+        server.docling_slot = threading.Semaphore(1)
         print(f"http://127.0.0.1:{server.server_port}", flush=True)
         server.serve_forever()
 

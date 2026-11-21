@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прототипы · Каталог публикаций RAG — ВИНИТИ</title>
+<style>
+  :root{
+    --bg:#f3f6f1; --ink:#182b22; --muted:#5d7268; --green:#16533d;
+    --green-soft:#e7f1ea; --dark:#142c24; --line:#c6d8ce; --line-soft:#dbe6df;
+    --amber:#8a5a00; --amber-bg:#fdf4dc; --warn:#a33a1e; --warn-bg:#fdeee8;
+    --radius:14px; --shadow:0 1px 2px rgba(14,35,27,.06),0 8px 24px rgba(14,35,27,.05);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.5 Inter,"Segoe UI",system-ui,-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--green)}
+  :focus-visible{outline:3px solid #2c7a58; outline-offset:2px; border-radius:6px}
+  .topbar{background:var(--dark); color:#e8f1ec}
+  .topbar .wrap{display:flex; align-items:center; justify-content:space-between; gap:16px; height:60px}
+  .brand{display:flex; align-items:baseline; gap:10px; font-weight:700; letter-spacing:.02em}
+  .brand span{font-weight:500; color:#a9c3b6}
+  .badge{
+    display:inline-block; padding:2px 9px; border-radius:999px;
+    border:1px solid #3f5d50; color:#cfe0d7; font-size:.72rem;
+    text-transform:uppercase; letter-spacing:.08em; font-weight:600;
+  }
+  .wrap{width:min(1080px,calc(100% - 40px)); margin:0 auto}
+  header.page{padding:40px 0 8px}
+  .eyebrow{
+    margin:0 0 6px; font-size:.74rem; text-transform:uppercase;
+    letter-spacing:.1em; color:var(--muted); font-weight:700;
+  }
+  h1{margin:0 0 12px; font-size:clamp(1.7rem,3vw,2.3rem); line-height:1.2; letter-spacing:-.01em}
+  .lead{max-width:74ch; margin:0; color:#33453b; font-size:1.02rem}
+  .facts{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:10px; margin:22px 0 0; padding:0; list-style:none;
+  }
+  .facts li{
+    background:#fbfdfb; border:1px solid var(--line-soft); border-radius:10px;
+    padding:10px 12px; font-size:.86rem; color:#3a4d43;
+  }
+  .facts b{display:block; color:var(--ink); font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px}
+
+  section.variants{margin:30px 0 8px}
+  .variants h2{font-size:1.15rem; margin:0 0 4px}
+  .variants .sub{margin:0 0 16px; color:var(--muted); font-size:.9rem}
+  .cards{display:grid; gap:16px}
+  article.card{
+    background:#fff; border:1px solid var(--line); border-radius:var(--radius);
+    padding:22px 24px; box-shadow:var(--shadow);
+    display:grid; gap:16px; grid-template-columns:minmax(0,1fr) 250px;
+  }
+  .card-head{display:flex; align-items:flex-start; gap:14px}
+  .letter{
+    flex:0 0 auto; width:44px; height:44px; border-radius:12px;
+    display:grid; place-items:center; font-size:1.2rem; font-weight:800;
+    background:var(--green-soft); color:var(--green); border:1px solid #cfe0d6;
+  }
+  .card h3{margin:0 0 2px; font-size:1.2rem; letter-spacing:-.01em}
+  .kind{margin:0; font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:700}
+  .idea{margin:10px 0 0; color:#2b3d33}
+  dl.plusminus{display:grid; grid-template-columns:1fr 1fr; gap:12px 18px; margin:14px 0 0}
+  dl.plusminus div{min-width:0}
+  dl.plusminus dt{
+    font-size:.72rem; text-transform:uppercase; letter-spacing:.07em;
+    font-weight:700; margin-bottom:3px;
+  }
+  dl.plusminus dd{margin:0; font-size:.88rem; color:#3a4d43}
+  .plus dt{color:#1f6b4a} .plus dd{color:#26483a}
+  .minus dt{color:#8a3a22} .minus dd{color:#4c342c}
+  .when{
+    margin:0; font-size:.88rem; color:#2b3d33; background:#f7faf8;
+    border-left:3px solid var(--green); border-radius:0 8px 8px 0; padding:8px 12px;
+  }
+  .when b{color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.07em; display:block; margin-bottom:2px}
+  .card-side{
+    display:flex; flex-direction:column; gap:10px; justify-content:space-between;
+    border-left:1px solid var(--line-soft); padding-left:18px;
+  }
+  .card-side ul{margin:0; padding-left:18px; font-size:.8rem; color:var(--muted); display:grid; gap:5px}
+  .open{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    background:var(--green); color:#fff; text-decoration:none; font-weight:600;
+    border-radius:10px; padding:11px 14px; font-size:.92rem; border:1px solid var(--green);
+  }
+  .open:hover{background:#123f2e}
+  .open:focus-visible{outline-color:#0d2c20}
+
+  .panel{
+    background:#fbfdfb; border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px 24px; margin:22px 0;
+  }
+  .panel h2{margin:0 0 10px; font-size:1.05rem}
+  .panel p{margin:0 0 10px; font-size:.9rem; color:#3a4d43; max-width:80ch}
+  .panel ul{margin:8px 0 0; padding-left:20px; font-size:.9rem; color:#3a4d43; display:grid; gap:6px}
+  .panel li::marker{color:var(--green)}
+  .rec{display:grid; gap:8px; grid-template-columns:1fr; }
+  .rec p{margin:0}
+  .rec strong{color:var(--green)}
+  .note{font-size:.82rem; color:var(--muted)}
+  footer{padding:8px 0 48px; color:var(--muted); font-size:.82rem}
+  kbd{
+    font:inherit; font-size:.8em; padding:1px 6px; border-radius:5px;
+    border:1px solid var(--line); background:#fff; color:#2b3d33;
+  }
+  @media (max-width:820px){
+    article.card{grid-template-columns:1fr}
+    .card-side{border-left:0; border-top:1px solid var(--line-soft); padding:14px 0 0}
+    dl.plusminus{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <div class="brand">ВИНИТИ РАН <span>CyberGarden / RAG</span></div>
+    <span class="badge">Прототипы · не продакшен</span>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <header class="page">
+    <p class="eyebrow">Каталог публикаций · UI-прототипы</p>
+    <h1>Три способа смотреть на 90 публикаций и проверять извлечённые значения</h1>
+    <p class="lead">
+      Один и тот же сценарий — список публикаций, пакетный разбор PDF, карточка публикации
+      с результатами, замечаниями и доказательствами из PDF — собран в трёх разных компоновках.
+      Данные, палитра и типографика общие, поэтому варианты можно сравнивать «в лоб»,
+      а не по вкусу к цвету кнопки.
+    </p>
+    <ul class="facts">
+      <li><b>Что внутри</b>8 публикаций RAG (включая D014 на 28 649 строк), трек Solar, ошибки, скан без OCR.</li>
+      <li><b>Карточка D020</b>5 вкладок, 8 колонок, 12 строк демо-выборки, разворот строки, два якоря источника.</li>
+      <li><b>Технически</b>по одному HTML на вариант, инлайн CSS/JS, без сборки и сети — открывается двойным щелчком.</li>
+    </ul>
+  </header>
+
+  <section class="variants" aria-labelledby="variants-title">
+    <h2 id="variants-title">Варианты</h2>
+    <p class="sub">Различаются компоновкой и способом показать доказательство, а не оформлением.</p>
+
+    <div class="cards">
+
+      <article class="card" aria-labelledby="v-a">
+        <div>
+          <div class="card-head">
+            <div class="letter" aria-hidden="true">A</div>
+            <div>
+              <p class="kind">Плотный реестр</p>
+              <h3 id="v-a">Таблица каталога + модальное доказательство</h3>
+            </div>
+          </div>
+          <p class="idea">
+            Каталог — одна плотная таблица со статусами и счётчиками, карточка публикации —
+            обычная страница. Доказательство (страница PDF с подсветкой значения или заголовка)
+            открывается модальным окном поверх таблицы результатов.
+          </p>
+          <dl class="plusminus">
+            <div class="plus"><dt>Плюсы</dt><dd>Максимум строк на экран, привычная логика реестра, меньше всего кода и состояний, ближе всего к текущему <code>static/</code>.</dd></div>
+            <div class="minus"><dt>Минусы</dt><dd>Модалка перекрывает контекст, а на 28 649 строк нужна аккуратная пагинация и фильтры, иначе таблица «плывёт».</dd></div>
+          </dl>
+          <p class="when"><b>Когда уместен</b>Когда главное — быстро просмотреть много публикаций и точечно сверить одну цифру.</p>
+        </div>
+        <div class="card-side">
+          <ul>
+            <li>Разворот строки прямо в таблице</li>
+            <li>Модалка с двумя якорями: «Стр. 4» и «Заголовок»</li>
+            <li>D014 — отдельный режим больших результатов</li>
+          </ul>
+          <a class="open" href="variant-a.html">Открыть вариант A <span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+
+      <article class="card" aria-labelledby="v-b">
+        <div>
+          <div class="card-head">
+            <div class="letter" aria-hidden="true">B</div>
+            <div>
+              <p class="kind">Обзор + контекст</p>
+              <h3 id="v-b">Плитки публикаций + закреплённая панель доказательств</h3>
+            </div>
+          </div>
+          <p class="idea">
+            Каталог — сетка плиток с крупными статусами и счётчиками. Справа от таблицы результатов
+            всегда стоит липкая панель: выбранная строка, цитата, поля записи, миниатюра страницы
+            и якоря. Модальных окон нет вообще — доказательство не уходит с экрана.
+          </p>
+          <dl class="plusminus">
+            <div class="plus"><dt>Плюсы</dt><dd>Контекст не теряется, удобно проверять подряд, крупные зоны нажатия, хорошо живёт на широком мониторе.</dd></div>
+            <div class="minus"><dt>Минусы</dt><dd>Меньше строк на экран, панель отнимает ширину у таблицы, на ноутбуке 1280 px тесновато.</dd></div>
+          </dl>
+          <p class="when"><b>Когда уместен</b>Когда чтение доказательств важнее обзора: рецензент идёт по замечаниям, а не по списку.</p>
+        </div>
+        <div class="card-side">
+          <ul>
+            <li>Плитки со статусом, годом и числом результатов</li>
+            <li>Панель с цитатой и полями записи</li>
+            <li>Миниатюра фрагмента внутри панели</li>
+          </ul>
+          <a class="open" href="variant-b.html">Открыть вариант B <span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+
+      <article class="card" aria-labelledby="v-c">
+        <div>
+          <div class="card-head">
+            <div class="letter" aria-hidden="true">C</div>
+            <div>
+              <p class="kind">Рабочее место проверяющего</p>
+              <h3 id="v-c">Список + превью, фасеты, разворот строки и полноэкранный просмотр</h3>
+            </div>
+          </div>
+          <p class="idea">
+            Каталог разбит на список слева и превью справа: выбор публикации не уводит со страницы.
+            В карточке — сайдбар фасетов (метрика, k, набор, конфигурация, статус), разворот строки
+            с миниатюрой страницы и режим «Разобрать замечания», который оставляет только
+            проблемные строки и раскрывает первую.
+          </p>
+          <dl class="plusminus">
+            <div class="plus"><dt>Плюсы</dt><dd>Самый короткий цикл проверки: фильтр → строка → страница PDF → следующий вопрос, без переходов и модалок.</dd></div>
+            <div class="minus"><dt>Минусы</dt><dd>Больше всего кода и состояний; на узком экране две колонки складываются, а фасеты занимают место.</dd></div>
+          </dl>
+          <p class="when"><b>Когда уместен</b>Когда разбор замечаний — основная работа, и за сессию надо пройти десятки публикаций.</p>
+        </div>
+        <div class="card-side">
+          <ul>
+            <li>Фасеты со счётчиками по демо-выборке</li>
+            <li>Режим «Разобрать замечания»</li>
+            <li>Мини-страница PDF + «Во весь экран»</li>
+          </ul>
+          <a class="open" href="variant-c.html">Открыть вариант C <span aria-hidden="true">→</span></a>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="rec-title">
+    <h2 id="rec-title">Рекомендация</h2>
+    <div class="rec">
+      <p><strong>A — как основа.</strong> Он ближе всего к текущему интерфейсу и дешевле всего в реализации:
+      плотный реестр, модальное доказательство, минимум новых состояний. Риск на 28 649 строк снимается
+      пагинацией и серверными фильтрами, а не переработкой компоновки.</p>
+      <p><strong>C — если проверка замечаний является продуктом.</strong> Возьмите из него фасеты и режим
+      «Разобрать замечания» и перенесите в A: это аддитивные куски, они не ломают таблицу.</p>
+      <p class="note">B хорош как демонстрация «доказательство всегда рядом», но проигрывает по плотности —
+      его стоит выбирать, если у пользователей широкие мониторы и основной сценарий — чтение, а не обзор.</p>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="check-title">
+    <h2 id="check-title">Что проверить в каждом варианте</h2>
+    <ul>
+      <li>Переключение <b>RAG / Solar</b> в тёмной шапке: меняются и каталог, и пакетный баннер.</li>
+      <li>Пакетный баннер «Обработано 37 из 90 · 3 ошибки» и переход «Показать ошибки».</li>
+      <li><b>D020</b>: вкладки, фильтры (метрика, k, набор, конфигурация, статус, замечания, поиск), 8 колонок, 12 строк.</li>
+      <li>Разворот строки: raw → normalized, происхождение, дубликат, агрегация, цитата, связанные замечания.</li>
+      <li>Две кнопки источника — «Стр. 4» и «Заголовок» — ведут к разным подсветкам.</li>
+      <li><b>D014</b>: 28 649 результатов, «по 50 на страницу», пагинация 1 / 573.</li>
+      <li><b>P058</b> — ошибка обработки, <b>D013</b> — скан без OCR, <b>D005</b> — в очереди.</li>
+      <li>Пустой результат фильтра: «Ничего не найдено — сбросить фильтры».</li>
+      <li>Клавиатура: <kbd>Tab</kbd> по элементам, <kbd>Enter</kbd> на строке и кнопках источника, <kbd>Esc</kbd> закрывает модалку/диалог.</li>
+    </ul>
+    <p class="note" style="margin-top:12px">
+      Данные синтетические и лежат внутри файлов: сеть не нужна, backend не требуется.
+      Значения D020 и тексты замечаний совпадают во всех трёх вариантах.
+    </p>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  Прототипы для хакатона · каталог RAG ВИНИТИ · файлы не подключены к приложению и не влияют на <code>static/</code>
+</footer>
+
+</body>
+</html>
