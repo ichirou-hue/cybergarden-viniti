@@ -34,6 +34,30 @@
   </form>
 </div>
 
+<section id="wizard" class="wizard" aria-labelledby="wizardTitle" hidden>
+  <div class="wizard-inner">
+    <p id="wizardStep" class="wizard-step">Шаг 1 из 2 · Документ</p>
+    <h1 id="wizardTitle">Загрузите научную статью</h1>
+    <p id="wizardHint">Перетащите PDF в область ниже или выберите файл на устройстве.</p>
+    <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Выбрать PDF">
+      <span class="drop-icon" aria-hidden="true">↑</span>
+      <strong>Перетащите PDF сюда</strong>
+      <span>или нажмите, чтобы выбрать файл</span>
+    </div>
+    <div id="profileStep" hidden>
+      <p id="selectedFile"></p>
+      <h2>Выберите профиль обработки</h2>
+      <div id="profileChoices" class="profile-choices"></div>
+      <div class="wizard-actions">
+        <a href="/manual-profile" class="button secondary">Создать профиль</a>
+        <button id="wizardBack" type="button" class="secondary">Другой PDF</button>
+        <button id="wizardSubmit" type="button" class="primary">Разобрать PDF</button>
+      </div>
+    </div>
+    <p id="wizardError" class="wizard-error" role="alert" hidden></p>
+    <a href="#/catalog?track=rag">Открыть каталог</a>
+  </div>
+</section>
 <main class="wrap" id="view" tabindex="-1"></main>
 <p id="status" class="status" role="status"></p>
 <noscript><p class="notice bad wrap">Для работы интерфейса нужен JavaScript.</p></noscript>
