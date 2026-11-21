@@ -1,4 +1,5 @@
 import { takeProfilePDF } from "./pending.js";
+import { apiFetch, loadSession } from "./api.js";
 
 const byId = id => document.getElementById(id);
 const upload = byId("profilePdf");
@@ -68,6 +69,27 @@ function showError(message) {
   status.textContent = message;
 }
 
+// Ручной профиль доступен только вошедшему пользователю: /api/profile/source
+// и /api/profile/assist требуют серверную сессию и CSRF-токен.
+const sessionReady = loadSession().then(data => {
+  if (!data.user) {
+    location.replace("/");
+    return null;
+  }
+  return data.user;
+}).catch(error => {
+  showError(error.message);
+  return null;
+});
+
+async function authorized(response) {
+  if (response.status === 401) {
+    location.replace("/");
+    throw new Error("Требуется вход.");
+  }
+  return response;
+}
+
 function clearPreset() {
   document.querySelectorAll("[data-preset]").forEach(button => button.setAttribute("aria-pressed", "false"));
 }
@@ -93,7 +115,8 @@ function fieldMarkup() {
       <label class="field pf-target-unit" data-when="number"><span>Нужная единица</span><input name="targetUnit" placeholder="например, %"></label>
       <label class="field pf-factor" data-when="number"><span>Коэффициент</span><input name="factor" type="number" step="any" placeholder="если единицы разные"></label>
       <label class="field pf-wide" data-when="reference"><span>Связанный тип</span><input name="target" list="profileTypes" placeholder="Название типа из списка выше"></label>
-    </div>`;
+    </div>
+    <label class="field pf-example"><span>Пример значения</span><input name="example" maxlength="160" placeholder="Из статьи или от помощника"></label>`;
 }
 
 function updateExtra(field) {
@@ -107,47 +130,20 @@ function updateExtra(field) {
 function addField(container, name = "", kind = "text", example = "") {
   const field = document.createElement("fieldset");
   field.className = "profile-field";
-<<<<<<< HEAD
   field.innerHTML = fieldMarkup();
   const type = field.querySelector('[name="type"]');
   type.addEventListener("change", () => updateExtra(field));
   field.querySelector(".pf-remove").onclick = () => {
-=======
-  field.innerHTML = `
-    <label><input type="checkbox" name="includeField" checked> Извлекать поле</label>
-    <label>Название поля <input name="fieldName" required></label>
-    <label>Тип <select name="type"><option value="text">Текст</option><option value="number">Число</option>
-      <option value="boolean">Да / нет</option><option value="reference">Связь</option></select></label>
-    <label>Пример значения <input name="example" maxlength="160"></label>
-    <label><input type="checkbox" name="requiredField"> Обязательное поле</label>
-    <label data-number hidden>Исходная единица <input name="unit"></label>
-    <label data-number hidden>Целевая единица <input name="targetUnit"></label>
-    <label data-number hidden>Коэффициент пересчёта <input name="factor" type="number" step="any"></label>
-    <label data-reference hidden>Тип связанной сущности <input name="target"></label>
-    <button type="button" class="button">Удалить поле</button>`;
-  field.querySelector("button").onclick = () => {
->>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
     field.remove();
     staleMatches();
     markEdited();
   };
   container.append(field);
   field.querySelector('[name="fieldName"]').value = name;
-<<<<<<< HEAD
+  type.value = kind;
+  field.querySelector('[name="example"]').value = example;
   updateExtra(field);
   staleMatches();
-=======
-  field.querySelector('[name="type"]').value = kind;
-  field.querySelector('[name="example"]').value = example;
-  const updateDetails = () => {
-    const selected = field.querySelector('[name="type"]').value;
-    field.querySelectorAll("[data-number]").forEach(node => { node.hidden = selected !== "number"; });
-    field.querySelectorAll("[data-reference]").forEach(node => { node.hidden = selected !== "reference"; });
-  };
-  field.querySelector('[name="type"]').addEventListener("change", updateDetails);
-  updateDetails();
-  clearMatches();
->>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
 }
 
 function addEntity(preset) {
@@ -213,12 +209,8 @@ function readProfile() {
       const type = value(field, "type");
       const factor = value(field, "factor");
       return {
-<<<<<<< HEAD
         name: value(field, "fieldName"), type, selected: true,
-=======
-        name: value(field, "fieldName"), type, selected: checked(field, "includeField"),
         example: value(field, "example"),
->>>>>>> 3402af1 (feat: ДОБавлен каркас чат бота)
         required: checked(field, "requiredField"),
         ...(type === "number" && {unit: value(field, "unit"), targetUnit: value(field, "targetUnit"),
           factor: factor === "" ? null : Number(factor)}),
@@ -324,11 +316,11 @@ byId("assistantAsk").onclick = async () => {
   chatMessage(question, "user");
   byId("assistantQuestion").value = "";
   try {
-    const response = await fetch("/api/profile/assist", {method: "POST",
+    const response = await authorized(await apiFetch("/api/profile/assist", {method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({question, profile, sources: documentData.sources.slice(0, 24),
         history: assistantHistory.slice(-4)}),
-    });
+    }));
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Помощник не ответил.");
     proposals = data.suggestions || [];
@@ -382,6 +374,7 @@ byId("assistantApply").onclick = () => {
 let loading = false;
 async function loadFile(file) {
   if (!file || loading) return;
+  if (!(await sessionReady)) return;
   assistantHistory.length = 0;
   byId("assistantMessages").replaceChildren();
   byId("assistantSuggestions").replaceChildren();
@@ -396,9 +389,9 @@ async function loadFile(file) {
   byId("profilePanel").hidden = false;
   status.textContent = "Читаем PDF…";
   try {
-    const response = await fetch("/api/profile/source", {
+    const response = await authorized(await apiFetch("/api/profile/source", {
       method: "POST", headers: {"Content-Type": "application/pdf"}, body: file,
-    });
+    }));
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
     documentData = {...data, filename: file.name};
@@ -410,9 +403,12 @@ async function loadFile(file) {
     form.hidden = false;
     byId("assistantEntry").hidden = true;
     if (!entities.children.length) applyPreset("basic");
+    if (!byId("assistantMessages").children.length) {
+      chatMessage("PDF прочитан. Спросите, какие поля искать в статье, или отметьте фрагменты слева.");
+    }
     status.textContent = "PDF прочитан. Выберите готовый набор или опишите поля вручную.";
   } catch (error) {
-    status.textContent = error.message;
+    showError(error.message);
   } finally {
     upload.value = "";
     upload.disabled = false;

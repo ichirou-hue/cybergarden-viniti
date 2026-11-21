@@ -119,7 +119,7 @@ def _solar_tables():
     return tables
 
 
-def list_profiles(*, root=None):
+def list_profiles(*, root=None, include_users=True):
     """Список без содержимого полей; битый пользовательский файл виден как ошибка."""
     items = []
     for name in BUILTINS:
@@ -129,6 +129,8 @@ def list_profiles(*, root=None):
             items.append({"id": name, "source": "builtin", "error": str(error)})
         else:
             items.append(summary(profile, source=source, name=name))
+    if not include_users:
+        return items
     folder = directory(root)
     if folder.is_dir():
         for path in sorted(folder.glob("*.json")):

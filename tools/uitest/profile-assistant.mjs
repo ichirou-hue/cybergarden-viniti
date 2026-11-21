@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { sessionResponse } from "./account.mjs";
 
 const root = new URL("../../static/", import.meta.url);
 const dom = new JSDOM(readFileSync(new URL("manual-profile.html", root), "utf8"), {
@@ -9,14 +10,16 @@ const dom = new JSDOM(readFileSync(new URL("manual-profile.html", root), "utf8")
 for (const key of ["window", "document", "location", "HTMLElement", "Node", "Element", "Event", "File"]) {
   Object.defineProperty(globalThis, key, {value: dom.window[key], configurable: true});
 }
-globalThis.fetch = async path => {
-  if (path === "/api/profile/source") return {ok: true, json: async () => ({
+globalThis.fetch = async input => {
+  const url = String(input);
+  if (url.includes("/api/auth/me")) return sessionResponse();
+  if (url.endsWith("/api/profile/source")) return {ok: true, status: 200, json: async () => ({
     pages: 1, warnings: [], sources: [{page: 1, quote: "PCE 21.5%"}],
   })};
-  if (path === "/api/profile/assist") return {ok: true, json: async () => ({suggestions: [
+  if (url.endsWith("/api/profile/assist")) return {ok: true, status: 200, json: async () => ({suggestions: [
     {entity: "Результат", field: "КПД", type: "number", value: "21.5%", page: 1, quote: "PCE 21.5%"},
   ]})};
-  throw new Error(path);
+  throw new Error(url);
 };
 await import(new URL("profile.mjs", root).href);
 const $ = id => document.getElementById(id);
@@ -34,8 +37,8 @@ const field = [...document.querySelectorAll(".profile-field")].find(node => node
 assert.ok(field);
 assert.equal(field.querySelector('[name="type"]').value, "number");
 assert.equal(field.querySelector('[name="example"]').value, "21.5%");
-assert.equal(field.querySelector('[data-number]').hidden, false);
-assert.equal(field.querySelector('[data-reference]').hidden, true);
+assert.equal(field.querySelector('[data-when="number"]').hidden, false);
+assert.equal(field.querySelector('[data-when="reference"]').hidden, true);
 assert.equal($("assistantApply").hidden, true);
 assert.ok(document.querySelector(".assistant-messages .user-bubble"));
 assert.ok(document.querySelector(".assistant-messages .assistant-bubble"));

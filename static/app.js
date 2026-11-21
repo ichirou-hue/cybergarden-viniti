@@ -6,7 +6,7 @@ import { openEvidence, dismissEvidence } from "./evidence.js";
 import { uploadPDF, uploadPDFWithProgress, openDemo } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
 import { stashProfilePDF } from "./pending.js";
-import { mountAuthScreen, currentAccount, isSignedIn, recordActivity, signOutAccount } from "./auth.js";
+import { mountAuthScreen, currentAccount, isSignedIn, recordActivity, signOutAccount, restoreSession } from "./auth.js";
 import { mountAccountMenu, renderProfile } from "./account.js";
 
 const view = document.getElementById("view");
@@ -75,6 +75,9 @@ function say(message, isError = false) {
 }
 
 function renderTracks(active = app.track) {
+  // Область больше не переключается в шапке: RAG/Solar выбираются только
+  // на экране загрузки. Ссылка на паспорт остаётся отдельным пунктом.
+  if (!trackBar) return;
   fill(trackBar, app.descriptors.map(item => el("a", {
     class: "track",
     href: buildHash("/catalog", {track: item.track}),
@@ -139,7 +142,7 @@ async function route() {
     app.controller?.abort();
     setUploadEnabled(true);
     document.body.dataset.view = "";
-    document.title = "ВИНТИ · Каталог результатов";
+    document.title = "ВИНИТИ · Каталог результатов";
     renderWizard();
     booted = true;
     document.getElementById("bootError").hidden = true;
@@ -485,8 +488,14 @@ async function enterApp(account, notice = "") {
   accountMenu.sync(account);
   authScreen.hide();
   lastPath = "";
-  // Адрес не трогаем: глубокая ссылка должна открыться и при первом,
-  // и при повторном входе.
+  // Вход ведёт на мастер загрузки, а не на каталог. Прямые ссылки на
+  // документ и его источник сохраняются.
+  const {path} = parse();
+  if (!path.startsWith("/doc/")) {
+    history.replaceState(null, "", buildHash("/", {track: app.track}));
+  }
+  // Адрес не трогаем сверх этого: глубокая ссылка должна открыться и при
+  // первом, и при повторном входе.
   if (!app.started) await startApp();
   else await route();
   focusAfterAuth();
@@ -503,6 +512,9 @@ function leaveAccount() {
   fileName.title = "";
   lastPath = "";
   booted = false;
+  clearTimeout(toastTimer);
+  const toastNode = document.getElementById("toast");
+  if (toastNode) toastNode.hidden = true;
   fill(view);
   say("");
   setUploadEnabled(false);
@@ -511,14 +523,35 @@ function leaveAccount() {
 }
 
 async function boot() {
-  const account = currentAccount();
+  let account = null;
+  try {
+    account = await restoreSession();
+  } catch (error) {
+    // Сервер недоступен: показываем вход, а не пустой каталог.
+    authScreen.show("Не удалось проверить сессию. Проверьте, что сервер запущен.", true);
+    return;
+  }
   if (!account) {
     document.getElementById("bootError").hidden = true;
     authScreen.show();
     return;
   }
+  authScreen.hide();
   accountMenu.sync(account);
   await startApp();
 }
+
+// Истёкшая cookie превращает любой запрос в 401: возвращаем экран входа,
+// не оставляя пользователя с пустыми таблицами.
+window.addEventListener("viniti:unauthorized", () => {
+  if (!isSignedIn()) return;
+  signOutAccount();
+  app.controller?.abort();
+  accountMenu.sync(null);
+  lastPath = "";
+  booted = false;
+  setUploadEnabled(false);
+  authScreen.show("Сессия истекла. Войдите снова.", true);
+});
 
 await boot();

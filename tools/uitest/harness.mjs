@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
-import { seedWindow } from "./account.mjs";
+import { seedWindow, sessionResponse } from "./account.mjs";
 
 const base = process.env.MOCK_URL || "http://127.0.0.1:8799";
 const root = new URL("../../static/", import.meta.url);
@@ -16,6 +16,7 @@ for (const key of [
 const nativeFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
   const url = typeof input === "string" ? new URL(input, base) : input;
+  if (String(url).includes("/api/auth/me")) return Promise.resolve(sessionResponse());
   return nativeFetch(url, init);
 };
 globalThis.dom = dom;
@@ -58,7 +59,7 @@ check("каталог: не меньше 8 публикаций", rows("#view tb
 const statValues = rows(".stats > div strong").map(node => node.textContent.trim()).join("/");
 check("каталог: сводка прогона", statValues === "90/4/3", statValues);
 check("каталог: статусы текстом", text("#view").includes("частично") && text("#view").includes("в очереди"));
-check("каталог: переключатель области", document.querySelectorAll("#tracks .track").length === 2);
+check("каталог: в шапке только «Паспорт»", document.querySelectorAll(".track-switch .track").length === 1);
 
 // Поиск по каталогу
 const search = document.querySelector(".filters input[type=search]");

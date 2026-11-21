@@ -1,5 +1,25 @@
 const JSON_HEADERS = {Accept: "application/json"};
 
+// CSRF-токен живёт только в памяти вкладки. Сервер выдаёт его вместе с
+// cookie-сессией в /api/auth/me, login и register; после перезагрузки его
+// возвращает тот же /api/auth/me.
+let csrfToken = "";
+
+export function setCSRF(token) {
+  csrfToken = token || "";
+}
+
+export function getCSRF() {
+  return csrfToken;
+}
+
+function unauthorized(response) {
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent("viniti:unauthorized"));
+  }
+  return response;
+}
+
 async function unwrap(response) {
   const type = response.headers.get("Content-Type") || "";
   let data;
@@ -28,17 +48,63 @@ function networkError(error) {
   throw new Error("Не удалось связаться с сервером. Проверьте соединение.");
 }
 
+function request(path, options = {}, signal) {
+  const headers = new Headers(options.headers || {});
+  if (csrfToken) headers.set("X-CSRF-Token", csrfToken);
+  return fetch(path, {
+    ...options,
+    headers,
+    signal: options.signal || signal,
+    credentials: "same-origin",
+  }).catch(networkError).then(unauthorized);
+}
+
 export function getJSON(path, params = {}, signal) {
   const url = new URL(path, location.origin);
   for (const [key, value] of Object.entries(params || {})) {
     if (value === "" || value === null || value === undefined) continue;
     url.searchParams.set(key, value);
   }
-  return fetch(url, {signal, headers: JSON_HEADERS}).catch(networkError).then(unwrap);
+  return fetch(url, {signal, headers: JSON_HEADERS, credentials: "same-origin"})
+    .catch(networkError).then(unauthorized).then(unwrap);
+}
+
+export function postJSON(path, body, signal) {
+  return request(path, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", Accept: "application/json"},
+    body: JSON.stringify(body),
+  }, signal).then(unwrap);
+}
+
+export function deleteJSON(path, signal) {
+  return request(path, {method: "DELETE"}, signal).then(unwrap);
+}
+
+export function putJSON(path, body, signal) {
+  return request(path, {
+    method: "PUT",
+    headers: {"Content-Type": "application/json", Accept: "application/json"},
+    body: JSON.stringify(body),
+  }, signal).then(unwrap);
+}
+
+// Сырой запрос с CSRF и cookie: нужен страницам, которые отдают не JSON
+// (например, PDF на /api/profile/source).
+export function apiFetch(path, options = {}, signal) {
+  return request(path, options, signal);
+}
+
+// Сессия на сервере: cookie ставится HttpOnly, а CSRF-токен возвращается
+// в теле. Ответ {"user": null} - штатное «не вошёл», а не ошибка.
+export async function loadSession(signal) {
+  const data = await getJSON("/api/auth/me", {}, signal);
+  setCSRF(data && data.csrf_token);
+  return data || {user: null};
 }
 
 export function uploadPDF(file, track, signal) {
-  return fetch("/api/documents", {
+  return request("/api/documents", {
     method: "POST",
     body: file,
     signal,
@@ -47,15 +113,15 @@ export function uploadPDF(file, track, signal) {
       "X-Track": track,
       "X-Filename": encodeURIComponent(file.name),
     },
-  }).catch(networkError).then(unwrap);
+  }, signal).then(unwrap);
 }
 
 export async function uploadPDFWithProgress(file, track, onProgress, signal) {
-  const response = await fetch("/api/documents/stream", {
+  const response = await request("/api/documents/stream", {
     method: "POST", body: file, signal,
     headers: {"Content-Type": "application/pdf", "X-Track": track,
       "X-Filename": encodeURIComponent(file.name)},
-  }).catch(networkError);
+  }, signal);
   if (!response.ok) return unwrap(response);
   if (!response.body) throw new Error("Браузер не поддерживает потоковый ответ сервера.");
   const reader = response.body.getReader();
@@ -81,9 +147,9 @@ export async function uploadPDFWithProgress(file, track, onProgress, signal) {
 }
 
 export function openDemo(track, signal) {
-  return fetch("/api/demo", {
+  return request("/api/demo", {
     method: "POST",
     signal,
     headers: {"X-Track": track},
-  }).catch(networkError).then(unwrap);
+  }, signal).then(unwrap);
 }

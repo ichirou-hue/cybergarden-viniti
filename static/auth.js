@@ -1,26 +1,23 @@
-// Аккаунт исследователя без сервера: запись живёт в localStorage этого браузера.
-// Пароль не сохраняется и никуда не отправляется, серверной проверки пока нет.
-// Ключи продублированы в inline-скрипте static/index.html: он ставит класс
-// auth-locked до первой отрисовки, чтобы не мелькал каталог.
-//
-// Если браузер запрещает localStorage, аккаунт всё равно работает в памяти
-// модуля до перезагрузки страницы, поэтому вход и навигация не ломаются.
+// Аккаунт исследователя: вход и пароль проверяет сервер (`auth.py`), cookie
+// сессии HttpOnly ставит он же. В браузере остаются только поля профиля
+// (имя, организация, роль, описание, настройки и лента) - по одному набору
+// на id пользователя. Пароль нигде в localStorage не хранится.
 
-const STORE_KEY = "viniti.account.v1";
-const SESSION_KEY = "viniti.session.v1";
-const SESSION_OUT = "out";
+import { postJSON, loadSession, setCSRF } from "./api.js";
+
+const PROFILE_PREFIX = "viniti.profile.v1:";
+const LEGACY_KEY = "viniti.account.v1";
 const MAX_ACTIVITY = 12;
-
-// Память процесса: страховка для приватного режима и запрета хранения.
-// Гость не пишется в localStorage вовсе, иначе затирал бы профиль владельца.
-let memoryAccount = null;
-let memoryGuest = null;
-let memorySignedOut = false;
 
 const MONTHS = [
   "января", "февраля", "марта", "апреля", "мая", "июня",
   "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ];
+
+// Память процесса: страховка для приватного режима и запрета хранения.
+const memoryProfiles = new Map();
+let serverUser = null;
+let cachedAccount = null;
 
 function storage() {
   try {
@@ -61,8 +58,7 @@ export function firstName(name) {
 
 export function modeLabel(account) {
   if (!account) return "";
-  if (account.guest) return "Гостевой доступ";
-  return "Локальный аккаунт";
+  return "Аккаунт на сервере";
 }
 
 export function modeChip(account) {
@@ -77,20 +73,32 @@ function text(value, fallback = "") {
   return String(value === null || value === undefined ? fallback : value).trim();
 }
 
-function normalize(raw) {
+function emailShaped(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+}
+
+function nameFromUsername(username) {
+  const local = String(username || "").split("@")[0].replace(/[._-]+/g, " ").trim();
+  return local
+    ? local.split(/\s+/).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
+    : "Исследователь";
+}
+
+function profileKey(userId) {
+  return `${PROFILE_PREFIX}${userId}`;
+}
+
+function normalizeProfile(raw) {
   if (!raw || typeof raw !== "object") return null;
-  const name = text(raw.name);
-  if (!name) return null;
   const createdAt = Number(raw.createdAt);
+  const stamp = Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now();
   return {
-    name,
+    name: text(raw.name),
     email: text(raw.email),
     org: text(raw.org, "Без организации") || "Без организации",
-    role: text(raw.role, "Исследователь"),
+    role: text(raw.role, "Исследователь") || "Исследователь",
     bio: text(raw.bio),
-    guest: Boolean(raw.guest),
-    createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now(),
-    since: text(raw.since) || sinceLabel(new Date(Number.isFinite(createdAt) ? createdAt : Date.now())),
+    createdAt: stamp,
     settings: {
       notifyIssues: raw.settings?.notifyIssues !== false,
       onlyVerified: raw.settings?.onlyVerified !== false,
@@ -116,72 +124,31 @@ function normalize(raw) {
   };
 }
 
-export function readAccount() {
-  // Гостевая сессия живёт только в памяти вкладки и не затирает чужой профиль.
-  if (memoryGuest) return memoryGuest;
+function readProfile(userId) {
   const store = storage();
-  if (!store) return memoryAccount;
+  if (!store) return memoryProfiles.get(userId) || null;
   let raw;
   try {
-    raw = store.getItem(STORE_KEY);
+    raw = store.getItem(profileKey(userId));
   } catch {
-    return memoryAccount;
+    return memoryProfiles.get(userId) || null;
   }
-  if (!raw) {
-    memoryAccount = null;
+  if (!raw) return memoryProfiles.get(userId) || null;
+  try {
+    return normalizeProfile(JSON.parse(raw));
+  } catch {
     return null;
   }
-  try {
-    memoryAccount = normalize(JSON.parse(raw));
-  } catch {
-    memoryAccount = null;
-  }
-  return memoryAccount;
 }
 
-function signedOut() {
-  const store = storage();
-  if (!store) return memorySignedOut;
-  try {
-    return store.getItem(SESSION_KEY) === SESSION_OUT;
-  } catch {
-    return memorySignedOut;
-  }
-}
-
-function setSignedOut(value) {
-  memorySignedOut = value;
-  const store = storage();
-  if (!store) return;
-  try {
-    if (value) store.setItem(SESSION_KEY, SESSION_OUT);
-    else store.removeItem(SESSION_KEY);
-  } catch {
-    // Запись не переживёт перезагрузку, но текущая вкладка уже знает ответ.
-  }
-}
-
-export function isSignedIn() {
-  return Boolean(readAccount()) && !signedOut();
-}
-
-export function currentAccount() {
-  return isSignedIn() ? readAccount() : null;
-}
-
-export function saveAccount(account) {
-  const normalized = normalize(account);
+function saveProfile(userId, profile) {
+  const normalized = normalizeProfile(profile);
   if (!normalized) return null;
-  if (normalized.guest) {
-    memoryGuest = normalized;
-    return normalized;
-  }
-  memoryGuest = null;
-  memoryAccount = normalized;
+  memoryProfiles.set(userId, normalized);
   const store = storage();
   if (!store) return normalized;
   try {
-    store.setItem(STORE_KEY, JSON.stringify(normalized));
+    store.setItem(profileKey(userId), JSON.stringify(normalized));
   } catch {
     // Приватный режим или переполненное хранилище: экран продолжает работать,
     // запись не переживёт перезагрузку.
@@ -189,24 +156,48 @@ export function saveAccount(account) {
   return normalized;
 }
 
-// Выход завершает сессию, но не стирает профиль: по тому же email можно
-// вернуться и сохранить историю, настройки и описание.
-export function signOutAccount() {
-  memoryGuest = null;
-  setSignedOut(true);
+// Профиль прошлой (локальной) версии переезжает к текущему пользователю,
+// если там тот же email. Иначе он остаётся в старом ключе нетронутым.
+function legacyProfile(userId) {
+  const store = storage();
+  if (!store) return null;
+  let raw;
+  try {
+    raw = store.getItem(LEGACY_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const profile = normalizeProfile(parsed);
+  if (!profile) return null;
+  const email = profile.email.toLowerCase();
+  // An empty email was the old guest record; it must not leak into the first
+  // real account of this browser.
+  if (!email || email !== String(serverUser?.username || "").toLowerCase()) return null;
+  saveProfile(userId, profile);
+  try {
+    store.removeItem(LEGACY_KEY);
+    store.removeItem("viniti.session.v1");
+  } catch {
+    // Ключи не мешают: профиль уже перенесён.
+  }
+  return profile;
 }
 
-function baseAccount(fields) {
-  const now = new Date();
+function baseProfile(fields) {
   return {
-    name: fields.name,
+    name: fields.name || "",
     email: fields.email || "",
     org: fields.org || "Без организации",
     role: fields.role || "Исследователь",
     bio: fields.bio || "",
-    guest: Boolean(fields.guest),
-    createdAt: now.getTime(),
-    since: sinceLabel(now),
+    createdAt: Date.now(),
     settings: {
       notifyIssues: true,
       onlyVerified: true,
@@ -219,92 +210,126 @@ function baseAccount(fields) {
   };
 }
 
-export function registerAccount({name, email, org}) {
-  const account = baseAccount({
-    name,
-    email,
-    org,
+function composeAccount(user, profile) {
+  const createdAt = profile.createdAt || Number(user.created_at || 0) * 1000 || Date.now();
+  const username = String(user.username || "");
+  return {
+    id: user.id,
+    username,
+    name: profile.name || nameFromUsername(username),
+    email: profile.email || (emailShaped(username) ? username : ""),
+    org: profile.org,
+    role: profile.role,
+    bio: profile.bio,
+    guest: false,
+    createdAt,
+    since: sinceLabel(new Date(createdAt)),
+    settings: profile.settings,
+    stats: profile.stats,
+    activity: profile.activity,
+  };
+}
+
+function applyUser(user) {
+  serverUser = user || null;
+  if (!serverUser) {
+    cachedAccount = null;
+    return null;
+  }
+  const username = String(serverUser.username || "");
+  const profile = readProfile(serverUser.id) || legacyProfile(serverUser.id)
+    || baseProfile({
+      name: nameFromUsername(username),
+      email: emailShaped(username) ? username : "",
+      org: "ВИНИТИ РАН",
+    });
+  saveProfile(serverUser.id, profile);
+  cachedAccount = composeAccount(serverUser, profile);
+  return cachedAccount;
+}
+
+// Восстанавливает серверную сессию по cookie. {"user": null} - штатное
+// «не вошёл»; сетевую ошибку пробрасываем, чтобы вход не притворялся.
+export async function restoreSession(signal) {
+  const data = await loadSession(signal);
+  if (!data.user) {
+    applyUser(null);
+    return null;
+  }
+  return applyUser(data.user);
+}
+
+export function isSignedIn() {
+  return Boolean(serverUser) && Boolean(cachedAccount);
+}
+
+export function currentAccount() {
+  return isSignedIn() ? cachedAccount : null;
+}
+
+function updateStoredProfile(patch) {
+  if (!serverUser) return null;
+  const profile = readProfile(serverUser.id) || baseProfile({});
+  const next = {
+    ...profile,
+    ...patch,
+    settings: {...profile.settings, ...(patch.settings || {})},
+  };
+  const saved = saveProfile(serverUser.id, next);
+  cachedAccount = composeAccount(serverUser, saved);
+  return cachedAccount;
+}
+
+// Регистрация: сервер проверяет пароль и ставит cookie, локально остаются
+// только описательные поля профиля.
+export async function registerAccount({name, email, org, password}) {
+  const data = await postJSON("/api/auth/register", {username: email, password});
+  setCSRF(data.csrf_token);
+  applyUser(data.user);
+  updateStoredProfile({
+    name: text(name) || nameFromUsername(email),
+    email: text(email),
+    org: text(org) || "Без организации",
     role: "Исследователь",
     bio: "Заполните описание в настройках профиля, чтобы коллеги понимали, с какими данными вы работаете.",
   });
-  memoryGuest = null;
-  setSignedOut(false);
-  return recordActivity(account, {
+  return recordActivity(cachedAccount, {
     title: "Аккаунт создан",
-    detail: "Профиль сохранён в этом браузере.",
+    detail: "Пароль проверяется на сервере, профиль хранится в этом браузере.",
     kind: "account",
   });
 }
 
-export function loginAccount(email) {
-  const clean = text(email);
-  const normalized = clean.toLowerCase();
-  const saved = readAccount();
-  if (saved && !saved.guest) {
-    if (saved.email.toLowerCase() !== normalized) {
-      return {
-        ok: false,
-        error: `В этом браузере уже сохранён профиль ${saved.email}. Войдите с этим email или создайте новый аккаунт.`,
-      };
-    }
-    memoryGuest = null;
-    setSignedOut(false);
-    return {
-      ok: true,
-      account: recordActivity(saved, {
-        title: "Вход в аккаунт",
-        detail: "Профиль найден в этом браузере.",
-        kind: "account",
-      }),
-    };
-  }
-  const local = normalized.split("@")[0].replace(/[._-]+/g, " ").trim();
-  const name = local
-    ? local.split(/\s+/).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
-    : "Исследователь";
-  const account = baseAccount({name, email: clean, org: "ВИНИТИ РАН", role: "Исследователь"});
-  memoryGuest = null;
-  setSignedOut(false);
-  return {
-    ok: true,
-    account: recordActivity(account, {
-      title: "Вход в каталог",
-      detail: "Аккаунт создан локально при входе.",
-      kind: "account",
-    }),
-  };
-}
-
-export function createGuest() {
-  const account = baseAccount({
-    name: "Гость",
-    email: "",
-    org: "Без организации",
-    role: "Гостевой доступ",
-    bio: "Гостевой доступ: каталог открыт, данные профиля остаются в этой вкладке.",
-    guest: true,
-  });
-  setSignedOut(false);
-  return recordActivity(account, {
-    title: "Гостевой вход",
-    detail: "Каталог открыт без регистрации.",
+export async function loginAccount(email, password) {
+  const data = await postJSON("/api/auth/login", {username: email, password});
+  setCSRF(data.csrf_token);
+  const account = applyUser(data.user);
+  return recordActivity(cachedAccount || account, {
+    title: "Вход в аккаунт",
+    detail: "Сессия подтверждена сервером.",
     kind: "account",
   });
+}
+
+// Выход стирает серверную сессию. Локальный профиль остаётся, чтобы
+// повторный вход вернул настройки и ленту.
+export function signOutAccount() {
+  const request = postJSON("/api/auth/logout", {}).catch(error => {
+    console.warn("Серверная сессия не завершилась:", error.message);
+  });
+  serverUser = null;
+  cachedAccount = null;
+  setCSRF("");
+  return request;
 }
 
 export function updateAccount(patch) {
-  const account = readAccount();
-  if (!account) return null;
-  const next = {
-    ...account,
-    ...patch,
-    settings: {...account.settings, ...(patch.settings || {})},
-  };
-  return saveAccount(next);
+  if (!cachedAccount) return null;
+  return updateStoredProfile(patch);
 }
 
 export function recordActivity(account, {title, detail = "", kind = "action"}) {
-  if (!account) return null;
+  if (!account || !serverUser) return account || null;
   const activity = [
     {at: Date.now(), title, detail, kind},
     ...(account.activity || []),
@@ -312,7 +337,7 @@ export function recordActivity(account, {title, detail = "", kind = "action"}) {
   const stats = {...account.stats};
   stats.actions = Number(stats.actions || 0) + 1;
   if (kind === "upload") stats.docs = Number(stats.docs || 0) + 1;
-  return saveAccount({...account, activity, stats});
+  return updateStoredProfile({activity, stats});
 }
 
 export function accountStats(account) {
@@ -436,6 +461,7 @@ export function mountAuthScreen(root, {onEnter}) {
   }
 
   function selectTab(index, moveFocus) {
+    setStatus("");
     tabButtons.forEach((tab, i) => {
       const active = i === index;
       tab.setAttribute("aria-selected", String(active));
@@ -477,6 +503,17 @@ export function mountAuthScreen(root, {onEnter}) {
     }
   });
 
+  async function send(button, task) {
+    if (button) button.disabled = true;
+    try {
+      await task();
+    } catch (error) {
+      setStatus(error.message, true);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   byId("registerForm")?.addEventListener("submit", event => {
     event.preventDefault();
     let errors = 0;
@@ -499,15 +536,19 @@ export function mountAuthScreen(root, {onEnter}) {
       (root.querySelector("#panelReg .is-invalid") || consent).focus();
       return;
     }
-    setStatus("");
-    const account = registerAccount({
-      name: byId("regName").value.trim(),
-      email: byId("regEmail").value.trim(),
-      org: byId("regOrg").value.trim(),
+    setStatus("Создаём аккаунт…");
+    const button = byId("registerForm").querySelector('button[type="submit"]');
+    send(button, async () => {
+      const account = await registerAccount({
+        name: byId("regName").value.trim(),
+        email: byId("regEmail").value.trim(),
+        org: byId("regOrg").value.trim(),
+        password: byId("regPassword").value,
+      });
+      hide();
+      resetForms();
+      onEnter(account, "Аккаунт создан. Загрузите первый PDF.");
     });
-    hide();
-    resetForms();
-    onEnter(account, "Аккаунт создан. Добро пожаловать в каталог.");
   });
 
   byId("loginForm")?.addEventListener("submit", event => {
@@ -520,28 +561,21 @@ export function mountAuthScreen(root, {onEnter}) {
       (root.querySelector("#panelLogin .is-invalid") || byId("loginEmail")).focus();
       return;
     }
-    setStatus("");
-    const email = byId("loginEmail").value.trim();
-    const result = loginAccount(email);
-    if (!result.ok) {
-      setStatus(result.error, true);
-      byId("loginEmail").focus();
-      return;
-    }
-    hide();
-    resetForms();
-    onEnter(result.account, "Вы вошли в каталог.");
+    setStatus("Проверяем пароль…");
+    const button = byId("loginForm").querySelector('button[type="submit"]');
+    send(button, async () => {
+      const account = await loginAccount(
+        byId("loginEmail").value.trim(),
+        byId("loginPassword").value,
+      );
+      hide();
+      resetForms();
+      onEnter(account, "Вы вошли.");
+    });
   });
 
   byId("forgotBtn")?.addEventListener("click", () => {
-    setStatus("В демо-режиме восстановление пароля не подключено: создайте новый аккаунт.", false);
-  });
-
-  byId("guestBtn")?.addEventListener("click", () => {
-    const account = createGuest();
-    hide();
-    resetForms();
-    onEnter(account, "Вы вошли как гость.");
+    setStatus("В прототипе восстановление пароля не подключено: зарегистрируйте новый аккаунт.", false);
   });
 
   for (const button of root.querySelectorAll("[data-toggle-pass]")) {
@@ -560,7 +594,7 @@ export function mountAuthScreen(root, {onEnter}) {
     document.documentElement.classList.add("auth-locked");
     document.body.classList.remove("wizard-active");
     document.body.dataset.view = "";
-    document.title = "Вход · ВИНТИ";
+    document.title = "Вход · ВИНИТИ";
     const bootError = document.getElementById("bootError");
     if (bootError) bootError.hidden = true;
     const storageNote = byId("authStorageNote");

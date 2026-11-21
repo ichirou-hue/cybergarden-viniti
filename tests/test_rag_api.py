@@ -1,12 +1,14 @@
 """Тесты RAG-адаптера и HTTP-контракта каталога."""
 
 import json
+from http.cookiejar import CookieJar
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
+import auth
 from library import Library
 from rag_api import RagStore, build_envelope, demo_pdf, export_csv, _anchor
 from server import Handler, ThreadingHTTPServer
@@ -59,9 +61,18 @@ class HttpTest(unittest.TestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.library = Library(Path(self.tmp.name) / "papers.sqlite3")
         self.server.rag_store = RagStore(Path(self.tmp.name) / "papers.sqlite3")
+        self.server.auth = auth.Auth(Path(self.tmp.name) / "auth.sqlite3",
+                                     iterations=auth.MIN_ITERATIONS)
         self.thread = Thread(target=self.server.serve_forever)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_port}"
+        self.client = build_opener(HTTPCookieProcessor(CookieJar()))
+        request = Request(
+            self.base + "/api/auth/register",
+            data=json.dumps({"username": "raguser", "password": "correct horse"}).encode(),
+            headers={"Content-Type": "application/json"})
+        with self.client.open(request, timeout=20) as response:
+            self.csrf = json.load(response)["csrf_token"]
 
     def tearDown(self):
         self.server.shutdown()
@@ -70,12 +81,13 @@ class HttpTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def get_json(self, path):
-        with urlopen(self.base + path, timeout=10) as response:
+        with self.client.open(self.base + path, timeout=10) as response:
             return json.load(response)
 
     def test_demo_catalog_results_and_evidence(self):
-        request = Request(self.base + "/api/demo", data=b"", headers={"X-Track": "rag"})
-        with urlopen(request, timeout=30) as response:
+        request = Request(self.base + "/api/demo", data=b"",
+                          headers={"X-Track": "rag", "X-CSRF-Token": self.csrf})
+        with self.client.open(request, timeout=30) as response:
             created = json.load(response)
         self.assertEqual(created["document_id"], "rag:demo")
 
@@ -93,9 +105,9 @@ class HttpTest(unittest.TestCase):
         anchor = self.get_json(f"/api/documents/rag%3Ademo/anchors/{source_id}.json")
         self.assertEqual(anchor["page"], 1)
 
-        with urlopen(f"{self.base}/api/documents/rag%3Ademo/anchors/{source_id}.png", timeout=10) as response:
+        with self.client.open(f"{self.base}/api/documents/rag%3Ademo/anchors/{source_id}.png", timeout=10) as response:
             self.assertEqual(response.read(8), b"\x89PNG\r\n\x1a\n")
-        with urlopen(f"{self.base}/api/documents/rag%3Ademo/export.csv", timeout=10) as response:
+        with self.client.open(f"{self.base}/api/documents/rag%3Ademo/export.csv", timeout=10) as response:
             self.assertIn("result_id", response.read().decode("utf-8-sig"))
         jobs = self.get_json("/api/jobs?track=rag")
         self.assertEqual(jobs["done"], 1)

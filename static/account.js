@@ -52,7 +52,7 @@ export function mountAccountMenu({navigate, onLogout}) {
     setText("accountMenuName", account.name);
     setText("accountMenuEmail", account.email || "Аккаунт без email");
     setText("accountMode", modeLabel(account));
-    setText("accountLogout", account.guest ? "Завершить гостевой доступ" : "Выйти из аккаунта");
+    setText("accountLogout", "Выйти из аккаунта");
     button.setAttribute("aria-label", `Меню профиля: ${account.name}`);
   }
 
@@ -179,7 +179,7 @@ export function renderProfile(view, ctx) {
       el("p", {class: "eyebrow", text: "Личный кабинет"}),
       title,
       el("p", {class: "lede", text: "Данные аккаунта, история действий и настройки извлечения."})),
-    el("span", {class: `badge ${account.guest ? "idle" : "ok"}`, text: modeLabel(account)}));
+    el("span", {class: "badge ok", text: modeLabel(account)}));
 
   const settingsPanel = el("section", {
     class: "panel profile-panel profile-settings",
@@ -236,7 +236,8 @@ export function renderProfile(view, ctx) {
       el("label", {}, "Роль",
         el("input", {type: "text", name: "role", value: account.role})),
       el("label", {}, "Email",
-        el("input", {type: "email", name: "email", value: account.email, readonly: true})),
+        el("input", {type: "email", name: "email", value: account.email, readonly: true,
+          title: "Email совпадает с логином серверной сессии"})),
       el("label", {class: "profile-form-wide"}, "Чем занимаюсь",
         el("textarea", {name: "bio", rows: "3"})),
       el("p", {class: "profile-form-status", role: "status", "aria-live": "polite", text: flash}),
@@ -311,7 +312,7 @@ export function renderProfile(view, ctx) {
 
   fill(settingsPanel,
     settingsTitle,
-    el("p", {class: "profile-sub", text: "Заглушки без сервера: значения сохраняются только в этом браузере."}),
+    el("p", {class: "profile-sub", text: "Настройки и описание сохраняются в этом браузере для вашего аккаунта."}),
     settingsStatus,
     notify.node,
     verified.node,
@@ -323,18 +324,11 @@ export function renderProfile(view, ctx) {
     form,
     el("div", {class: "profile-danger"},
       el("p", {
-        text: account.guest
-          ? "Завершение гостевого доступа вернёт экран регистрации."
-          : "Выход завершает сессию в этом браузере. Профиль и настройки останутся, чтобы можно было войти снова.",
+        text: "Выход завершает серверную сессию. Профиль и настройки этого браузера останутся, чтобы можно было войти снова.",
       }),
       el("button", {type: "button", text: "Выйти из аккаунта", onclick: onLogout})));
 
   const main = el("div", {class: "profile-main"},
-    account.guest
-      ? el("p", {class: "notice warn"},
-        el("strong", {text: "Гостевой доступ."}),
-        el("p", {text: "Каталог открыт, но данные профиля живут только в этой вкладке."}))
-      : null,
     about,
     statsBlock,
     activity,

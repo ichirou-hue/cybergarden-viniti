@@ -1,6 +1,7 @@
 import { chromium } from "playwright-core";
 
-// Проверки входа и профиля без бэкенда: аккаунт живёт в localStorage.
+// Проверки входа и профиля на серверной сессии: пароль проверяет мок-сервер,
+// cookie сессии ставит он же, в localStorage остаётся только профиль.
 // Требует запущенный мок: ../../.venv/bin/python ../mock_api.py --port 8799
 
 const base = process.env.MOCK_URL || "http://127.0.0.1:8799";
@@ -39,6 +40,8 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
     || Boolean(document.body.dataset.view));
 }
 
+const profileKey = email => `viniti.profile.v1:${email}`;
+
 // 1. Первый вход закрывает каталог
 {
   const {context, page, errors} = await fresh();
@@ -52,9 +55,9 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
   check("вход: поле помечено", await page.locator("#regName").getAttribute("aria-invalid") === "true");
 
   await register(page);
-  check("регистрация: каталог открылся", await page.locator("#view").isVisible());
+  check("регистрация: открылся мастер загрузки", await page.locator("#wizard").isVisible());
   check("регистрация: имя в шапке", (await page.locator("#accountName").textContent()).trim() === "Илья");
-  check("регистрация: фокус ушёл в приложение", await page.evaluate(() => document.activeElement?.id) === "view");
+  check("регистрация: фокус ушёл в приложение", await page.evaluate(() => document.activeElement?.id) === "wizardTitle");
 
   await page.locator("#accountButton").click();
   check("поповер: раскрыт", await page.locator("#accountMenu").isVisible());
@@ -91,13 +94,14 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
   await page.waitForTimeout(400);
   check("поповер: каталог открывается", page.url().includes("#/catalog"), page.url());
 
-  // Выход: сессия завершается, профиль остаётся
+  // Выход: серверная сессия завершается, профиль остаётся
   await page.locator("#accountButton").click();
   await page.locator("#accountLogout").click();
   await page.waitForSelector("#authScreen", {state: "visible"});
   check("выход: экран входа", await page.locator("#authScreen").isVisible());
   check("выход: заголовок вкладки", (await page.title()).includes("Вход"));
-  check("выход: запись профиля сохранена", await page.evaluate(() => Boolean(localStorage.getItem("viniti.account.v1"))));
+  check("выход: профиль сохранён", await page.evaluate(key => Boolean(localStorage.getItem(key)),
+    profileKey("i.safonov@viniti.ru")));
 
   // Повторный вход с тем же email возвращает профиль
   await page.locator("#tabLogin").click();
@@ -114,11 +118,11 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
   await context.close();
 }
 
-// 2. Чужой email не затирает профиль молча
+// 2. Неверный пароль и незарегистрированный email не пускают
 {
   const {context, page} = await fresh();
   await page.goto(`${base}/`, {waitUntil: "networkidle"});
-  await register(page);
+  await register(page, "Второй Пользователь", "second@viniti.ru");
   await page.locator("#accountButton").click();
   await page.locator("#accountLogout").click();
   await page.waitForSelector("#authScreen", {state: "visible"});
@@ -126,33 +130,18 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
   await page.fill("#loginEmail", "other@viniti.ru");
   await page.fill("#loginPassword", "password123");
   await page.locator("#loginForm button[type=submit]").click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(300);
   check("вход: чужой email отклонён", await page.locator("#authScreen").isVisible());
-  check("вход: объяснение показано", (await page.locator("#authStatus").textContent()).includes("уже сохранён профиль"));
+  check("вход: объяснение показано", (await page.locator("#authStatus").textContent()).includes("Неверное имя пользователя"));
+  await page.fill("#loginEmail", "second@viniti.ru");
+  await page.fill("#loginPassword", "wrong-password");
+  await page.locator("#loginForm button[type=submit]").click();
+  await page.waitForTimeout(300);
+  check("вход: неверный пароль отклонён", await page.locator("#authScreen").isVisible());
   await context.close();
 }
 
-// 3. Гость не затирает профиль владельца
-{
-  const {context, page} = await fresh();
-  await page.goto(`${base}/`, {waitUntil: "networkidle"});
-  await page.locator("#guestBtn").click();
-  await page.waitForSelector("#authScreen", {state: "hidden"});
-  await page.waitForSelector("#wizard", {state: "visible"});
-  check("гость: каталог открыт", await page.locator("#wizard").isVisible());
-  check("гость: шапка", (await page.locator("#accountName").textContent()).trim() === "Гость");
-  await page.locator("#accountButton").click();
-  check("гость: режим", (await page.locator("#accountMode").textContent()).includes("Гостевой доступ"));
-  await page.locator("#accountProfileLink").click();
-  await page.waitForSelector(".profile-identity");
-  check("гость: предупреждение", (await page.locator(".notice.warn").textContent()).includes("Гостевой доступ"));
-  await page.locator(".profile-side-nav .danger-link").click();
-  await page.waitForSelector("#authScreen", {state: "visible"});
-  check("гость: запись не попала в профиль", await page.evaluate(() => localStorage.getItem("viniti.account.v1")) === null);
-  await context.close();
-}
-
-// 4. Недоступный localStorage: вход работает в памяти
+// 3. Недоступный localStorage: серверная сессия работает, профиль в памяти
 {
   const {context, page, errors} = await fresh({width: 1280, height: 800}, async ctx => {
     await ctx.addInitScript(() => {
@@ -165,14 +154,14 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
   await page.goto(`${base}/`, {waitUntil: "networkidle"});
   check("хранилище: экран входа", await page.locator("#authScreen").isVisible());
   check("хранилище: честное предупреждение", await page.locator("#authStorageNote").isVisible());
-  await register(page);
+  await register(page, "Третий Пользователь", "storage@viniti.ru");
   check("хранилище: регистрация работает в памяти", await page.locator("#wizard").isVisible());
-  check("хранилище: каталог доступен", (await page.locator("#accountName").textContent()).trim() === "Илья");
+  check("хранилище: каталог доступен", (await page.locator("#accountName").textContent()).trim() === "Третий");
   check("хранилище: нет ошибок в консоли", errors.length === 0, errors.join(" | "));
   await context.close();
 }
 
-// 5. Мобильная ширина
+// 4. Мобильная ширина
 {
   const {context, page} = await fresh({width: 375, height: 812});
   await page.goto(`${base}/`, {waitUntil: "networkidle"});
@@ -180,7 +169,7 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check("мобильный: нет горизонтального скролла", overflow <= 0, String(overflow));
   await page.screenshot({path: "/tmp/viniti-auth-mobile.png"});
-  await register(page);
+  await register(page, "Мобильный Пользователь", "mobile@viniti.ru");
   await page.locator("#accountButton").click();
   const box = await page.locator("#accountMenu").boundingBox();
   check("мобильный: поповер внутри экрана", box.x >= 0 && box.x + box.width <= 375, JSON.stringify(box));

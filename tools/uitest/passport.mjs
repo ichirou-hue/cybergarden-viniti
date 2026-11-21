@@ -146,8 +146,7 @@ await step("демо", async () => {
   check("демо: в герое импорт и PDF", (await heroActions()).some(text => text.includes("Импорт паспорта JSON")) &&
     (await heroActions()).some(text => text.includes("Привязать исходный PDF")), (await heroActions()).join(" | "));
   check("демо: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
-  check("демо: вкладка RAG на месте и не активна", await page.locator("#tracks .track").first().isVisible() &&
-    await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
+  check("демо: в шапке только «Паспорт»", await page.locator(".track-switch .track").count() === 1);
   check("демо: «Паспорт» отмечен aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   check("демо: таблица в .results", await page.locator("#view .workspace .results table").count() === 1);
   check("демо: .table-wrap больше нет", await page.locator("#view .table-wrap").count() === 0);
@@ -468,14 +467,14 @@ await step("вложенный source", async () => {
 /* 8. Навигация, hidden-контролы и hash-роутинг */
 await step("навигация", async () => {
   await open("#/catalog?track=rag&q=D014");
-  check("каталог: контролы видны", await page.locator("#upload").isVisible() && await page.locator("#tracks").isVisible());
+  check("каталог: контролы и паспорт видны", await page.locator("#upload").isVisible() &&
+    await page.locator("#passportLink").isVisible());
   await page.click("#passportLink");
   await page.waitForTimeout(400);
   check("навигация: каталог → паспорт", page.url().endsWith("#/passport"), page.url());
   check("паспорт: H1", (await h1()) === "Паспорт публикации.");
   check("паспорт: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
-  check("паспорт: вкладка RAG осталась", await page.locator("#tracks .track").first().isVisible() &&
-    await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
+  check("паспорт: в шапке только «Паспорт»", await page.locator(".track-switch .track").count() === 1);
   check("паспорт: aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   await page.goBack();
   await page.waitForTimeout(500);
@@ -501,10 +500,10 @@ await step("навигация", async () => {
   check("навигация: ?track=solar не блокирует паспорт", (await h1()) === "Паспорт публикации." &&
     !(await page.locator("#view").innerText()).includes("Раздел «Solar»"), (await page.locator("#view").innerText()).slice(0, 120));
   await open("#/passport");
-  await page.click('#tracks .track:has-text("RAG")');
+  await page.click(".brand");
   await page.waitForTimeout(400);
-  check("паспорт → каталог по вкладке RAG", page.url().includes("#/catalog?track=rag"), page.url());
-  check("каталог: RAG снова активен", (await page.locator("#tracks .track[aria-current=\"page\"]").innerText()).trim() === "RAG");
+  check("логотип ведёт на загрузку", (await page.locator("#wizard").isVisible()) &&
+    /#\/$/.test(page.url()), page.url());
   await open("#/nope");
   check("навигация: неизвестный путь", (await page.locator("#view").innerText()).includes("Страница не найдена"));
 });

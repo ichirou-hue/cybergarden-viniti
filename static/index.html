@@ -8,18 +8,9 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/auth.css">
   <script>
-    // Без активного аккаунта сразу показываем экран входа, чтобы не мелькал
-    // каталог. Ключи совпадают с auth.js; битая запись тоже ведёт на вход.
-    try {
-      const stored = localStorage.getItem("viniti.account.v1");
-      const signedOut = localStorage.getItem("viniti.session.v1") === "out";
-      const account = stored ? JSON.parse(stored) : null;
-      if (!account || !account.name || signedOut) {
-        document.documentElement.classList.add("auth-locked");
-      }
-    } catch (error) {
-      document.documentElement.classList.add("auth-locked");
-    }
+    // Серверную сессию проверяет app.js через /api/auth/me. Пока ответа нет,
+    // каталог не показываем, чтобы не мелькали пустые таблицы.
+    document.documentElement.classList.add("auth-locked");
   </script>
   <script type="module" src="/app.js"></script>
 </head>
@@ -60,7 +51,7 @@
         <div class="auth-card-head">
           <p class="auth-eyebrow">Аккаунт исследователя</p>
           <h2>Начните работу</h2>
-          <p class="muted">Регистрация занимает минуту. Данные остаются в этом браузере.</p>
+          <p class="muted">Регистрация занимает минуту. Пароль проверяет сервер ВИНИТИ.</p>
         </div>
 
         <div class="auth-tabs" role="tablist" aria-label="Регистрация или вход" data-tabs>
@@ -95,7 +86,7 @@
                 <input type="password" id="regPassword" name="password" autocomplete="new-password" placeholder="Не короче 8 символов" aria-describedby="regPassword-hint regPassword-error">
                 <button type="button" class="auth-reveal" id="regPassBtn" data-toggle-pass="regPassword" aria-pressed="false" aria-label="Показать пароль">Показать</button>
               </div>
-              <p class="auth-hint" id="regPassword-hint">Минимум 8 символов. Пароль не сохраняется.</p>
+              <p class="auth-hint" id="regPassword-hint">Минимум 8 символов. На сервере хранится только хэш пароля.</p>
               <p class="auth-error" id="regPassword-error" hidden></p>
             </div>
             <label class="auth-consent" for="regConsent">
@@ -127,15 +118,8 @@
           </form>
         </div>
 
-        <div class="auth-alt">
-          <button type="button" class="auth-btn quiet" id="guestBtn">
-            Продолжить без аккаунта
-            <span class="arrow" aria-hidden="true">→</span>
-          </button>
-          <p>Смотреть каталог в гостевом режиме, без регистрации</p>
-        </div>
-        <p class="auth-note is-warn" id="authStorageNote" hidden><strong>Хранение недоступно.</strong> Браузер запрещает localStorage: аккаунт будет жить только до перезагрузки страницы.</p>
-        <p class="auth-note"><strong>Прототип.</strong> Пароль не проверяется, аккаунт хранится только в этом браузере.</p>
+        <p class="auth-note is-warn" id="authStorageNote" hidden><strong>Хранение недоступно.</strong> Браузер запрещает localStorage: сессия на сервере работает, но имя и организация не сохранятся до перезагрузки.</p>
+        <p class="auth-note"><strong>Прототип.</strong> Пароль проверяется на сервере, сессия живёт в HttpOnly-cookie, профиль (имя, организация) остаётся в этом браузере.</p>
       </div>
     </div>
   </div>
@@ -143,7 +127,7 @@
 
 <header class="top">
   <div class="wrap masthead">
-    <a class="brand" href="#/catalog"><span class="mark" aria-hidden="true">✳</span>ВИНИТИ РАН<span>CyberGarden</span></a>
+    <a class="brand" href="#/"><span class="mark" aria-hidden="true">✳</span>ВИНИТИ РАН<span>CyberGarden</span></a>
     <div class="account" id="account" hidden>
       <button type="button" class="account-button" id="accountButton" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" aria-label="Меню профиля">
         <span class="account-avatar" id="accountAvatar" aria-hidden="true">Г</span>
@@ -170,9 +154,7 @@
 </header>
 <div class="wrap toolbar">
   <div class="track-switch" role="group" aria-label="Разделы">
-    <div class="tracks" id="tracks"></div>
     <a class="track" id="passportLink" href="#/passport">Паспорт</a>
-    <a class="track" href="/manual-profile">Ручной профиль</a>
   </div>
   <form id="upload" class="upload">
     <label class="file"><span id="fileName">Загрузить PDF</span>

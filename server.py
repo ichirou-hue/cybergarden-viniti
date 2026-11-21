@@ -13,6 +13,7 @@ import argparse
 import csv
 from hashlib import sha256
 import io
+import hmac
 import json
 import logging
 import os
@@ -28,6 +29,7 @@ import uuid
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import db as storage
+import auth
 import export_csv as result_export
 import profiles_store
 import profile_assistant
@@ -137,15 +139,218 @@ class Handler(BaseHTTPRequestHandler):
 
     def data_connection(self):
         path = getattr(self.server, "data", None)
+        message = ("База результатов не подключена. Запустите python db.py --init и "
+                   "python import_gold.py, затем перезапустите сервер.")
         if path is None or not Path(path).exists():
-            self.error("База результатов не подключена. Запустите python db.py --init и "
-                       "python import_gold.py, затем перезапустите сервер.", 503)
+            self.error(message, 503)
             return None
-        return storage.connect(path)
+        try:
+            conn = storage.connect(path)
+        except (SystemExit, sqlite3.Error):
+            self.error(message, 503)
+            return None
+        # The same file now holds the auth tables, so an auth-only database
+        # (created by the first registration) must not be mistaken for an
+        # initialized results database.
+        try:
+            has_documents = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents'"
+            ).fetchone()
+        except sqlite3.Error:
+            has_documents = None
+        if has_documents is None:
+            conn.close()
+            self.error(message, 503)
+            return None
+        return conn
+
+    # --- cookie authentication -------------------------------------------
+    def auth_store(self):
+        store = getattr(self.server, "auth", None)
+        if store is not None:
+            return store
+        path = getattr(self.server, "data", None)
+        if path is None or not Path(path).exists():
+            return None
+        store = auth.Auth(path)
+        self.server.auth = store
+        return store
+
+    def session_token(self):
+        for item in (self.headers.get("Cookie") or "").split(";"):
+            name, separator, value = item.strip().partition("=")
+            if separator and name == auth.COOKIE_NAME and value:
+                return value
+        return None
+
+    def current_session(self):
+        store = self.auth_store()
+        token = self.session_token()
+        if store is not None:
+            return store.authenticate(token) if token else None
+        return None
+
+    # The built-in demo card is common to every signed-in account. Owned
+    # uploads stay private, but the demo is a fixed card that two accounts can
+    # open without the content-addressed ingest answering 409 to the second one.
+    SHARED_DOCUMENTS = frozenset({"rag:demo"})
+
+    @classmethod
+    def shared_document(cls, document_id):
+        return document_id in cls.SHARED_DOCUMENTS
+
+    def owns_document(self, area, document_id):
+        session = self.current_session()
+        store = self.auth_store()
+        if session is None or store is None:
+            return False
+        if self.shared_document(document_id):
+            return True
+        return store.owns_document(area, document_id, session["user"]["id"])
+
+    def visible_documents(self, area, items):
+        """Filter a catalog slice without one SQLite round-trip per document."""
+        store = self.auth_store()
+        if store is None:
+            return items
+        session = self.current_session()
+        allowed = store.owned_documents(area, session["user"]["id"]) if session else set()
+        return [item for item in items
+                if self.shared_document(item.get("document_id"))
+                or item.get("document_id") in allowed]
+
+    def claim_uploaded_document(self, area, document_id, session):
+        """True when ``session`` may receive the ingested document.
+
+        A content-addressed ingest returns the document already stored for a
+        repeated upload.  When another user owns it, answering 201 would hand
+        back a card that ``owns_document`` then hides, so the caller must
+        refuse instead.  Without an auth store the server is anonymous and
+        ownership is not enforced.
+        """
+        store = self.auth_store()
+        if store is None or session is None or not document_id:
+            return True
+        if self.shared_document(document_id):
+            return True
+        return store.claim_document(area, document_id, session["user"]["id"]) != "conflict"
+
+    def same_origin(self):
+        host = (self.headers.get("Host") or "").lower()
+        for header in ("Origin", "Referer"):
+            value = self.headers.get(header)
+            if not value:
+                continue
+            parsed = urlsplit(value)
+            return parsed.netloc.lower() == host and parsed.scheme in {"http", "https"}
+        return True
+
+    def require_user(self, csrf=True):
+        if self.auth_store() is None:
+            self.error("Требуется вход.", 401)
+            return None
+        session = self.current_session()
+        if session is None:
+            self.error("Требуется вход.", 401)
+            return None
+        if not self.same_origin():
+            self.error("Запрос с другого источника отклонён.", 403)
+            return None
+        if csrf and not hmac.compare_digest(session["csrf_token"], self.headers.get("X-CSRF-Token", "")):
+            self.error("Неверный CSRF-токен.", 403)
+            return None
+        return session
+
+    def auth_payload(self):
+        data = self.payload(64 * 1024, "application/json")
+        if data is None:
+            return None
+        try:
+            value = json.loads(data)
+        except (UnicodeError, json.JSONDecodeError):
+            self.error("Тело должно быть корректным JSON в UTF-8.", 400)
+            return None
+        if not isinstance(value, dict):
+            self.error("Ожидается JSON-объект.", 400)
+            return None
+        return value
+
+    def auth_register(self):
+        if not self.same_origin():
+            self.error("Запрос с другого источника отклонён.", 403); return
+        store = self.auth_store()
+        if store is None:
+            self.error("Аутентификация не настроена.", 503); return
+        value = self.auth_payload()
+        if value is None: return
+        try:
+            user = store.register(value.get("username"), value.get("password"))
+            token, user, csrf_token, expires_at = store.login(value.get("username"), value.get("password"), self.client_address[0], self.headers.get("User-Agent", ""), limit=False)
+        except auth.AuthError as error:
+            self.error(error.message, error.status); return
+        self.send_json({"user": user, "csrf_token": csrf_token, "expires_at": expires_at}, 201,
+                       Set_Cookie=auth.cookie_header(token, store.cookie_secure, store.session_ttl))
+
+    def auth_login(self):
+        if not self.same_origin():
+            self.error("Запрос с другого источника отклонён.", 403); return
+        store = self.auth_store()
+        if store is None:
+            self.error("Аутентификация не настроена.", 503); return
+        value = self.auth_payload()
+        if value is None: return
+        try:
+            token, user, csrf_token, expires_at = store.login(value.get("username"), value.get("password"), self.client_address[0], self.headers.get("User-Agent", ""), self.session_token())
+        except auth.AuthError as error:
+            self.error(error.message, error.status); return
+        self.send_json({"user": user, "csrf_token": csrf_token, "expires_at": expires_at},
+                       Set_Cookie=auth.cookie_header(token, store.cookie_secure, store.session_ttl))
+
+    def auth_logout(self):
+        session = self.current_session()
+        if session is not None:
+            if not self.same_origin() or not hmac.compare_digest(session["csrf_token"], self.headers.get("X-CSRF-Token", "")):
+                self.error("Неверный CSRF-токен.", 403); return
+            store = self.auth_store(); store.logout(session["token"])
+        self.send_json({"ok": True}, Set_Cookie=auth.clear_cookie())
 
     # --- профили ручного этапа ------------------------------------------
     def profiles_root(self):
-        return getattr(self.server, "profiles_dir", None)
+        configured = getattr(self.server, "profiles_dir", None)
+        return Path(configured) if configured is not None else ROOT / "data" / "profiles"
+
+    def profile_root_for(self, session):
+        return self.profiles_root() / session["user"]["id"]
+
+    def profile_scope(self, name, *, require_owner=True):
+        if name in profiles_store.BUILTINS:
+            return self.profiles_root()
+        session = self.current_session()
+        if session is None:
+            if require_owner:
+                self.error("Профиль не найден.", 404)
+            return None
+        return self.profile_root_for(session)
+
+    def profile_roots(self, name):
+        """Read roots in order: the user's folder, then the pre-auth flat one."""
+        root = self.profile_scope(name)
+        if root is None:
+            return []
+        roots = [Path(root)]
+        legacy = self.profiles_root()
+        if legacy is not None and Path(legacy) not in roots:
+            roots.append(Path(legacy))
+        return roots
+
+    def load_profile(self, name):
+        last = None
+        for root in self.profile_roots(name):
+            try:
+                return profiles_store.load(name, root=root)
+            except KeyError as error:
+                last = error
+        raise last or KeyError(name)
 
     def parses_root(self):
         configured = getattr(self.server, "parse_root", None)
@@ -171,14 +376,27 @@ class Handler(BaseHTTPRequestHandler):
     def profiles_get(self, path):
         segments = [unquote(part) for part in path.split("/") if part]
         if segments == ["api", "profiles"]:
-            self.send_json({"profiles": profiles_store.list_profiles(root=self.profiles_root())})
+            session = self.current_session()
+            if not session:
+                self.send_json({"profiles": profiles_store.list_profiles(
+                    root=self.profiles_root(), include_users=False)})
+                return
+            items = profiles_store.list_profiles(root=self.profile_root_for(session))
+            known = {item["id"] for item in items}
+            # Profiles saved before per-user folders stay readable and listed.
+            for item in profiles_store.list_profiles(root=self.profiles_root()):
+                if item.get("source") != "builtin" and item["id"] not in known:
+                    items.append(item)
+            self.send_json({"profiles": items})
             return
         if len(segments) != 3:
             self.error("Маршрут не найден.", 404)
             return
         name = segments[2]
+        if not self.profile_roots(name):
+            return
         try:
-            profile, source, _ = profiles_store.load(name, root=self.profiles_root())
+            profile, source, _ = self.load_profile(name)
         except KeyError:
             self.error("Профиль не найден.", 404)
             return
@@ -200,6 +418,10 @@ class Handler(BaseHTTPRequestHandler):
         if name in profiles_store.BUILTINS:
             self.error("Встроенный профиль нельзя перезаписать; сохраните копию под другим id.", 409)
             return
+        session = self.current_session()
+        if session is None:
+            self.error("Профиль не найден.", 404)
+            return
         data = self.payload(profiles_store.MAX_BYTES, "application/json")
         if data is None:
             return
@@ -209,7 +431,7 @@ class Handler(BaseHTTPRequestHandler):
             self.error("Тело должно быть корректным JSON в UTF-8.", 400)
             return
         try:
-            saved = profiles_store.save(name, document, root=self.profiles_root())
+            saved = profiles_store.save(name, document, root=self.profile_root_for(session))
         except ValueError as error:
             self.error(str(error), 422)
             return
@@ -221,8 +443,12 @@ class Handler(BaseHTTPRequestHandler):
             self.error("Маршрут не найден.", 404)
             return
         name = segments[2]
+        session = self.current_session()
+        if session is None:
+            self.error("Профиль не найден.", 404)
+            return
         try:
-            profiles_store.delete(name, root=self.profiles_root())
+            profiles_store.delete(name, root=self.profile_root_for(session))
         except KeyError:
             self.error("Профиль не найден.", 404)
             return
@@ -232,7 +458,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"deleted": name})
 
     # --- разбор PDF без LLM ---------------------------------------------
-    def parse_post(self):
+    def parse_post(self, session=None):
+        if session is None:
+            session = self.current_session()
+            if session is None:
+                self.error("Требуется вход.", 401)
+                return
         data = self.payload(PARSE_MAX_BYTES, "application/pdf")
         if data is None:
             return
@@ -257,7 +488,9 @@ class Handler(BaseHTTPRequestHandler):
             self.error("Извлечение данных графиков требует парсер docling.", 400)
             return
         try:
-            _, source, profile_path = profiles_store.load(name, root=self.profiles_root())
+            if not self.profile_roots(name):
+                return
+            _, source, profile_path = self.load_profile(name)
         except KeyError:
             self.error("Профиль не найден.", 404)
             return
@@ -282,6 +515,7 @@ class Handler(BaseHTTPRequestHandler):
             "parser": parser, "ocr": ocr if parser == "docling" else "off", "charts": charts,
             "filename": filename, "sha256": sha256(data).hexdigest(), "bytes": len(data),
             "created_at": round(time(), 3), "updated_at": round(time(), 3),
+            "owner_user_id": session["user"]["id"],
         }
         self.write_job(folder, job)
         threading.Thread(
@@ -377,7 +611,12 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             log.warning("Не удалось записать parse.log")
 
-    def parse_get(self, path):
+    def parse_get(self, path, session=None):
+        if session is None:
+            session = self.current_session()
+        if session is None:
+            self.error("Разбор не найден.", 404)
+            return
         segments = [unquote(part) for part in path.split("/") if part]
         if len(segments) < 3 or not PARSE_ID.fullmatch(segments[2]):
             self.error("Разбор не найден.", 404)
@@ -385,6 +624,9 @@ class Handler(BaseHTTPRequestHandler):
         folder = self.parses_root() / segments[2]
         job = self.read_job(folder)
         if not job:
+            self.error("Разбор не найден.", 404)
+            return
+        if job.get("owner_user_id") != session["user"]["id"]:
             self.error("Разбор не найден.", 404)
             return
         started = job.get("started_at", job.get("created_at", 0))
@@ -551,6 +793,21 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parts.query)
         single = {key: values[0] for key, values in query.items()}
 
+        if path == "/api/auth/me":
+            session = self.current_session()
+            if session is None:
+                self.send_json({"user": None})
+            else:
+                self.send_json({"user": session["user"], "csrf_token": session["csrf_token"], "expires_at": session["expires_at"]})
+            return
+        if path == "/api/auth/csrf":
+            session = self.current_session()
+            if session is None:
+                self.error("Требуется вход.", 401)
+            else:
+                self.send_json({"csrf_token": session["csrf_token"]})
+            return
+
         target = static_file(path)
         if target is not None:
             self.send_data(target.read_bytes(), STATIC_TYPES[target.suffix.lower()])
@@ -630,7 +887,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/api/parse/"):
-            self.parse_get(path)
+            self.parse_get(path, self.current_session())
             return
 
         if path == "/api/documents" or path.startswith("/api/documents/"):
@@ -642,7 +899,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/papers":
-            self.send_json(self.server.library.list())
+            session = self.require_user(csrf=False)
+            if session is None:
+                return
+            store = self.auth_store()
+            allowed = store.owned_documents("rag", session["user"]["id"])
+            items = [item for item in self.server.library.list()
+                     if item.get("id") in allowed or self.shared_document(item.get("id"))]
+            self.send_json(items)
             return
 
         if path.startswith("/api/papers/"):
@@ -662,6 +926,7 @@ class Handler(BaseHTTPRequestHandler):
             items = self.rag_store().list(single.get("track", "rag"))
             if single.get("track", "rag") == "solar":
                 items = self.solar_store().list()
+            items = self.visible_documents(single.get("track", "rag"), items)
             q = (single.get("q") or "").strip().lower()
             if q:
                 items = [
@@ -692,6 +957,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         document_id = segments[2]
+        store = self.auth_store()
+        if store is not None:
+            track = "solar" if document_id.startswith("solar:") else "rag"
+            if not self.owns_document(track, document_id):
+                self.error("Документ не найден.", 404)
+                return
         if document_id.startswith("solar:"):
             self.solar_documents_get(document_id, segments[3:], query, single)
             return
@@ -905,6 +1176,7 @@ class Handler(BaseHTTPRequestHandler):
     def jobs(self, single):
         track = single.get("track", "rag")
         docs = self.solar_store().list() if track == "solar" else self.rag_store().list(track)
+        docs = self.visible_documents(track, docs)
         done = sum(doc.get("status") == "done" for doc in docs)
         partial = sum(doc.get("status") == "partial" for doc in docs)
         failed = sum(doc.get("status") == "failed" for doc in docs)
@@ -926,8 +1198,18 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def legacy_paper(self, path, raw_query):
+        match = PAPER.fullmatch(path)
+        if match is None:
+            self.error("Документ не найден.", 404)
+            return
+        paper_id = match.group(1)
+        # Without an auth store the server runs anonymously (tests, old demo),
+        # and ownership is not enforced anywhere else; keep that mode readable.
+        if self.auth_store() is not None and not self.owns_document("rag", paper_id):
+            self.error("Документ не найден.", 404)
+            return
         try:
-            paper_id, resource, key = PAPER.fullmatch(path).groups()
+            paper_id, resource, key = match.groups()
             if not resource:
                 self.send_json(
                     self.server.library.get(paper_id),
@@ -956,7 +1238,15 @@ class Handler(BaseHTTPRequestHandler):
     # --- POST -----------------------------------------------------------
     def do_POST(self):
         path = urlsplit(self.path).path
+        if path == "/api/auth/register":
+            self.auth_register(); return
+        if path == "/api/auth/login":
+            self.auth_login(); return
+        if path == "/api/auth/logout":
+            self.auth_logout(); return
         if path == "/api/profile/assist":
+            if self.require_user() is None:
+                return
             raw = self.payload(64 * 1024, "application/json")
             if raw is None:
                 return
@@ -970,6 +1260,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(result)
             return
         if path == "/api/profile/source":
+            if self.require_user() is None: return
             data = self.payload(MAX_BYTES, "application/pdf")
             if data is not None:
                 try:
@@ -985,37 +1276,47 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(result)
             return
         if path in {"/api/documents", "/api/demo"}:
-            self.documents_post(path)
+            session = self.require_user()
+            if session is not None:
+                self.documents_post(path, session)
             return
         if path == "/api/documents/stream":
-            self.documents_stream()
+            session = self.require_user()
+            if session is not None:
+                self.documents_stream(session)
             return
         if path.startswith("/api/profiles/"):
-            self.profiles_put(path)
+            if self.require_user() is not None:
+                self.profiles_put(path)
             return
         if path == "/api/parse":
-            self.parse_post()
+            session = self.require_user()
+            if session is not None:
+                self.parse_post(session)
             return
         if path == "/api/papers":
-            self.legacy_upload()
+            if self.require_user() is not None:
+                self.legacy_upload()
             return
         self.send_json({"error": "Маршрут не найден."}, 404)
 
     def do_PUT(self):
         path = urlsplit(self.path).path
         if path.startswith("/api/profiles/"):
-            self.profiles_put(path)
+            if self.require_user() is not None:
+                self.profiles_put(path)
             return
         self.send_json({"error": "Маршрут не найден."}, 404)
 
     def do_DELETE(self):
         path = urlsplit(self.path).path
         if path.startswith("/api/profiles/"):
-            self.profiles_delete(path)
+            if self.require_user() is not None:
+                self.profiles_delete(path)
             return
         self.send_json({"error": "Маршрут не найден."}, 404)
 
-    def documents_stream(self):
+    def documents_stream(self, session):
         track = self.headers.get("X-Track", "rag").strip().lower()
         if track not in AREAS:
             self.error("Недопустимая область. Допустимы: rag, solar.", 400)
@@ -1053,14 +1354,19 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.solar_store().ingest(name, data, progress=emit)
             else:
                 result = self.rag_store().ingest(name, data, track=track, progress=emit)
-            emit(4, "Обработка завершена", result=result)
+            document_id = result.get("document_id") if isinstance(result, dict) else None
+            if not self.claim_uploaded_document(track, document_id, session):
+                emit(0, "Документ уже загружен другим пользователем.",
+                     error="Документ с таким содержимым уже загружен другим пользователем.")
+            else:
+                emit(4, "Обработка завершена", result=result)
         except ValueError as error:
             emit(0, "Ошибка обработки", error=str(error))
         except Exception:
             log.exception("Streaming PDF ingest failed")
             emit(0, "Ошибка обработки", error="Ошибка обработки PDF. Подробности в консоли сервера.")
 
-    def documents_post(self, path):
+    def documents_post(self, path, session):
         track = self.headers.get("X-Track", "rag").strip().lower()
         max_bytes = SOLAR_MAX_BYTES if track == "solar" else RAG_MAX_BYTES
         try:
@@ -1094,6 +1400,9 @@ class Handler(BaseHTTPRequestHandler):
                 log.exception("RAG ingest failed")
                 self.error("Ошибка обработки PDF. Подробности в консоли сервера.", 500)
                 return
+            if not self.claim_uploaded_document(track, summary.get("document_id"), session):
+                self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
+                return
             self.send_json(summary, 201)
             return
 
@@ -1109,6 +1418,9 @@ class Handler(BaseHTTPRequestHandler):
             publication_id="DEMO",
             forced_id="rag:demo",
         )
+        if not self.claim_uploaded_document("rag", summary.get("document_id"), session):
+            self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
+            return
         self.send_json(summary, 201)
 
     def legacy_upload(self):
@@ -1133,6 +1445,11 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("PDF processing failed")
             self.send_json({"error": "Ошибка обработки PDF. Подробности в консоли сервера."}, 500)
             return
+        session = self.current_session()
+        document_id = sha256(data).hexdigest()
+        if not self.claim_uploaded_document("rag", document_id, session):
+            self.send_json({"error": "Документ с таким содержимым уже загружен другим пользователем."}, 409)
+            return
         self.send_json(result, 201)
 
 
@@ -1155,6 +1472,7 @@ def main():
         server.library = Library(args.db)
         server.rag_store = RagStore(args.db)
         server.data = args.data
+        server.auth = auth.Auth(args.data)
         server.profiles_dir = ROOT / "data" / "profiles"
         server.parse_root = ROOT / "data" / "parses"
         server.parse_slots = threading.BoundedSemaphore(2)
