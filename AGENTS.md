@@ -120,6 +120,25 @@ pdf_source.extract(bytes)            текст страниц (pypdf), табл
 (счётчики по областям и таблицам из паспорта), плюс старый `/api/papers` прототипа.
 Ошибка в имени поля или в фильтре - 400 с перечнем допустимых, отсутствие базы - 503.
 
+Ручной этап профилей живёт отдельно от паспорта и базы:
+
+- `profiles_store.py` читает встроенные `profiles/*.json` и пользовательские
+  `data/profiles/<id>.json`, проверяет их через `extraction_core.compile_profile`;
+  `GET /api/profiles`, `GET|PUT|DELETE /api/profiles/<id>`. Встроенные профили
+  перезаписывать и удалять нельзя, для изменения нужна копия с новым id.
+- `parse_document.py` - разбор PDF по профилю без LLM: готовит источники, таблицы,
+  figures и offline-кандидаты, пишет комплект через `extraction_core.export_result`.
+  `POST /api/parse` (PDF + `X-Profile`, `X-Parser`, `X-OCR`, `X-Charts`) запускает
+  его фоновым процессом; `GET /api/parse/<id>`, `/result` и `/file/<path>` отдают
+  статус, JSON и артефакты. Результат лежит в `data/parses/<id>/`, исходный PDF -
+  рядом как `input.pdf`; `job.json` обновляется атомарно.
+- Для `--parser docling` сервер запускает отдельный интерпретатор из
+  `VINITI_DOCLING_PYTHON` (иначе `sys.executable`). OCR и локальный chart2csv
+  требуют установленного Docling/Tesseract и весов моделей; без них job завершится
+  ошибкой, а не молчаливым частичным результатом. `VINITI_PARSE_TIMEOUT` задаёт
+  лимит секунд на один разбор (по умолчанию 1800).
+- Это пока разбор, а не извлечение структуры: LLM-этап и LLM-аудит не подключены.
+
 ## Схема БД
 
 Один файл `data/viniti.sqlite3` держит обе области. Таблицы области называются

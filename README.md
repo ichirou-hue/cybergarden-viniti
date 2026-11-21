@@ -43,6 +43,16 @@ python -m venv .venv
 
 Здесь работают загрузка и разбор PDF, каталог `/#/`, карточка статьи `/#/doc/…` и экран паспорта `/#/passport`. Каталог и карточку наполняет RAG-модуль `rag/` через `/api/documents…` (контракт `docs/adr/0008-rag-catalog-ui.md`); результаты хранятся в той же SQLite-базе.
 
+### Ручной этап профилей
+
+Серверная часть ручного профиля уже доступна без отдельного экрана:
+
+- `GET /api/profiles`, `GET|PUT|DELETE /api/profiles/<id>` - встроенные `solar`/`custom-example` и пользовательские профили в `data/profiles/`;
+- `POST /api/parse` - PDF и заголовки `X-Profile`, `X-Parser` (`pdfplumber` или `docling`), `X-OCR`, `X-Charts`; разбор идёт в фоне;
+- `GET /api/parse/<id>`, `/result`, `/file/candidates.csv`, `/file/assets/...` - статус, JSON и артефакты.
+
+Это разбор без LLM: текст, таблицы, figures и offline-кандидаты. Для OCR и локального chart2csv задайте `VINITI_DOCLING_PYTHON` на Python с `requirements-docling.txt`; без Docling работает `pdfplumber`. Экран профиля появится после выбора прототипа.
+
 ### Фронтенд
 
 Отдельного dev-сервера и сборки нет. Фронтенд — это `static/index.html` и модули `static/*.js`; он открывается с того же адреса, что и API, поэтому CORS не нужен.

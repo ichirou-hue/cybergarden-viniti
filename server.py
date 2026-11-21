@@ -11,17 +11,25 @@
 
 import argparse
 import csv
+from hashlib import sha256
 import io
 import json
 import logging
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import sqlite3
+import subprocess
+import sys
+import threading
+from time import time
+import uuid
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import db as storage
 import export_csv as result_export
+import profiles_store
 
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
@@ -51,6 +59,14 @@ STATIC_TYPES = {
 }
 AREAS = {"solar", "rag"}
 JOB_STATUSES = ("ok", "error", "skipped", "running", "queued")
+PARSE_MAX_BYTES = 40 * 1024 * 1024
+PARSE_ID = re.compile(r"[0-9a-f]{16}")
+try:
+    PARSE_TIMEOUT = max(1, int(os.environ.get("VINITI_PARSE_TIMEOUT", "1800")))
+except ValueError:
+    PARSE_TIMEOUT = 1800
+PARSE_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}")
+PARSE_KINDS = {"tables", "figures", "charts"}
 
 
 def static_file(path):
@@ -120,6 +136,298 @@ class Handler(BaseHTTPRequestHandler):
                        "python import_gold.py, затем перезапустите сервер.", 503)
             return None
         return storage.connect(path)
+
+    # --- профили ручного этапа ------------------------------------------
+    def profiles_root(self):
+        return getattr(self.server, "profiles_dir", None)
+
+    def parses_root(self):
+        configured = getattr(self.server, "parse_root", None)
+        return Path(configured) if configured is not None else ROOT / "data" / "parses"
+
+    def payload(self, limit, media=None):
+        if media and self.headers.get_content_type() != media:
+            self.error(f"Ожидается {media}.", 415)
+            return None
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            self.error("Неверная длина тела запроса.", 400)
+            return None
+        if length <= 0:
+            self.error("Пустое тело запроса.", 413)
+            return None
+        if length > limit:
+            self.error(f"Тело больше {limit // (1024 * 1024)} МиБ.", 413)
+            return None
+        return self.rfile.read(length)
+
+    def profiles_get(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if segments == ["api", "profiles"]:
+            self.send_json({"profiles": profiles_store.list_profiles(root=self.profiles_root())})
+            return
+        if len(segments) != 3:
+            self.error("Маршрут не найден.", 404)
+            return
+        name = segments[2]
+        try:
+            profile, source, _ = profiles_store.load(name, root=self.profiles_root())
+        except KeyError:
+            self.error("Профиль не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 422)
+            return
+        self.send_json({
+            "profile": profile,
+            "source": source,
+            "summary": profiles_store.summary(profile, source=source, name=name),
+        })
+
+    def profiles_put(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if len(segments) != 3:
+            self.error("Маршрут не найден.", 404)
+            return
+        name = segments[2]
+        if name in profiles_store.BUILTINS:
+            self.error("Встроенный профиль нельзя перезаписать; сохраните копию под другим id.", 409)
+            return
+        data = self.payload(profiles_store.MAX_BYTES, "application/json")
+        if data is None:
+            return
+        try:
+            document = json.loads(data)
+        except (UnicodeError, json.JSONDecodeError):
+            self.error("Тело должно быть корректным JSON в UTF-8.", 400)
+            return
+        try:
+            saved = profiles_store.save(name, document, root=self.profiles_root())
+        except ValueError as error:
+            self.error(str(error), 422)
+            return
+        self.send_json(saved)
+
+    def profiles_delete(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if len(segments) != 3:
+            self.error("Маршрут не найден.", 404)
+            return
+        name = segments[2]
+        try:
+            profiles_store.delete(name, root=self.profiles_root())
+        except KeyError:
+            self.error("Профиль не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 409)
+            return
+        self.send_json({"deleted": name})
+
+    # --- разбор PDF без LLM ---------------------------------------------
+    def parse_post(self):
+        data = self.payload(PARSE_MAX_BYTES, "application/pdf")
+        if data is None:
+            return
+        name = (self.headers.get("X-Profile") or "solar").strip()
+        parser = (self.headers.get("X-Parser") or "pdfplumber").strip().lower()
+        ocr = (self.headers.get("X-OCR") or "auto").strip().lower()
+        raw_charts = (self.headers.get("X-Charts") or "").strip().lower()
+        if parser not in {"pdfplumber", "docling"}:
+            self.error("Парсер должен быть pdfplumber или docling.", 400)
+            return
+        if ocr not in {"auto", "full", "off"}:
+            self.error("OCR должен быть auto, full или off.", 400)
+            return
+        if parser == "pdfplumber" and ocr != "auto":
+            self.error("OCR full/off требует парсер docling.", 400)
+            return
+        if raw_charts not in {"", "0", "1", "false", "true", "no", "yes", "off", "on"}:
+            self.error("X-Charts должен быть 1 или 0.", 400)
+            return
+        charts = raw_charts in {"1", "true", "yes", "on"}
+        if charts and parser != "docling":
+            self.error("Извлечение данных графиков требует парсер docling.", 400)
+            return
+        try:
+            _, source, profile_path = profiles_store.load(name, root=self.profiles_root())
+        except KeyError:
+            self.error("Профиль не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 422)
+            return
+        filename = Path(unquote(self.headers.get("X-Filename", "article.pdf")).replace("\\", "/")).name
+        if not filename or len(filename) > 240:
+            self.error("Некорректное имя файла.", 400)
+            return
+        run_id = uuid.uuid4().hex[:16]
+        folder = self.parses_root() / run_id
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            (folder / "input.pdf").write_bytes(data)
+        except OSError:
+            log.exception("Не удалось создать каталог разбора")
+            self.error("Не удалось сохранить PDF для разбора.", 500)
+            return
+        job = {
+            "id": run_id, "status": "queued", "profile": name, "profile_source": source,
+            "parser": parser, "ocr": ocr if parser == "docling" else "off", "charts": charts,
+            "filename": filename, "sha256": sha256(data).hexdigest(), "bytes": len(data),
+            "created_at": round(time(), 3), "updated_at": round(time(), 3),
+        }
+        self.write_job(folder, job)
+        threading.Thread(
+            target=self.run_parse,
+            args=(folder, profile_path, parser, ocr, charts),
+            daemon=True,
+        ).start()
+        self.send_json(job, 202)
+
+    def read_job(self, folder):
+        try:
+            return json.loads((folder / "job.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def write_job(self, folder, job):
+        temporary = folder / f".job-{uuid.uuid4().hex}.json"
+        temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        os.replace(temporary, folder / "job.json")
+
+    def run_parse(self, folder, profile_path, parser, ocr, charts):
+        slot = getattr(self.server, "docling_slot", None) if parser == "docling" else None
+        slots = getattr(self.server, "parse_slots", None)
+        try:
+            if slots is not None:
+                slots.acquire()
+            if slot is not None:
+                slot.acquire()
+            started = round(time(), 3)
+            job = self.read_job(folder)
+            job.update(status="running", started_at=started, updated_at=started)
+            self.write_job(folder, job)
+            interpreter = sys.executable
+            if parser == "docling":
+                interpreter = os.environ.get("VINITI_DOCLING_PYTHON") or interpreter
+            publication_id = Path(job.get("filename", "article.pdf")).stem or "article"
+            command = [
+                interpreter, "-X", "utf8", str(ROOT / "parse_document.py"), str(folder / "input.pdf"),
+                "--profile", str(profile_path), "--publication-id", publication_id,
+                "-o", str(folder / "bundle"), "--parser", parser,
+            ]
+            if parser == "docling":
+                command += ["--ocr", ocr]
+                if charts:
+                    command.append("--charts")
+            completed = subprocess.run(
+                command, cwd=ROOT, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
+            )
+            self.write_log(folder, completed)
+            job = self.read_job(folder)
+            if completed.returncode:
+                lines = (completed.stderr or completed.stdout or "").strip().splitlines()
+                message = lines[-1] if lines else "Разбор завершился с ошибкой."
+                job.update(status="error", error=message[:500], returncode=completed.returncode)
+            else:
+                lines = (completed.stdout or "").strip().splitlines()
+                try:
+                    summary = json.loads(lines[-1]) if lines else {}
+                except json.JSONDecodeError:
+                    summary = {}
+                if isinstance(summary, dict):
+                    summary.pop("output", None)
+                job.update(status="ok", summary=summary)
+            job.update(updated_at=round(time(), 3), elapsed_seconds=round(time() - started, 3))
+            self.write_job(folder, job)
+        except subprocess.TimeoutExpired:
+            job = self.read_job(folder)
+            job.update(status="error", error=f"Разбор превысил лимит {PARSE_TIMEOUT} с.",
+                       updated_at=round(time(), 3))
+            self.write_job(folder, job)
+        except OSError as error:
+            job = self.read_job(folder)
+            job.update(status="error", error=f"Не удалось запустить разбор: {error}"[:500],
+                       updated_at=round(time(), 3))
+            self.write_job(folder, job)
+        except Exception:
+            log.exception("Разбор PDF завершился внутренней ошибкой")
+            job = self.read_job(folder)
+            job.update(status="error", error="Внутренняя ошибка разбора; подробности в логе сервера.",
+                       updated_at=round(time(), 3))
+            self.write_job(folder, job)
+        finally:
+            if slot is not None:
+                slot.release()
+            if slots is not None:
+                slots.release()
+
+    def write_log(self, folder, completed):
+        text = (completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")
+        try:
+            (folder / "parse.log").write_text(text[-64000:], encoding="utf-8")
+        except OSError:
+            log.warning("Не удалось записать parse.log")
+
+    def parse_get(self, path):
+        segments = [unquote(part) for part in path.split("/") if part]
+        if len(segments) < 3 or not PARSE_ID.fullmatch(segments[2]):
+            self.error("Разбор не найден.", 404)
+            return
+        folder = self.parses_root() / segments[2]
+        job = self.read_job(folder)
+        if not job:
+            self.error("Разбор не найден.", 404)
+            return
+        started = job.get("started_at", job.get("created_at", 0))
+        if job.get("status") == "running" and time() - started > PARSE_TIMEOUT + 60:
+            # Не перезаписываем job на диске: рабочий процесс мог ещё завершиться.
+            job.update(status="error", error="Разбор прерван: процесс не завершился за отведённое время.")
+        if len(segments) == 3:
+            self.send_json(job)
+            return
+        if segments[3] == "result":
+            if job.get("status") != "ok":
+                self.error("Результат ещё не готов.", 409)
+                return
+            try:
+                data = (folder / "bundle" / "result.json").read_bytes()
+            except OSError:
+                self.error("Файл результата не найден.", 404)
+                return
+            self.send_data(data, "application/json; charset=utf-8")
+            return
+        if segments[3] == "file" and len(segments) > 4:
+            self.parse_file(folder / "bundle", segments[4:])
+            return
+        self.error("Маршрут не найден.", 404)
+
+    def parse_file(self, base, parts):
+        relative = PurePosixPath(*parts)
+        allowed = relative.parts in {("result.json",), ("parser.json",), ("candidates.csv",)}
+        if not allowed and (
+            len(relative.parts) != 3 or relative.parts[0] != "assets"
+            or relative.parts[1] not in PARSE_KINDS
+            or not PARSE_FILE.fullmatch(relative.parts[2])
+            or relative.suffix not in {".png", ".csv"}
+        ):
+            self.error("Файл не найден.", 404)
+            return
+        base = base.resolve()
+        try:
+            path = (base / relative).resolve()
+            path.relative_to(base)
+        except ValueError:
+            self.error("Файл не найден.", 404)
+            return
+        if not path.is_file():
+            self.error("Файл не найден.", 404)
+            return
+        media = {".json": "application/json; charset=utf-8", ".csv": "text/csv; charset=utf-8",
+                 ".png": "image/png"}.get(path.suffix, "application/octet-stream")
+        self.send_data(path.read_bytes(), media)
 
     def csv_slice(self, area, spec, columns, rows):
         buffer = io.StringIO(newline="")
@@ -300,6 +608,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(self.stats_document(conn))
             finally:
                 conn.close()
+            return
+
+        if path == "/api/profiles" or path.startswith("/api/profiles/"):
+            self.profiles_get(path)
+            return
+
+        if path.startswith("/api/parse/"):
+            self.parse_get(path)
             return
 
         if path == "/api/documents" or path.startswith("/api/documents/"):
@@ -513,8 +829,28 @@ class Handler(BaseHTTPRequestHandler):
         if path in {"/api/documents", "/api/demo"}:
             self.documents_post(path)
             return
+        if path.startswith("/api/profiles/"):
+            self.profiles_put(path)
+            return
+        if path == "/api/parse":
+            self.parse_post()
+            return
         if path == "/api/papers":
             self.legacy_upload()
+            return
+        self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def do_PUT(self):
+        path = urlsplit(self.path).path
+        if path.startswith("/api/profiles/"):
+            self.profiles_put(path)
+            return
+        self.send_json({"error": "Маршрут не найден."}, 404)
+
+    def do_DELETE(self):
+        path = urlsplit(self.path).path
+        if path.startswith("/api/profiles/"):
+            self.profiles_delete(path)
             return
         self.send_json({"error": "Маршрут не найден."}, 404)
 
@@ -601,6 +937,10 @@ def main():
         server.library = Library(args.db)
         server.rag_store = RagStore(args.db)
         server.data = args.data
+        server.profiles_dir = ROOT / "data" / "profiles"
+        server.parse_root = ROOT / "data" / "parses"
+        server.parse_slots = threading.BoundedSemaphore(2)
+        server.docling_slot = threading.Semaphore(1)
         print(f"http://127.0.0.1:{server.server_port}", flush=True)
         server.serve_forever()
 
