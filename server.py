@@ -11,11 +11,12 @@ from pdfminer.pdfparser import PDFSyntaxError
 
 from demo import demo_pdf
 from library import Library, MAX_BYTES
-from pdf_source import render
+from pdf_source import extract, render
 
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = {
+    "/profile.mjs": ("profile.mjs", "text/javascript; charset=utf-8"),
     "/": ("solar.html", "text/html; charset=utf-8"),
     "/rag": ("index.html", "text/html; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
@@ -84,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
             result = self.server.library.ingest("retrieval-demo.pdf", demo_pdf())
             self.send_json(result, 201)
             return
-        if self.path != "/api/papers":
+        if self.path not in {"/api/papers", "/api/profile/source"}:
             self.send_json({"error": "Маршрут не найден."}, 404)
             return
         if self.headers.get_content_type() != "application/pdf":
@@ -99,6 +100,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         data = self.rfile.read(size)
         try:
+            if self.path == "/api/profile/source":
+                if not data.startswith(b"%PDF-"):
+                    raise ValueError("Invalid PDF")
+                self.send_json(extract(data))
+                return
             result = self.server.library.ingest(
                 unquote(self.headers.get("X-Filename", "article.pdf")), data)
         except (PDFSyntaxError, PDFPasswordIncorrect, ValueError):
