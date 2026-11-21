@@ -307,10 +307,10 @@ async function readPdf(file) {
     status.textContent = job.status === "queued" ? "PDF ожидает своей очереди…"
       : "Docling распознаёт структуру, текст и формулы. Это может занять несколько минут…";
     await new Promise(resolve => setTimeout(resolve, 1000));
-    job = await parseResponse(await fetch(path, {cache: "no-store"}));
+    job = await parseResponse(await apiFetch(path, {cache: "no-store"}));
   }
   if (job.status !== "ok") throw new Error(job.error || "Разбор PDF завершился с ошибкой.");
-  const result = await parseResponse(await fetch(path + "/result", {cache: "no-store"}));
+  const result = await parseResponse(await apiFetch(path + "/result", {cache: "no-store"}));
   return {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []};
 }
 

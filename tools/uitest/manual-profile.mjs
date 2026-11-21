@@ -31,7 +31,7 @@ check("профиль: блока паспорта и его кнопок нет
 check("профиль: панель скрыта до выбора PDF", await page.locator("#profilePanel").evaluate(node => node.hidden));
 
 // Форма не показывается и не активна, пока PDF ещё читается.
-await page.route("**/api/profile/source", async route => {
+await page.route("**/api/parse", async route => {
   await new Promise(resolve => setTimeout(resolve, 700));
   await route.continue();
 });
@@ -40,7 +40,7 @@ await page.waitForTimeout(150);
 check("профиль: форма скрыта во время чтения",
   await page.locator("#profileForm").evaluate(node => node.hidden && getComputedStyle(node).display === "none"));
 await page.waitForSelector("#profileForm:not([hidden])", {timeout: 15000});
-await page.unroute("**/api/profile/source");
+await page.unroute("**/api/parse");
 const source = await page.locator("#profileSource").textContent();
 check("профиль: PDF прочитан", source.includes("article.pdf") && source.includes("страниц: 2"), source);
 

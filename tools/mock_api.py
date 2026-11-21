@@ -11,6 +11,7 @@ import hmac
 import json
 import mimetypes
 import sys
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -30,6 +31,17 @@ STATUSES = ("queued", "running", "done", "partial", "failed")
 MOCK_CSRF = "mock-csrf-token"
 MOCK_USERS = {}
 MOCK_SESSION_COOKIE = "mock_session"
+PARSE_JOBS = {}
+MOCK_SOURCES = [
+    {"id": 1, "page": 1, "bbox": [10, 10, 200, 20], "kind": "text",
+     "quote": "The device absorber material is MAPbI3."},
+    {"id": 2, "page": 1, "bbox": [10, 30, 220, 40], "kind": "text",
+     "quote": "Device A achieved a power conversion efficiency of 21.4 %."},
+    {"id": 3, "page": 2, "bbox": [10, 10, 200, 20], "kind": "text",
+     "quote": "The open-circuit voltage was 1.10 V under AM1.5."},
+    {"id": 4, "page": 2, "bbox": [10, 30, 240, 40], "kind": "text",
+     "quote": "RAG retrieval accuracy was 0.82 on the benchmark dataset."},
+]
 
 
 def mock_user(username):
@@ -477,6 +489,25 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path.startswith("/api/parse/"):
+            segments = [unquote(part) for part in path.split("/") if part]
+            job = PARSE_JOBS.get(segments[2]) if len(segments) > 2 else None
+            if job is None:
+                self.error("Разбор не найден.", 404)
+                return
+            if len(segments) == 3:
+                self.send_json(job)
+                return
+            if len(segments) == 4 and segments[3] == "result":
+                self.send_json({
+                    "document": {"pages": 2, "filename": job["filename"]},
+                    "sources": MOCK_SOURCES,
+                    "warnings": [],
+                })
+                return
+            self.error("Маршрут не найден.", 404)
+            return
+
         segments = [unquote(part) for part in path.split("/") if part]
         # /api/documents/<id>[/<resource>[/<key>]]
         if len(segments) < 3 or segments[:2] != ["api", "documents"]:
@@ -686,9 +717,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True}, headers={
                 "Set-Cookie": f"{MOCK_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"})
             return
-        if path in ("/api/documents", "/api/demo", "/api/profile/source"):
+        if path in ("/api/documents", "/api/demo", "/api/profile/source", "/api/parse"):
             if not self.require_session() or not self.require_csrf():
                 return
+        if path == "/api/parse":
+            run_id = "mock-" + uuid.uuid4().hex[:10]
+            filename = unquote(self.headers.get("X-Filename", "article.pdf"))
+            PARSE_JOBS[run_id] = {
+                "id": run_id, "status": "ok", "profile": self.headers.get("X-Profile", "solar"),
+                "parser": "docling", "filename": filename, "warnings": [],
+            }
+            self.send_json(PARSE_JOBS[run_id], 202)
+            return
         if path == "/api/documents" and self.headers.get_content_type() != "application/pdf":
             self.error("Ожидается application/pdf.", 415)
             return
@@ -707,16 +747,7 @@ class Handler(BaseHTTPRequestHandler):
                 "title": "Synthetic profiling article", "author": "Mock",
                 "pages": 2, "warnings": [], "page_texts": {"1": "mock"},
                 "fallback_pages": [],
-                "sources": [
-                    {"id": 1, "page": 1, "bbox": [10, 10, 200, 20], "kind": "text",
-                     "quote": "The device absorber material is MAPbI3."},
-                    {"id": 2, "page": 1, "bbox": [10, 30, 220, 40], "kind": "text",
-                     "quote": "Device A achieved a power conversion efficiency of 21.4 %."},
-                    {"id": 3, "page": 2, "bbox": [10, 10, 200, 20], "kind": "text",
-                     "quote": "The open-circuit voltage was 1.10 V under AM1.5."},
-                    {"id": 4, "page": 2, "bbox": [10, 30, 240, 40], "kind": "text",
-                     "quote": "RAG retrieval accuracy was 0.82 on the benchmark dataset."},
-                ],
+                "sources": MOCK_SOURCES,
             })
             return
         if path != "/api/documents":

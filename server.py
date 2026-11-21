@@ -690,7 +690,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             log.warning("Не удалось записать parse.log")
 
-    def start_catalog_parse(self, document_id, filename, data):
+    def start_catalog_parse(self, document_id, filename, data, owner_user_id=None):
         """Run recognition independently of scientific result extraction."""
         run_id = uuid.uuid4().hex[:16]
         folder = self.parses_root() / run_id
@@ -700,7 +700,8 @@ class Handler(BaseHTTPRequestHandler):
                "document_id": document_id, "parser": "docling", "ocr": "auto", "charts": False,
                "filename": Path(filename.replace("\\", "/")).name,
                "sha256": sha256(data).hexdigest(), "bytes": len(data),
-               "created_at": round(time(), 3), "updated_at": round(time(), 3)}
+               "created_at": round(time(), 3), "updated_at": round(time(), 3),
+               "owner_user_id": owner_user_id}
         self.write_job(folder, job)
         threading.Thread(target=self.run_parse,
                          args=(folder, ROOT / "profiles" / "solar.json", "docling", "auto", False),
@@ -1527,7 +1528,7 @@ class Handler(BaseHTTPRequestHandler):
                     summary = self.solar_store().ingest(name, data)
                     recognition = summary.get("recognition", {})
                     if recognition.get("status") != "done" or recognition.get("revision") != RECOGNITION_REVISION:
-                        summary["recognition_job_id"] = self.start_catalog_parse(summary["document_id"], name, data)
+                        summary["recognition_job_id"] = self.start_catalog_parse(summary["document_id"], name, data, session["user"]["id"])
                 elif track == "rag":
                     summary = self.rag_store().ingest(name, data, track=track)
                 else:
