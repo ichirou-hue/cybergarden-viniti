@@ -47,7 +47,7 @@ function pad(value) {
 }
 
 export function initials(name) {
-  const parts = String(name || "Гость").trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  const parts = String(name || "Профиль").trim().split(/\s+/).filter(Boolean).slice(0, 2);
   const letters = parts.map(part => part.charAt(0).toUpperCase()).join("");
   return letters || "Г";
 }
