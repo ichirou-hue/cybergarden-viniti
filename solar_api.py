@@ -21,9 +21,38 @@ import db as storage
 from csv_safe import safe_csv_value
 import extract
 import pdf_source
+import verify
 
 MAX_BYTES = 32 * 1024 * 1024
 TRACK = "solar"
+
+
+def _anchor_boxes(sources, page, fragment):
+    """Geometry for one verified fragment from the parsed source lines.
+
+    ``source_fragment`` written by ``extract.run`` is a literal slice of a
+    ``pdf_source`` quote, so the matching source already carries the exact box:
+    a table row highlights the whole row, a prose line the whole line. Nothing
+    is guessed: when no source on that page contains the fragment the anchor
+    keeps ``bbox=None`` and ``bboxes=[]`` and the viewer renders the bare page.
+
+    ``bboxes`` has the same list shape the RAG anchors use, so a multi-line
+    fragment needs no API change; a single fragment is one box.
+    """
+    needle = verify.compact(fragment)
+    if not needle:
+        return None, []
+    for source in sources:
+        if source.get("page") != page:
+            continue
+        haystack = verify.compact(source.get("quote") or "")
+        if not haystack or not (needle in haystack or haystack in needle):
+            continue
+        box = source.get("bbox")
+        if isinstance(box, (list, tuple)) and len(box) == 4:
+            boxes = [[float(value) for value in box]]
+            return boxes[0], boxes
+    return None, []
 
 
 class SolarStore:
@@ -98,12 +127,15 @@ class SolarStore:
         publication = dict(publication) if publication else {}
         results = []
         anchors = {}
+        parsed_sources = parsed.get("sources") or []
         for index, row in enumerate(rows, 1):
             try:
                 page = int(row.get("source_page") or 1)
             except (TypeError, ValueError):
                 page = 1
-            source = {"source_id": 1000 + index, "page": page, "kind": "table", "table": row.get("source_table", ""), "fragment": row.get("source_fragment", ""), "quote": row.get("source_fragment", ""), "bbox": None}
+            fragment = row.get("source_fragment", "")
+            bbox, bboxes = _anchor_boxes(parsed_sources, page, fragment)
+            source = {"source_id": 1000 + index, "page": page, "section": "", "figure": "", "kind": "table", "table": row.get("source_table", ""), "fragment": fragment, "quote": fragment, "bbox": bbox, "bboxes": bboxes}
             anchors[str(source["source_id"])] = source
             results.append({"result_id": row.get("result_id", f"X{index:03d}"), "metric_name": row.get("metric_name", ""), "metric_value": row.get("metric_value", ""), "metric_unit": row.get("metric_unit", ""), "raw_value": row.get("metric_value", ""), "extraction_status": row.get("extraction_status", "extracted"), "source": source, "issues": [], "device_id": row.get("device_id", ""), "measurement_id": row.get("measurement_id", "")})
         duration = int((time.monotonic() - started) * 1000)

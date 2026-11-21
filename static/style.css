@@ -240,6 +240,24 @@ input[type=search]::placeholder { color: #7d9296; }
 .count { color: var(--muted); font-size: .9rem; min-height: 1.4em; margin: 8px 0; }
 .placeholder:empty { display: none; }
 
+.selection {
+  gap: 8px 14px; align-items: center; margin: 6px 0 12px;
+  padding: 10px 14px; border: 1px solid #3c5b32; border-radius: 12px;
+  background: linear-gradient(90deg, rgba(213, 255, 131, .09), transparent 62%), var(--panel);
+}
+.selection-count { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.selection-pages { color: var(--muted); font-size: .86rem; min-width: 0; }
+.selection-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.selection-actions button { padding: 7px 12px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .selection:not([hidden]) { animation: selection-in .18s ease-out; }
+  @keyframes selection-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
 /* ---------------------------------------------------------------- таблицы */
 
 .results {
@@ -264,6 +282,7 @@ td { font-size: .92rem; overflow-wrap: break-word; }
 td:first-child, th:first-child { padding-left: 18px; }
 tbody tr:hover { background: #1b2a2f; }
 tr.selected, tr.selected:hover { background: #213236; }
+tr.result.selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 tr.detail > td { background: #131f23; }
 tr.target > td { background: #2a2418; }
 tr.target > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
@@ -337,6 +356,12 @@ table.compact { width: 100%; min-width: 0; }
 
 .source-cell { white-space: nowrap; }
 .source-cell button + button { margin-left: 6px; }
+.select-cell { width: 40px; }
+th.select-cell, td.select-cell { padding-left: 12px; padding-right: 4px; }
+.select-cell input[type=checkbox] {
+  width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer;
+}
+.select-cell input[type=checkbox]:disabled { opacity: .35; cursor: default; }
 .group { white-space: nowrap; }
 .quote { min-width: 420px; }
 .unit, .raw, .cutoff { color: var(--muted); font-size: .82rem; }
@@ -478,4 +503,6 @@ dialog img {
   .results { max-height: 62vh; }
   .quote { min-width: 240px; }
   .wide { min-width: 220px; }
+  .selection-actions { margin-left: 0; width: 100%; }
+  .selection-pages { white-space: normal; }
 }

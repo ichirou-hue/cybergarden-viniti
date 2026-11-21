@@ -5,6 +5,8 @@
 Корпус _corpus/ и data/viniti.sqlite3 не нужны - в CI их нет.
 """
 import json
+from contextlib import redirect_stdout
+import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
@@ -14,7 +16,7 @@ from urllib.request import urlopen
 
 import db as storage
 from library import Library
-from server import Handler, ThreadingHTTPServer
+from server import Handler, ThreadingHTTPServer, serve_until_interrupt
 
 ROOT = Path(__file__).resolve().parent
 
@@ -292,6 +294,19 @@ class ApiTest(unittest.TestCase):
         status, body = get(self.base + "/api/stats")
         self.assertEqual(status, 503)
         self.assertIn("База результатов не подключена", json.loads(body)["error"])
+
+    # ----------------------------------------------------------- Ctrl+C
+
+    def test_keyboard_interrupt_stops_the_loop_without_traceback(self):
+        """Ctrl+C в serve_forever не должен всплывать наружу как исключение."""
+        class Interrupted:
+            def serve_forever(self):
+                raise KeyboardInterrupt
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            serve_until_interrupt(Interrupted())
+        self.assertIn("Сервер остановлен", buffer.getvalue())
 
 
 if __name__ == "__main__":

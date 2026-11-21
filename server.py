@@ -490,6 +490,7 @@ class Handler(BaseHTTPRequestHandler):
             self.error("Документ не найден.", 404)
             return
         resource = resources[0] if resources else ""
+        key = resources[1] if len(resources) > 1 else ""
         if not resource:
             self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
         elif resource == "facets":
@@ -505,6 +506,37 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"total": len(items), "items": items[:self._int(query, "limit", 200, 1, 500)]})
         elif resource == "entities":
             self.send_json({"total": 0, "items": []})
+        elif resource == "anchors" and (key.endswith(".json") or key.endswith(".png")):
+            try:
+                source_id = int(key.rsplit(".", 1)[0])
+            except ValueError:
+                self.error("Идентификатор источника должен быть числом.", 400)
+                return
+            anchor = envelope.get("anchors", {}).get(str(source_id))
+            if anchor is None:
+                self.error("Источник не найден.", 404)
+                return
+            if key.endswith(".json"):
+                self.send_json(anchor)
+                return
+            data = self.solar_store().pdf(document_id)
+            if data is None:
+                self.error("PDF не найден.", 404)
+                return
+            try:
+                png = render_anchor_png(
+                    data,
+                    anchor.get("page", 1),
+                    anchor.get("bbox"),
+                    bboxes=anchor.get("bboxes"),
+                )
+            except (IndexError, TypeError, ValueError) as error:
+                # A stale or malformed anchor is data, not a server error.
+                # page=0/None/out-of-range must answer 400, never crash the
+                # request loop.
+                self.error(str(error), 400)
+                return
+            self.send_data(png, "image/png")
         elif resource == "export.json":
             self.send_data(json.dumps(envelope, ensure_ascii=False).encode(), "application/json; charset=utf-8", Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.json\"")
         elif resource == "export.csv":
@@ -661,6 +693,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 
+def serve_until_interrupt(server):
+    """Крутит serve_forever, а Ctrl+C превращает в короткое сообщение без traceback."""
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("Сервер остановлен.", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="VINITI PDF evidence workspace")
     parser.add_argument("--port", type=int, default=8765)
@@ -672,7 +712,7 @@ def main():
         server.rag_store = RagStore(args.db)
         server.data = args.data
         print(f"http://127.0.0.1:{server.server_port}", flush=True)
-        server.serve_forever()
+        serve_until_interrupt(server)
 
 
 if __name__ == "__main__":
