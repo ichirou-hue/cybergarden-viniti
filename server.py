@@ -72,8 +72,8 @@ PARSE_KINDS = {"tables", "figures", "charts"}
 
 
 def static_file(path):
-    if path == "/manual-profile":
-        path = "/solar.html"
+    if path in ("/manual-profile", "/solar", "/solar.html"):
+        path = "/manual-profile.html"
     name = "index.html" if path in ("", "/") else unquote(path).lstrip("/")
     parts = Path(name).parts
     if not name or name.startswith("/") or "\\" in name or any(part in ("", ".", "..") for part in parts):

@@ -143,7 +143,7 @@ await step("демо", async () => {
   check("демо: в герое импорт и PDF", (await heroActions()).some(text => text.includes("Импорт паспорта JSON")) &&
     (await heroActions()).some(text => text.includes("Привязать исходный PDF")), (await heroActions()).join(" | "));
   check("демо: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
-  check("демо: вкладка RAG на месте и не активна", await page.locator("#tracks .track").isVisible() &&
+  check("демо: вкладка RAG на месте и не активна", await page.locator("#tracks .track").first().isVisible() &&
     await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
   check("демо: «Паспорт» отмечен aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   check("демо: таблица в .results", await page.locator("#view .workspace .results table").count() === 1);
@@ -471,7 +471,7 @@ await step("навигация", async () => {
   check("навигация: каталог → паспорт", page.url().endsWith("#/passport"), page.url());
   check("паспорт: H1", (await h1()) === "Паспорт публикации.");
   check("паспорт: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
-  check("паспорт: вкладка RAG осталась", await page.locator("#tracks .track").isVisible() &&
+  check("паспорт: вкладка RAG осталась", await page.locator("#tracks .track").first().isVisible() &&
     await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
   check("паспорт: aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   await page.goBack();

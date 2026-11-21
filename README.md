@@ -45,13 +45,15 @@ python -m venv .venv
 
 ### Ручной этап профилей
 
-Серверная часть ручного профиля уже доступна без отдельного экрана:
+Экран ручного профиля - `/manual-profile` (`static/manual-profile.html` и `static/profile.mjs`). На нём выбирают PDF, описывают типы сущностей и поля, отмечают найденные фрагменты и скачивают JSON профиля вместе с доказательствами. PDF уходит на `POST /api/profile/source` только чтобы получить текстовые фрагменты; готовый профиль собирается в браузере. Из мастера загрузки на каталоге выбранный PDF передаётся на этот экран через IndexedDB, поэтому выбирать файл повторно не нужно.
+
+Серверная часть ручного профиля:
 
 - `GET /api/profiles`, `GET|PUT|DELETE /api/profiles/<id>` - встроенные `solar`/`custom-example` и пользовательские профили в `data/profiles/`;
 - `POST /api/parse` - PDF и заголовки `X-Profile`, `X-Parser` (`pdfplumber` или `docling`), `X-OCR`, `X-Charts`; разбор идёт в фоне;
 - `GET /api/parse/<id>`, `/result`, `/file/candidates.csv`, `/file/assets/...` - статус, JSON и артефакты.
 
-Это разбор без LLM: текст, таблицы, figures и offline-кандидаты. Для OCR и локального chart2csv задайте `VINITI_DOCLING_PYTHON` на Python с `requirements-docling.txt`; без Docling работает `pdfplumber`. Экран профиля появится после выбора прототипа.
+Это разбор без LLM: текст, таблицы, figures и offline-кандидаты. Для OCR и локального chart2csv задайте `VINITI_DOCLING_PYTHON` на Python с `requirements-docling.txt`; без Docling работает `pdfplumber`.
 
 ### Фронтенд
 

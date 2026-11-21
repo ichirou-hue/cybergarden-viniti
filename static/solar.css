@@ -10,7 +10,8 @@
 .profile-field { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
 .profile details label { padding: 5px; overflow-wrap: anywhere; }
 .profile summary { cursor: pointer; }
-:root { color: #e7eded; background: #0e1518; font: 15px/1.5 the-system, "Segoe UI", sans-serif; color-scheme: dark; }
+.boot-error { color: #ffd1a6; background: #493226; border: 1px solid #7a5339; border-radius: 10px; padding: 10px 16px; margin-top: 18px; }
+:root { color: #e7eded; background: #0e1518; font: 15px/1.5 system-ui, "Segoe UI", sans-serif; color-scheme: dark; }
 body { margin: 0; }
 .shell { width: min(1320px, calc(100% - 64px)); margin-inline: auto; }
 .top { border-bottom: 1px solid #2b393e; }

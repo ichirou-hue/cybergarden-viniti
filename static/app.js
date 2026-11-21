@@ -5,6 +5,7 @@ import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
 import { uploadPDF, uploadPDFWithProgress, openDemo } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
+import { stashProfilePDF } from "./pending.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -15,7 +16,6 @@ const uploadState = document.getElementById("uploadState");
 const demoButton = document.getElementById("demo");
 const passportInput = document.getElementById("passport");
 const passportLink = document.getElementById("passportLink");
-const contextLine = document.getElementById("context");
 const trackBar = document.getElementById("tracks");
 const evidenceDialog = document.getElementById("evidence");
 const wizard = document.getElementById("wizard");
@@ -62,10 +62,6 @@ function go(changes) {
 function say(message, isError = false) {
   statusLine.textContent = message || "";
   statusLine.className = isError ? "status error" : "status";
-}
-
-function setContext(text) {
-  if (contextLine) contextLine.textContent = `Проверка научных данных · ${text}`;
 }
 
 function renderTracks(active = app.track) {
@@ -144,7 +140,6 @@ async function route() {
     app.controller?.abort();
     document.body.dataset.view = "passport";
     passportLink.setAttribute("aria-current", "page");
-    setContext("паспорт статьи");
     setUploadEnabled(true);
     renderTracks("");
     renderPassport(view, {say, go, patch, params});
@@ -174,7 +169,6 @@ async function route() {
   app.track = descriptor.track;
   document.getElementById("demo").hidden = descriptor.demo === false;
   document.body.dataset.view = match ? "doc" : "catalog";
-  setContext(match ? "карточка статьи" : "каталог результатов");
   setUploadEnabled(true);
   renderTracks();
   if (docId && params.track && params.track !== descriptor.track) {
@@ -329,6 +323,22 @@ for (const name of ["dragleave", "drop"]) dropZone.addEventListener(name, event 
 dropZone.addEventListener("drop", event => selectPDF(event.dataTransfer.files[0]));
 document.getElementById("wizardBack").addEventListener("click", () => {
   selectedPDF = null; fileInput.value = ""; renderWizard();
+});
+document.getElementById("createProfile").addEventListener("click", async event => {
+  if (!selectedPDF) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const link = event.currentTarget;
+  link.setAttribute("aria-busy", "true");
+  link.textContent = "Готовим профиль…";
+  try {
+    await stashProfilePDF(selectedPDF);
+  } catch (error) {
+    // Переход не должен зависеть от хранилища: на странице профиля PDF
+    // можно выбрать повторно.
+    console.warn("Не удалось передать PDF в ручной профиль:", error.message);
+  }
+  location.assign(link.href);
 });
 document.getElementById("wizardSubmit").addEventListener("click", async () => {
   const track = document.querySelector('input[name="wizardProfile"]:checked')?.value;

@@ -201,6 +201,12 @@ solar_offline.build(bytes)           таблицы из координат сл
 
 Ручной этап профилей живёт отдельно от паспорта и базы:
 
+- `/manual-profile` отдаёт `static/manual-profile.html` (не `solar.html`): экран
+  собирает профиль извлечения в браузере через `static/profile.mjs`. PDF уходит
+  на `POST /api/profile/source` только за текстовыми фрагментами, а JSON профиля
+  и выбранных доказательств скачивается клиентом. Из мастера на каталоге
+  выбранный PDF передаётся сюда через IndexedDB (`static/pending.js`), поэтому
+  повторно выбирать файл не нужно.
 - `profiles_store.py` читает встроенные `profiles/*.json` и пользовательские
   `data/profiles/<id>.json`, проверяет их через `extraction_core.compile_profile`;
   `GET /api/profiles`, `GET|PUT|DELETE /api/profiles/<id>`. Встроенные профили

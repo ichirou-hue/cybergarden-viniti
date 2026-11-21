@@ -47,11 +47,10 @@ const rows = selector => [...document.querySelectorAll(selector)];
 await import(new URL("app.js", root).href);
 
 await waitFor(() => rows("#view tbody tr").length >= 8, "каталог загрузился");
-await waitFor(() => text(".banner").includes("Обработано"), "баннер пакета");
+await waitFor(() => text(".stats").includes("90"), "сводка прогона");
 check("каталог: не меньше 8 публикаций", rows("#view tbody tr").length >= 8, String(rows("#view tbody tr").length));
-check("каталог: баннер пакета", text(".banner").includes("Обработано 4 из 90"), text(".banner"));
-check("каталог: частично в баннере", /\d+ частично/.test(text(".banner")), text(".banner"));
-check("каталог: ошибка видна", text(".banner").includes("ошибка"), text(".banner"));
+const statValues = rows(".stats > div strong").map(node => node.textContent.trim()).join("/");
+check("каталог: сводка прогона", statValues === "90/4/3", statValues);
 check("каталог: статусы текстом", text("#view").includes("частично") && text("#view").includes("в очереди"));
 check("каталог: переключатель области", document.querySelectorAll("#tracks .track").length === 2);
 
@@ -176,9 +175,9 @@ await waitFor(() => text(".count").includes("страница 9 из 9"), "за�
 check("пагинация: страница зажата", text(".count").includes("страница 9 из 9"), text(".count"));
 
 // Область: неизвестная и несовпадение track с document_id
-location.hash = "#/?track=solar";
+location.hash = "#/?track=unknown";
 await waitFor(() => text("#view").includes("не подключён"), "неизвестная область");
-check("область: явная ошибка", text("#view").includes("Раздел «Solar» пока не подключён"), text("#view"));
+check("область: явная ошибка", text("#view").includes("Раздел «unknown» пока не подключён"), text("#view"));
 location.hash = "#/doc/rag:d020?track=solar";
 await waitFor(() => text(".doc-main h1").includes("W-RAC"), "track из document_id");
 check("область: document_id приоритетнее", text(".doc-main h1").includes("W-RAC"));

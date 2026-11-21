@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Создать профиль извлечения · ВИНИТИ РАН</title>
+<link rel="stylesheet" href="/solar.css">
+<script type="module" src="/profile.mjs"></script>
+</head>
+<body>
+<header class="top"><div class="shell masthead"><a class="brand" href="/"><span class="mark" aria-hidden="true">✳</span> ВИНИТИ РАН</a><span class="context">Ручной профиль извлечения</span></div></header>
+<main class="shell">
+<section class="hero">
+  <div>
+    <p class="eyebrow">Проверка научных данных</p>
+    <h1>Создать<br>профиль<span>.</span></h1>
+    <p class="lede">Опишите, какие сущности и поля нужно извлечь из статьи, отметьте фрагменты-подсказки и скачайте профиль вместе с доказательствами.</p>
+  </div>
+  <div class="actions">
+    <label class="button primary" for="profilePdf">Загрузить PDF</label><input id="profilePdf" class="file" type="file" accept=".pdf,application/pdf">
+    <a class="button" href="/">К каталогу</a>
+  </div>
+</section>
+<section class="panel profile" id="profilePanel" hidden aria-labelledby="profileTitle">
+ <header class="panel-head"><div><h2 id="profileTitle">Профиль извлечения</h2><p id="profileStatus" role="status"></p></div></header>
+ <form id="profileForm">
+  <p id="profileSource" class="profile-help"></p>
+  <p class="profile-help">1. Выберите, что искать в статье. Поля и подсказки появятся автоматически. 2. Проверьте найденные фрагменты. 3. Скачайте результат.</p>
+  <div class="profile-presets" role="group" aria-label="Готовые сценарии">
+    <button class="button" type="button" data-preset="solar">Солнечные элементы</button>
+    <button class="button" type="button" data-preset="rag">RAG-системы</button>
+    <button class="button" type="button" data-preset="basic">Универсальный</button>
+  </div>
+  <label>Название профиля <input name="title" required></label>
+  <p class="profile-help">Название нужно только для вашего файла. Список ниже можно менять под конкретную статью.</p>
+  <div id="profileEntities"></div>
+  <button class="button" type="button" id="addEntity">Добавить тип сущности</button>
+  <button class="button primary" type="button" id="scanProfile">2. Найти фрагменты</button>
+  <button class="button" type="button" id="browseProfile">Показать все фрагменты</button>
+  <div id="profileMatches"></div>
+  <button class="button primary" type="submit">Скачать профиль и выбранные фрагменты</button>
+ </form>
+</section>
+<p id="bootError" class="boot-error shell" role="alert" hidden>
+  Не удалось загрузить интерфейс профиля. Обновите страницу; если ошибка повторяется, проверьте, что сервер отдаёт `/profile.mjs` и `/pending.js`.
+</p>
+<noscript><p class="boot-error shell">Для работы интерфейса нужен JavaScript.</p></noscript>
+</main>
+<script>
+  setTimeout(function () {
+    var error = document.getElementById("bootError");
+    if (error && document.body.dataset.profile !== "ready") error.hidden = false;
+  }, 4000);
+</script>
+</body>
+</html>

@@ -1,3 +1,5 @@
+import { takeProfilePDF } from "./pending.js";
+
 const byId = id => document.getElementById(id);
 const upload = byId("profilePdf");
 const form = byId("profileForm");
@@ -164,9 +166,10 @@ function scan(browseAll) {
 byId("scanProfile").onclick = () => scan(false);
 byId("browseProfile").onclick = () => scan(true);
 
-upload.onchange = async () => {
-  const file = upload.files[0];
-  if (!file) return;
+let loading = false;
+async function loadFile(file) {
+  if (!file || loading) return;
+  loading = true;
   upload.disabled = true;
   form.hidden = true;
   documentData = undefined;
@@ -180,17 +183,34 @@ upload.onchange = async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error);
     documentData = {...data, filename: file.name};
-    status.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
-      + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
+    const sourceLine = byId("profileSource");
+    if (sourceLine) {
+      sourceLine.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
+        + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
+    }
     form.hidden = false;
     if (!entities.children.length) applyPreset("basic");
+    status.textContent = "PDF прочитан. Выберите готовый набор или опишите поля вручную.";
   } catch (error) {
     status.textContent = error.message;
   } finally {
     upload.value = "";
     upload.disabled = false;
+    loading = false;
   }
+}
+
+upload.onchange = () => {
+  const file = upload.files[0];
+  if (file) loadFile(file);
 };
+
+takeProfilePDF().then(file => {
+  if (file) loadFile(file);
+}).catch(error => {
+  // Без IndexedDB страница работает как обычно: PDF выбирается вручную.
+  console.warn("Не удалось забрать PDF из мастер-потока:", error.message);
+});
 
 form.onsubmit = event => {
   event.preventDefault();
@@ -212,3 +232,5 @@ form.onsubmit = event => {
     status.textContent = error.message;
   }
 };
+
+document.body.dataset.profile = "ready";
