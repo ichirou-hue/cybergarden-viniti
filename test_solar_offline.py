@@ -113,6 +113,16 @@ class TableExtractionTest(unittest.TestCase):
             {"1": "A wide bandgap, higher than 3 eV is preferred. "
                   "The absorber has a band gap of 1.65 eV."})
         self.assertEqual(value, "1.65")
+        # An unrelated comparison in the same sentence must not veto a real gap.
+        value, _, _ = solar_offline._bandgap(
+            {"1": "The deposition increased the absorption of the CZTS film to "
+                  "more than 104 cm-1 with a band gap between 1.62 eV and 1.51 eV."},
+            "CZTS")
+        self.assertEqual(value, "1.62")
+        value, _, _ = solar_offline._bandgap(
+            {"1": "The bulk bandgap of CdS is just above 2.42 eV for this stack."},
+            "Cu(In,Ga)Se2")
+        self.assertEqual(value, "")
         value, _, _ = solar_offline._bandgap(
             {"1": "The transport layer has a wide bandgap, higher than 3 eV."})
         self.assertEqual(value, "")
