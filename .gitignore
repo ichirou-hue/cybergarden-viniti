@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 .env
 data/
+docs/materials/
 _refs/
 _corpus/
 *.zip
