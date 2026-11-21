@@ -6,6 +6,7 @@ const form = byId("profileForm");
 const entities = byId("profileEntities");
 const matches = byId("profileMatches");
 const status = byId("profileStatus");
+const errorLine = byId("profileError");
 let documentData;
 let selection;
 const presets = {
@@ -26,50 +27,121 @@ export function matchingSources(sources, names) {
   });
 }
 
+let matchesStale = false;
 function clearMatches() {
   selection = undefined;
   matches.replaceChildren();
+  matchesStale = false;
+}
+
+function staleMatches() {
+  if (!matches.children.length || matchesStale) return;
+  matchesStale = true;
+  matches.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    input.checked = false;
+    input.disabled = true;
+  });
+  const note = document.createElement("p");
+  note.className = "profile-help profile-stale";
+  note.textContent = "Поля изменились. Нажмите «Найти фрагменты», чтобы обновить подсказки.";
+  matches.append(note);
+  status.textContent = note.textContent;
+}
+
+function clearError() {
+  if (!errorLine) return;
+  errorLine.hidden = true;
+  errorLine.textContent = "";
+}
+
+function showError(message) {
+  if (errorLine) {
+    errorLine.textContent = message;
+    errorLine.hidden = false;
+    errorLine.scrollIntoView({block: "nearest"});
+    try {
+      errorLine.focus({preventScroll: true});
+    } catch {
+      errorLine.focus();
+    }
+  }
+  status.textContent = message;
+}
+
+function clearPreset() {
+  document.querySelectorAll("[data-preset]").forEach(button => button.setAttribute("aria-pressed", "false"));
+}
+
+function markEdited() {
+  clearPreset();
+  const types = entities.children.length;
+  const fields = entities.querySelectorAll(".profile-field").length;
+  status.textContent = types ? `Набор изменён: типов ${types}, полей ${fields}.` : "Типы сущностей удалены.";
+  clearError();
+}
+
+function fieldMarkup() {
+  return `
+    <label class="field pf-name"><span>Название поля</span><input name="fieldName" required placeholder="Например, Значение"></label>
+    <label class="field pf-type"><span>Тип</span><select name="type">
+      <option value="text">Текст</option><option value="number">Число</option>
+      <option value="boolean">Да / нет</option><option value="reference">Связь с типом</option></select></label>
+    <label class="pf-required"><input type="checkbox" name="requiredField"> Обязательное</label>
+    <button type="button" class="pf-remove" aria-label="Удалить поле" title="Удалить поле">×</button>
+    <div class="pf-extra">
+      <label class="field pf-unit" data-when="number"><span>Единица в статье</span><input name="unit" placeholder="например, мА/см²"></label>
+      <label class="field pf-target-unit" data-when="number"><span>Нужная единица</span><input name="targetUnit" placeholder="например, %"></label>
+      <label class="field pf-factor" data-when="number"><span>Коэффициент</span><input name="factor" type="number" step="any" placeholder="если единицы разные"></label>
+      <label class="field pf-wide" data-when="reference"><span>Связанный тип</span><input name="target" list="profileTypes" placeholder="Название типа из списка выше"></label>
+    </div>`;
+}
+
+function updateExtra(field) {
+  const type = field.querySelector('[name="type"]').value;
+  field.dataset.type = type;
+  field.querySelectorAll("[data-when]").forEach(node => {
+    node.hidden = node.dataset.when !== type;
+  });
 }
 
 function addField(container, name = "") {
   const field = document.createElement("fieldset");
   field.className = "profile-field";
-  field.innerHTML = `
-    <label><input type="checkbox" name="includeField" checked> Извлекать поле</label>
-    <label>Название поля <input name="fieldName" required></label>
-    <label>Тип <select name="type"><option value="text">Текст</option><option value="number">Число</option>
-      <option value="boolean">Да / нет</option><option value="reference">Связь</option></select></label>
-    <label><input type="checkbox" name="requiredField"> Обязательное поле</label>
-    <label>Исходная единица <input name="unit"></label>
-    <label>Целевая единица <input name="targetUnit"></label>
-    <label>Коэффициент пересчёта <input name="factor" type="number" step="any"></label>
-    <label>Тип связанной сущности <input name="target"></label>
-    <button type="button" class="button">Удалить поле</button>`;
-  field.querySelector("button").onclick = () => {
+  field.innerHTML = fieldMarkup();
+  const type = field.querySelector('[name="type"]');
+  type.addEventListener("change", () => updateExtra(field));
+  field.querySelector(".pf-remove").onclick = () => {
     field.remove();
-    clearMatches();
+    staleMatches();
+    markEdited();
   };
   container.append(field);
   field.querySelector('[name="fieldName"]').value = name;
-  clearMatches();
+  updateExtra(field);
+  staleMatches();
 }
 
 function addEntity(preset) {
   const entity = document.createElement("fieldset");
   entity.className = "profile-entity";
   entity.innerHTML = `<legend>Тип сущности</legend>
-    <label><input type="checkbox" name="includeEntity" checked> Извлекать этот тип</label>
-    <label>Название типа <input name="entityName" required></label>
-    <label>Подсказки для поиска через запятую <input name="aliases" placeholder="Названия и сокращения из статьи"></label>
+    <div class="entity-head">
+      <label class="field pe-name"><span>Название типа</span><input name="entityName" required placeholder="Например, Результат"></label>
+      <label class="field pe-aliases"><span>Слова-подсказки</span><input name="aliases" placeholder="Через запятую: result, experiment…"></label>
+      <button type="button" class="pf-remove pe-remove" aria-label="Удалить тип" title="Удалить тип">×</button>
+    </div>
     <div class="profile-fields"></div>
-    <button type="button" class="button">Добавить поле</button>
-    <button type="button" class="button">Удалить тип</button>`;
+    <div class="entity-actions"><button type="button" class="button">Добавить поле</button></div>`;
   const fields = entity.querySelector(".profile-fields");
-  const [add, remove] = entity.querySelectorAll("button");
-  add.onclick = () => addField(fields);
-  remove.onclick = () => {
+  entity.querySelector(".entity-actions button").onclick = () => {
+    addField(fields);
+    markEdited();
+  };
+  entity.querySelector(".pf-remove").onclick = () => {
     entity.remove();
-    clearMatches();
+    refreshTypes();
+    staleMatches();
+    markEdited();
   };
   entities.append(entity);
   if (preset) {
@@ -77,12 +149,28 @@ function addEntity(preset) {
     entity.querySelector('[name="aliases"]').value = preset.aliases;
     preset.fields.forEach(name => addField(fields, name));
   } else addField(fields);
+  refreshTypes();
+}
+
+function refreshTypes() {
+  const list = byId("profileTypes");
+  if (!list) return;
+  const names = [...entities.querySelectorAll('[name="entityName"]')]
+    .map(input => input.value.trim()).filter(Boolean);
+  list.replaceChildren(...names.map(name => {
+    const option = document.createElement("option");
+    option.value = name;
+    return option;
+  }));
 }
 function applyPreset(key) {
   const preset = presets[key];
+  clearError();
+  clearMatches();
   entities.replaceChildren();
   form.elements.title.value = preset.title;
   preset.types.forEach(addEntity);
+  refreshTypes();
   document.querySelectorAll('[data-preset]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.preset === key)));
   status.textContent = "Готовый набор добавлен. Можно изменить названия и поля под статью.";
 }
@@ -90,13 +178,13 @@ document.querySelectorAll('[data-preset]').forEach(button => button.onclick = ()
 
 function readProfile() {
   const types = [...entities.children].map(entity => ({
-    name: value(entity, "entityName"), selected: checked(entity, "includeEntity"),
+    name: value(entity, "entityName"), selected: true,
     aliases: value(entity, "aliases").split(",").map(term => term.trim()).filter(Boolean),
     fields: [...entity.querySelectorAll(".profile-field")].map(field => {
       const type = value(field, "type");
       const factor = value(field, "factor");
       return {
-        name: value(field, "fieldName"), type, selected: checked(field, "includeField"),
+        name: value(field, "fieldName"), type, selected: true,
         required: checked(field, "requiredField"),
         ...(type === "number" && {unit: value(field, "unit"), targetUnit: value(field, "targetUnit"),
           factor: factor === "" ? null : Number(factor)}),
@@ -105,15 +193,16 @@ function readProfile() {
     }),
   }));
   const unique = names => new Set(names.map(normalize)).size === names.length;
-  if (!types.some(type => type.selected)) throw new Error("Отметьте хотя бы один тип для извлечения.");
+  if (!types.length) throw new Error("Добавьте хотя бы один тип сущности.");
   if (!types.every(type => type.name) || !unique(types.map(type => type.name))) {
     throw new Error("Укажите уникальные названия типов.");
   }
   for (const type of types) {
+    if (!type.fields.length) throw new Error("Добавьте хотя бы одно поле в тип «" + type.name + "».");
     if (!type.fields.every(field => field.name) || !unique(type.fields.map(field => field.name))) {
       throw new Error("Укажите уникальные названия полей в типе «" + type.name + "».");
     }
-    for (const field of type.fields.filter(field => type.selected && field.selected)) {
+    for (const field of type.fields) {
       if (field.type === "reference" && !types.some(other => other.selected && normalize(other.name) === normalize(field.target))) {
         throw new Error("Для связи «" + field.name + "» укажите название выбранного типа.");
       }
@@ -127,6 +216,7 @@ function readProfile() {
 }
 
 function showMatches(profile, browseAll) {
+  clearError();
   clearMatches();
   selection = [];
   for (const type of profile.types.filter(type => type.selected)) {
@@ -151,16 +241,23 @@ function showMatches(profile, browseAll) {
     : "Отметьте подходящие фрагменты. Подсказки основаны на совпадении слов.";
 }
 
-byId("addEntity").onclick = () => addEntity();
+byId("addEntity").onclick = () => {
+  addEntity();
+  staleMatches();
+  markEdited();
+};
 form.addEventListener("input", event => {
-  if (!matches.contains(event.target)) clearMatches();
+  if (matches.contains(event.target)) return;
+  refreshTypes();
+  staleMatches();
+  markEdited();
 });
 function scan(browseAll) {
   if (!documentData || !form.reportValidity()) return;
   try {
     showMatches(readProfile(), browseAll);
   } catch (error) {
-    status.textContent = error.message;
+    showError(error.message);
   }
 }
 byId("scanProfile").onclick = () => scan(false);
@@ -173,6 +270,7 @@ async function loadFile(file) {
   upload.disabled = true;
   form.hidden = true;
   documentData = undefined;
+  clearError();
   clearMatches();
   byId("profilePanel").hidden = false;
   status.textContent = "Читаем PDF…";
@@ -227,9 +325,10 @@ form.onsubmit = event => {
     link.download = "extraction-profile.json";
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    clearError();
     status.textContent = "Профиль сохранён. Выбрано фрагментов: " + evidence.length + ".";
   } catch (error) {
-    status.textContent = error.message;
+    showError(error.message);
   }
 };
 

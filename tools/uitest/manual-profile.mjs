@@ -18,16 +18,43 @@ const pdf = {name: "article.pdf", mimeType: "application/pdf", buffer: Buffer.fr
 // Прямой вход: экран профиля просит PDF и не тянет чужую логику паспорта.
 await page.goto(`${base}/manual-profile`, {waitUntil: "networkidle"});
 check("профиль: заголовок экрана", (await page.locator("h1").first().textContent()).includes("Создать"));
+check("профиль: стрелка назад ведёт на главную",
+  await page.locator('a[aria-label="Назад на главную"]').getAttribute("href") === "/");
+check("профиль: блока паспорта и его кнопок нет",
+  await page.getByText("Паспорт публикации").count() === 0 &&
+  await page.getByText("Импорт паспорта JSON").count() === 0 &&
+  await page.getByText("Привязать исходный PDF").count() === 0);
 check("профиль: панель скрыта до выбора PDF", await page.locator("#profilePanel").evaluate(node => node.hidden));
 
+// Форма не показывается и не активна, пока PDF ещё читается.
+await page.route("**/api/profile/source", async route => {
+  await new Promise(resolve => setTimeout(resolve, 700));
+  await route.continue();
+});
 await page.setInputFiles("#profilePdf", pdf);
+await page.waitForTimeout(150);
+check("профиль: форма скрыта во время чтения",
+  await page.locator("#profileForm").evaluate(node => node.hidden && getComputedStyle(node).display === "none"));
 await page.waitForSelector("#profileForm:not([hidden])", {timeout: 15000});
+await page.unroute("**/api/profile/source");
 const source = await page.locator("#profileSource").textContent();
 check("профиль: PDF прочитан", source.includes("article.pdf") && source.includes("страниц: 2"), source);
 
 await page.click('[data-preset="solar"]');
 check("профиль: готовый набор Solar", await page.locator(".profile-entity").count() === 2,
   String(await page.locator(".profile-entity").count()));
+
+// Лишние поля не показываются, пока тип их не требует.
+const firstField = page.locator(".profile-field").first();
+check("профиль: для текста нет единиц и связи",
+  await firstField.locator('.pf-extra [data-when]:not([hidden])').count() === 0);
+await firstField.locator('select[name="type"]').selectOption("number");
+check("профиль: для числа видны единицы и коэффициент",
+  await firstField.locator('.pf-extra [data-when]:not([hidden])').count() === 3);
+await firstField.locator('select[name="type"]').selectOption("reference");
+check("профиль: для связи виден связанный тип",
+  await firstField.locator('.pf-extra [data-when]:not([hidden])').count() === 1);
+await firstField.locator('select[name="type"]').selectOption("text");
 
 await page.click("#scanProfile");
 await page.waitForFunction(() => document.querySelectorAll("#profileMatches summary").length === 2);
@@ -46,6 +73,29 @@ check("профиль: скачан JSON", download.suggestedFilename() === "ext
   download.suggestedFilename());
 check("профиль: типы и доказательства", payload.profile?.types?.length === 2 && payload.evidence?.length === 1,
   JSON.stringify({types: payload.profile?.types?.length, evidence: payload.evidence?.length}));
+
+// Свои ошибки профиля видны рядом с кнопкой, а не только в шапке панели.
+const entityNames = page.locator('.profile-entity [name="entityName"]');
+await entityNames.nth(1).fill(await entityNames.first().inputValue());
+await page.click("#profileForm button[type=submit]");
+await page.waitForSelector("#profileError:not([hidden])");
+const errorState = await page.locator("#profileError").evaluate(node => {
+  const rect = node.getBoundingClientRect();
+  return {text: node.textContent, visible: rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight};
+});
+check("профиль: ошибка видна у кнопки", errorState.visible && errorState.text.includes("уникальные"), errorState.text);
+check("профиль: пресет снят после правки",
+  await page.locator('[data-preset="solar"]').getAttribute("aria-pressed") === "false");
+
+// Правка после сканирования помечает подсказки устаревшими, а не стирает молча.
+await entityNames.nth(1).fill("Измерение");
+await page.click("#scanProfile");
+await page.waitForFunction(() => document.querySelectorAll("#profileMatches summary").length === 2);
+const fieldName = page.locator('.profile-field [name="fieldName"]').first();
+await fieldName.fill((await fieldName.inputValue()) + " 2");
+check("профиль: старые подсказки помечены",
+  await page.locator("#profileMatches .profile-stale").count() === 1 &&
+  await page.locator("#profileMatches input[type=checkbox]").first().isDisabled());
 
 // Мастер на каталоге передаёт выбранный PDF на экран профиля без повторного выбора.
 await page.goto(`${base}/`, {waitUntil: "networkidle"});
