@@ -329,7 +329,7 @@ class SolarStore:
             "text_sources": _text_sources(result["sources"]),
         }
 
-    def ingest(self, name, data):
+    def ingest(self, name, data, *, progress=None):
         if len(data) > MAX_BYTES:
             raise ValueError("Нужен PDF размером до 32 МиБ.")
         if not data.startswith(b"%PDF-"):
@@ -359,6 +359,7 @@ class SolarStore:
             # The checked pipeline: literal citations, normalized units and the
             # deterministic consistency issues. A ValueError means the paper did
             # not pass verification, not that the upload is malformed.
+<<<<<<< HEAD
             try:
                 result = solar_offline.extract_pdf(path, publication_id)
             except ValueError as error:
@@ -377,7 +378,11 @@ class SolarStore:
                     "warnings": ["Исходный текстовый слой пуст; требуется OCR Docling. "
                                  "Научные результаты без буквального источника не извлекались."],
                 }
+=======
+            result = solar_offline.extract_pdf(path, publication_id, progress=progress)
+>>>>>>> b028d54dd8580e4c6016e8eeee73899909e1821f
         envelope = self._envelope(document_id, name, result, started)
+        if progress: progress(3, "Карточка собрана")
         summary_keys = {k: v for k, v in envelope.items() if k not in {"entities", "results", "issues", "anchors", "text_sources", "publication", "counts", "run", "export", "warnings"}}
         with closing(self._connect()) as conn, conn:
             conn.execute("INSERT OR REPLACE INTO solar_documents VALUES (?, ?, ?, ?, ?, ?)", (document_id, content_hash, json.dumps(summary_keys, ensure_ascii=False), json.dumps(envelope, ensure_ascii=False), data, envelope["updated_at"]))

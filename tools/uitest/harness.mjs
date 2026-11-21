@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { seedWindow, sessionResponse } from "./account.mjs";
 
 const base = process.env.MOCK_URL || "http://127.0.0.1:8799";
 const root = new URL("../../static/", import.meta.url);
 const html = readFileSync(new URL("index.html", root), "utf8");
-const dom = new JSDOM(html, { url: `${base}/#/`, pretendToBeVisual: true });
+const dom = new JSDOM(html, { url: `${base}/#/catalog?track=rag`, pretendToBeVisual: true });
 
 for (const key of [
   "window", "document", "location", "history", "HTMLElement", "Node",
@@ -15,9 +16,15 @@ for (const key of [
 const nativeFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
   const url = typeof input === "string" ? new URL(input, base) : input;
+  if (String(url).includes("/api/auth/me")) return Promise.resolve(sessionResponse());
   return nativeFetch(url, init);
 };
 globalThis.dom = dom;
+
+// Экран первого входа теперь обязателен: проверкам каталога нужен уже вошедший
+// пользователь. Аккаунт кладём в localStorage до импорта app.js.
+globalThis.localStorage = dom.window.localStorage;
+seedWindow(dom.window);
 
 const dialog = document.getElementById("evidence");
 dialog.showModal = function showModal() { this.open = true; };
@@ -47,13 +54,12 @@ const rows = selector => [...document.querySelectorAll(selector)];
 await import(new URL("app.js", root).href);
 
 await waitFor(() => rows("#view tbody tr").length >= 8, "каталог загрузился");
-await waitFor(() => text(".banner").includes("Обработано"), "баннер пакета");
+await waitFor(() => text(".stats").includes("90"), "сводка прогона");
 check("каталог: не меньше 8 публикаций", rows("#view tbody tr").length >= 8, String(rows("#view tbody tr").length));
-check("каталог: баннер пакета", text(".banner").includes("Обработано 4 из 90"), text(".banner"));
-check("каталог: частично в баннере", /\d+ частично/.test(text(".banner")), text(".banner"));
-check("каталог: ошибка видна", text(".banner").includes("ошибка"), text(".banner"));
+const statValues = rows(".stats > div strong").map(node => node.textContent.trim()).join("/");
+check("каталог: сводка прогона", statValues === "90/4/3", statValues);
 check("каталог: статусы текстом", text("#view").includes("частично") && text("#view").includes("в очереди"));
-check("каталог: переключатель области", document.querySelectorAll("#tracks .track").length === 1);
+check("каталог: в шапке только «Паспорт»", document.querySelectorAll(".track-switch .track").length === 1);
 
 // Поиск по каталогу
 const search = document.querySelector(".filters input[type=search]");
@@ -175,10 +181,11 @@ location.hash = "#/doc/rag:d020?track=rag&page=99";
 await waitFor(() => text(".count").includes("страница 9 из 9"), "зажим страницы");
 check("пагинация: страница зажата", text(".count").includes("страница 9 из 9"), text(".count"));
 
-// Область: неизвестная и несовпадение track с document_id
-location.hash = "#/?track=solar";
+// Область: неизвестная и несовпадение track с document_id.
+// Корень "/" открывает мастер загрузки, поэтому срез каталога проверяем на /catalog.
+location.hash = "#/catalog?track=unknown";
 await waitFor(() => text("#view").includes("не подключён"), "неизвестная область");
-check("область: явная ошибка", text("#view").includes("Раздел «Solar» пока не подключён"), text("#view"));
+check("область: явная ошибка", text("#view").includes("Раздел «unknown» пока не подключён"), text("#view"));
 location.hash = "#/doc/rag:d020?track=solar";
 await waitFor(() => text(".doc-main h1").includes("W-RAC"), "track из document_id");
 check("область: document_id приоритетнее", text(".doc-main h1").includes("W-RAC"));
@@ -186,7 +193,7 @@ check("область: document_id приоритетнее", text(".doc-main h1
 // Несуществующий документ
 location.hash = "#/doc/rag:nope?track=rag";
 await waitFor(() => text("#view").includes("Не удалось загрузить данные"), "404 документа");
-check("404: ссылка в каталог", text("#view").includes("Вернуться в каталог"), text("#view"));
+check("404: ссылка на загрузку", text("#view").includes("Добавить PDF"), text("#view"));
 
 const failed = results.filter(item => !item.ok);
 console.log(`\n${results.length - failed.length}/${results.length} проверок пройдено`);

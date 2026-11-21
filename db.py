@@ -26,6 +26,7 @@ import json
 import pathlib
 import sqlite3
 import sys
+import auth
 
 ROOT = pathlib.Path(__file__).resolve().parent
 PASSPORT = ROOT / "passport.json"
@@ -120,6 +121,7 @@ def __getattr__(name):
 
 
 def create_common(db):
+    auth.ensure_schema(db)
     db.executescript("""
         CREATE TABLE IF NOT EXISTS documents (
             area TEXT NOT NULL,

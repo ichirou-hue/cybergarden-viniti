@@ -7,6 +7,9 @@ from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
 from urllib.request import Request, urlopen
+from urllib.request import build_opener
+from http.cookiejar import CookieJar
+import auth
 
 from demo import demo_pdf
 from library import Library
@@ -21,14 +24,19 @@ class SmokeTest(unittest.TestCase):
         pdf = demo_pdf()
         with TemporaryDirectory() as tmp, ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
             server.library = Library(Path(tmp) / "papers.sqlite3")
+            server.auth = auth.Auth(Path(tmp) / "auth.sqlite3", iterations=auth.MIN_ITERATIONS)
             thread = Thread(target=server.serve_forever)
             thread.start()
             url = f"http://127.0.0.1:{server.server_port}"
+            client = build_opener(__import__("urllib.request").request.HTTPCookieProcessor(CookieJar()))
+            login = Request(url + "/api/auth/register", data=json.dumps({"username": "smokeuser", "password": "correct horse"}).encode(), headers={"Content-Type": "application/json"})
+            with client.open(login, timeout=10) as response:
+                csrf = json.load(response)["csrf_token"]
             upload = Request(url + "/api/papers", data=pdf, headers={
-                "Content-Type": "application/pdf", "X-Filename": "demo.pdf",
+                "Content-Type": "application/pdf", "X-Filename": "demo.pdf", "X-CSRF-Token": csrf,
             })
             try:
-                with urlopen(upload, timeout=10) as response:
+                with client.open(upload, timeout=10) as response:
                     result = json.load(response)
                 self.assertEqual(result["id"], sha256(pdf).hexdigest())
                 self.assertEqual(len(result["facts"]), 8)
@@ -36,11 +44,11 @@ class SmokeTest(unittest.TestCase):
                 self.assertEqual([(f["cutoff"], f["value"]) for f in flagged], [(5, .81), (10, .70)])
                 self.assertEqual(flagged[0]["evidence"]["quote"], "81")
                 base = url + "/api/papers/" + result["id"]
-                with urlopen(base + "?download", timeout=10) as response:
+                with client.open(base + "?download", timeout=10) as response:
                     self.assertEqual(json.load(response), result)
-                with urlopen(f"{base}/facts/{flagged[0]['id']}.png", timeout=10) as response:
+                with client.open(f"{base}/facts/{flagged[0]['id']}.png", timeout=10) as response:
                     self.assertEqual(response.read(8), b"\x89PNG\r\n\x1a\n")
-                with urlopen(upload, timeout=10) as response:
+                with client.open(upload, timeout=10) as response:
                     self.assertEqual(json.load(response), result)
                 self.assertEqual(len(server.library.list()), 1)
             finally:

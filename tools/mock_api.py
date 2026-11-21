@@ -7,13 +7,14 @@
 """
 import argparse
 import csv
+import hmac
 import json
 import mimetypes
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO, StringIO
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
@@ -23,6 +24,17 @@ if str(ROOT) not in sys.path:
 
 TRACKS = {"rag": "RAG", "solar": "Solar"}
 STATUSES = ("queued", "running", "done", "partial", "failed")
+
+# Мок-аутентификация повторяет контракт server.py: cookie-сессия, CSRF-токен
+# и per-user профиль. Пароли и сессии живут в памяти процесса.
+MOCK_CSRF = "mock-csrf-token"
+MOCK_USERS = {}
+MOCK_SESSION_COOKIE = "mock_session"
+
+
+def mock_user(username):
+    return {"id": username, "username": username, "created_at": 1763769600}
+
 
 DOCS = [
     {
@@ -355,15 +367,44 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def send_json(self, document, status=200):
-        self.send_data(json.dumps(document, ensure_ascii=False).encode(),
-                       "application/json; charset=utf-8", status)
+    def send_json(self, document, status=200, headers=None):
+        data = json.dumps(document, ensure_ascii=False).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(data)
 
     def error(self, message, status=404):
         self.send_json({"error": message}, status)
 
+    def session_username(self):
+        for item in (self.headers.get("Cookie") or "").split(";"):
+            name, _, value = item.strip().partition("=")
+            if name == MOCK_SESSION_COOKIE and value:
+                return unquote(value)
+        return ""
+
+    def require_session(self):
+        if self.session_username():
+            return True
+        self.error("Требуется вход.", 401)
+        return False
+
+    def require_csrf(self):
+        if hmac.compare_digest(self.headers.get("X-CSRF-Token", ""), MOCK_CSRF):
+            return True
+        self.error("Неверный CSRF-токен.", 403)
+        return False
+
     def static_file(self, path):
         relative = "index.html" if path == "/" else path.lstrip("/")
+        if relative in ("manual-profile", "solar", "solar.html"):
+            relative = "manual-profile.html"
         if relative.startswith("static/"):
             relative = relative[len("static/"):]
         target = (STATIC / relative).resolve()
@@ -383,6 +424,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
             self.send_data(target.read_bytes(), media_type)
+            return
+
+        if path == "/api/auth/me":
+            username = self.session_username()
+            if not username:
+                self.send_json({"user": None})
+            else:
+                self.send_json({"user": mock_user(username), "csrf_token": MOCK_CSRF,
+                                "expires_at": 4102444800})
+            return
+
+        if path == "/api/auth/csrf":
+            username = self.session_username()
+            if not username:
+                self.error("Требуется вход.", 401)
+            else:
+                self.send_json({"csrf_token": MOCK_CSRF})
             return
 
         if path == "/api/documents":
@@ -592,23 +650,74 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0") or 0)
         except ValueError:
             length = 0
+        limit = 40 * 1024 * 1024 if path == "/api/profile/source" else MAX_BYTES
+        if length > limit:
+            self.error(f"Файл больше {limit // (1024 * 1024)} МиБ.", 413)
+            return
+        body = self.rfile.read(length) if length else b""
+        if path in ("/api/auth/register", "/api/auth/login"):
+            try:
+                payload = json.loads(body or b"{}")
+            except (UnicodeError, json.JSONDecodeError):
+                self.error("Тело должно быть корректным JSON в UTF-8.", 400)
+                return
+            username = str(payload.get("username") or "").strip()
+            password = str(payload.get("password") or "")
+            if not username or len(password) < 8:
+                self.error("Некорректное имя пользователя или пароль.", 422)
+                return
+            if path.endswith("register"):
+                if username in MOCK_USERS:
+                    self.error("Пользователь с таким логином или email уже существует.", 409)
+                    return
+                MOCK_USERS[username] = password
+            elif MOCK_USERS.get(username) != password:
+                self.error("Неверное имя пользователя или пароль.", 401)
+                return
+            cookie = f"{MOCK_SESSION_COOKIE}={quote(username)}; Path=/; HttpOnly; SameSite=Lax"
+            self.send_json({"user": mock_user(username), "csrf_token": MOCK_CSRF,
+                            "expires_at": 4102444800},
+                           201 if path.endswith("register") else 200,
+                           headers={"Set-Cookie": cookie})
+            return
+        if path == "/api/auth/logout":
+            if self.session_username() and not self.require_csrf():
+                return
+            self.send_json({"ok": True}, headers={
+                "Set-Cookie": f"{MOCK_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"})
+            return
+        if path in ("/api/documents", "/api/demo", "/api/profile/source"):
+            if not self.require_session() or not self.require_csrf():
+                return
         if path == "/api/documents" and self.headers.get_content_type() != "application/pdf":
             self.error("Ожидается application/pdf.", 415)
             return
         if path == "/api/documents" and length == 0:
             self.error("Нужен PDF размером до 20 МиБ.", 413)
             return
-        if length > MAX_BYTES:
-            self.error("Файл больше 20 МиБ.", 413)
-            return
-        if length:
-            self.rfile.read(length)
         if path == "/api/demo":
             track = self.headers.get("X-Track", "rag")
             if track == "solar":
                 self.error("Демо для области Solar ещё не подключено.", 404)
                 return
             self.send_json(BY_ID["rag:d020"], 201)
+            return
+        if path == "/api/profile/source":
+            self.send_json({
+                "title": "Synthetic profiling article", "author": "Mock",
+                "pages": 2, "warnings": [], "page_texts": {"1": "mock"},
+                "fallback_pages": [],
+                "sources": [
+                    {"id": 1, "page": 1, "bbox": [10, 10, 200, 20], "kind": "text",
+                     "quote": "The device absorber material is MAPbI3."},
+                    {"id": 2, "page": 1, "bbox": [10, 30, 220, 40], "kind": "text",
+                     "quote": "Device A achieved a power conversion efficiency of 21.4 %."},
+                    {"id": 3, "page": 2, "bbox": [10, 10, 200, 20], "kind": "text",
+                     "quote": "The open-circuit voltage was 1.10 V under AM1.5."},
+                    {"id": 4, "page": 2, "bbox": [10, 30, 240, 40], "kind": "text",
+                     "quote": "RAG retrieval accuracy was 0.82 on the benchmark dataset."},
+                ],
+            })
             return
         if path != "/api/documents":
             self.error("Маршрут не найден.", 404)

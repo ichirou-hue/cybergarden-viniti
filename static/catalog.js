@@ -1,6 +1,6 @@
 import { getJSON } from "./api.js";
 import { el, fill } from "./dom.js";
-import { docStatus, number, plural, seconds } from "./ui.js";
+import { docStatus, number, seconds } from "./ui.js";
 
 const PAGE = 50;
 
@@ -39,7 +39,6 @@ export async function renderCatalog(root, ctx) {
   status.value = state.status;
   sort.value = state.sort;
 
-  const banner = el("div", {class: "banner"});
   const rows = el("tbody");
   const count = el("p", {class: "count", "aria-live": "polite"});
   const pager = el("nav", {class: "bar pager", "aria-label": "Страницы каталога"});
@@ -69,7 +68,6 @@ export async function renderCatalog(root, ctx) {
   fill(root,
     el("section", {class: "hero"},
       el("div", {},
-        el("p", {class: "eyebrow", text: "Пакетный разбор"}),
         el("h1", {}, "Каталог", el("br"), "публикаций", el("span", {class: "dot", text: "."})),
         el("p", {class: "lede", text: `${descriptor.note || "Публикации предметной области"}. `
           + "Загрузите PDF или откройте демо, чтобы увидеть результаты и доказательства."}),
@@ -80,7 +78,6 @@ export async function renderCatalog(root, ctx) {
       el("div", {}, el("span", {text: "Обработано"}), statDone),
       el("div", {}, el("span", {text: "Требуют разбора"}), statReview),
     ),
-    banner,
     el("section", {class: "panel catalog-panel"},
       el("header", {class: "panel-head"},
         el("div", {},
@@ -138,31 +135,14 @@ export async function renderCatalog(root, ctx) {
 
   getJSON("/api/jobs", {track: descriptor.track}, ctx.signal).then(data => {
     if (!data || ctx.signal.aborted) return;
-    const failed = Number(data.failed) || 0;
-    const partial = Number(data.partial) || 0;
     statTotal.textContent = number(data.total);
     statDone.textContent = number(data.done);
-    statReview.textContent = number(failed + partial);
-    fill(banner,
-      el("span", {},
-        el("strong", {text: `Обработано ${data.done} из ${data.total}`}),
-        partial ? ` · ${partial} частично` : "",
-        failed ? ` · ${failed} ${plural(failed, "ошибка", "ошибки", "ошибок")}` : "",
-        Number(data.done) < Number(data.total) ? " · прогон продолжается" : "",
-      ),
-      failed ? el("button", {
-        type: "button", class: "secondary", text: "Показать ошибки",
-        onclick: () => {
-          state.status = "failed";
-          status.value = "failed";
-          state.page = 1;
-          load();
-        },
-      }) : null,
-    );
+    statReview.textContent = number((Number(data.failed) || 0) + (Number(data.partial) || 0));
   }).catch(error => {
-    if (error.name === "AbortError" || ctx.signal.aborted) return;
-    fill(banner, el("span", {class: "muted", text: "Прогресс пакета недоступен."}));
+    // Сводка необязательна: без неё счётчики остаются с прочерками.
+    if (error.name !== "AbortError" && !ctx.signal.aborted) {
+      console.warn("Не удалось получить счётчики прогона:", error.message);
+    }
   });
 
   async function load() {
@@ -247,7 +227,7 @@ function emptyState(ctx) {
         type: "button", class: "ghost", text: "Сбросить фильтры",
         onclick: () => {
           const track = ctx.descriptor.track;
-          location.hash = `#/?track=${encodeURIComponent(track)}`;
+          location.hash = `#/catalog?track=${encodeURIComponent(track)}`;
         },
       }),
     ),

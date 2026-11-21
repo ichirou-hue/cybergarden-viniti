@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { seedContext } from "./account.mjs";
 
 // Проверки экрана «Паспорт статьи» (#/passport) в реальном браузере.
 // Требует запущенный мок: ../../.venv/bin/python ../../tools/mock_api.py --port 8799
@@ -47,6 +48,8 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH || chromium.executablePath(),
 });
 const context = await browser.newContext({viewport: {width: 1366, height: 900}, acceptDownloads: true});
+// Каталог закрыт экраном первого входа: подкладываем готовый аккаунт.
+await seedContext(context);
 const page = await context.newPage();
 let alerted = false;
 page.on("dialog", dialog => { alerted = true; dialog.dismiss(); });
@@ -143,8 +146,7 @@ await step("демо", async () => {
   check("демо: в герое импорт и PDF", (await heroActions()).some(text => text.includes("Импорт паспорта JSON")) &&
     (await heroActions()).some(text => text.includes("Привязать исходный PDF")), (await heroActions()).join(" | "));
   check("демо: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
-  check("демо: вкладка RAG на месте и не активна", await page.locator("#tracks .track").isVisible() &&
-    await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
+  check("демо: в шапке только «Паспорт»", await page.locator(".track-switch .track").count() === 1);
   check("демо: «Паспорт» отмечен aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   check("демо: таблица в .results", await page.locator("#view .workspace .results table").count() === 1);
   check("демо: .table-wrap больше нет", await page.locator("#view .table-wrap").count() === 0);
@@ -464,15 +466,15 @@ await step("вложенный source", async () => {
 
 /* 8. Навигация, hidden-контролы и hash-роутинг */
 await step("навигация", async () => {
-  await open("#/?track=rag&q=D014");
-  check("каталог: контролы видны", await page.locator("#upload").isVisible() && await page.locator("#tracks").isVisible());
+  await open("#/catalog?track=rag&q=D014");
+  check("каталог: контролы и паспорт видны", await page.locator("#upload").isVisible() &&
+    await page.locator("#passportLink").isVisible());
   await page.click("#passportLink");
   await page.waitForTimeout(400);
   check("навигация: каталог → паспорт", page.url().endsWith("#/passport"), page.url());
   check("паспорт: H1", (await h1()) === "Паспорт публикации.");
   check("паспорт: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
-  check("паспорт: вкладка RAG осталась", await page.locator("#tracks .track").isVisible() &&
-    await page.locator("#tracks .track[aria-current=\"page\"]").count() === 0);
+  check("паспорт: в шапке только «Паспорт»", await page.locator(".track-switch .track").count() === 1);
   check("паспорт: aria-current", await page.locator("#passportLink").getAttribute("aria-current") === "page");
   await page.goBack();
   await page.waitForTimeout(500);
@@ -482,7 +484,9 @@ await step("навигация", async () => {
   await open("#/doc/rag:d020?track=rag");
   check("навигация: прямая ссылка с двоеточием", (await page.locator("#view h1").innerText()).includes("Web Retrieval-Aware"),
     (await page.locator("#view h1").innerText()).slice(0, 80));
-  await page.click("#passportLink");
+  // На карточке документа тулбар скрыт, поэтому ссылку «Паспорт» из неё
+  // не нажать. Проверяем сам маршрут, сохраняя историю для goBack ниже.
+  await page.evaluate(() => { location.hash = "#/passport"; });
   await page.waitForTimeout(350);
   check("навигация: карточка → паспорт", page.url().endsWith("#/passport"), page.url());
   await page.setInputFiles("#passport", {name: "from-doc.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(general))});
@@ -496,10 +500,10 @@ await step("навигация", async () => {
   check("навигация: ?track=solar не блокирует паспорт", (await h1()) === "Паспорт публикации." &&
     !(await page.locator("#view").innerText()).includes("Раздел «Solar»"), (await page.locator("#view").innerText()).slice(0, 120));
   await open("#/passport");
-  await page.click('#tracks .track:has-text("RAG")');
+  await page.click(".brand");
   await page.waitForTimeout(400);
-  check("паспорт → каталог по вкладке RAG", page.url().includes("#/?track=rag"), page.url());
-  check("каталог: RAG снова активен", (await page.locator("#tracks .track[aria-current=\"page\"]").innerText()).trim() === "RAG");
+  check("логотип ведёт на загрузку", (await page.locator("#wizard").isVisible()) &&
+    /#\/$/.test(page.url()), page.url());
   await open("#/nope");
   check("навигация: неизвестный путь", (await page.locator("#view").innerText()).includes("Страница не найдена"));
 });
@@ -520,6 +524,7 @@ await step("xss", async () => {
 /* 10. Мобильная ширина */
 await step("мобильная ширина", async () => {
   const mobile = await browser.newContext({viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
+  await seedContext(mobile);
   const mp = await mobile.newPage();
   await mp.goto(`${base}/#/passport`, {waitUntil: "networkidle"});
   await mp.waitForTimeout(400);
@@ -532,7 +537,7 @@ await step("мобильная ширина", async () => {
   // Дизайн-решение: на 390px таблица паспорта сжимается по колонкам.
   const table = await mp.locator("#view .workspace .results").evaluate(el => ({scrollWidth: el.scrollWidth, clientWidth: el.clientWidth}));
   check("мобилка: паспортная таблица не скроллится внутри", table.scrollWidth <= table.clientWidth + 1, JSON.stringify(table));
-  await mp.goto(`${base}/#/`, {waitUntil: "networkidle"});
+  await mp.goto(`${base}/#/catalog?track=rag`, {waitUntil: "networkidle"});
   await mp.waitForTimeout(500);
   const catalog = await mp.locator("#view .results").evaluate(el => ({scrollWidth: el.scrollWidth, clientWidth: el.clientWidth}));
   check("мобилка: каталог скроллится внутри", catalog.scrollWidth > catalog.clientWidth, JSON.stringify(catalog));

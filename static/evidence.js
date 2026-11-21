@@ -4,6 +4,7 @@ const dialog = document.getElementById("evidence");
 const title = document.getElementById("evidenceTitle");
 const quote = document.getElementById("evidenceQuote");
 const preview = document.getElementById("preview");
+const pdfFallback = document.getElementById("pdfFallback");
 const fallback = document.getElementById("imageError");
 const closeButton = document.getElementById("evidenceClose");
 const pdfLink = document.getElementById("evidencePdf");
@@ -29,6 +30,7 @@ closeButton.addEventListener("click", () => dialog.close());
 
 dialog.addEventListener("close", () => {
   preview.removeAttribute("src");
+  pdfFallback.removeAttribute("src");
   if (silent) {
     silent = false;
     return;
@@ -42,6 +44,9 @@ dialog.addEventListener("close", () => {
 
 preview.addEventListener("error", () => {
   preview.hidden = true;
+  pdfFallback.src = pdfLink.href;
+  pdfFallback.hidden = false;
+  fallback.textContent = "Подсвеченное превью недоступно. Ниже открыта страница PDF; цитата указана выше.";
   fallback.hidden = false;
 });
 
@@ -59,6 +64,8 @@ export async function openEvidence({docId, source, sourceId, label, signal}) {
   title.textContent = heading;
   quote.textContent = anchor.fragment || anchor.quote || "";
   fallback.hidden = true;
+  pdfFallback.hidden = true;
+  pdfFallback.removeAttribute("src");
   preview.hidden = false;
   preview.alt = `Страница ${anchor.page} PDF с подсветкой источника`;
   preview.src = `/api/documents/${encodeURIComponent(docId)}/anchors/${encodeURIComponent(sid)}.png`;

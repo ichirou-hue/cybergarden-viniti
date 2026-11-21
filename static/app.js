@@ -3,8 +3,11 @@ import { tracks } from "./tracks/index.js";
 import { renderCatalog } from "./catalog.js";
 import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
-import { uploadPDF, openDemo } from "./api.js";
+import { uploadPDF, uploadPDFWithProgress, openDemo } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
+import { stashProfilePDF } from "./pending.js";
+import { mountAuthScreen, currentAccount, isSignedIn, recordActivity, signOutAccount, restoreSession } from "./auth.js";
+import { mountAccountMenu, renderProfile } from "./account.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -15,7 +18,6 @@ const uploadState = document.getElementById("uploadState");
 const demoButton = document.getElementById("demo");
 const passportInput = document.getElementById("passport");
 const passportLink = document.getElementById("passportLink");
-const contextLine = document.getElementById("context");
 const trackBar = document.getElementById("tracks");
 const evidenceDialog = document.getElementById("evidence");
 const wizard = document.getElementById("wizard");
@@ -23,7 +25,15 @@ const dropZone = document.getElementById("dropZone");
 const profileStep = document.getElementById("profileStep");
 let selectedPDF = null;
 
-const app = {descriptors: [], track: "rag", controller: null};
+const authScreen = mountAuthScreen(document.getElementById("authScreen"), {
+  onEnter: enterApp,
+});
+const accountMenu = mountAccountMenu({
+  navigate: hash => { location.hash = hash; },
+  onLogout: () => leaveAccount(),
+});
+
+const app = {descriptors: [], track: "rag", controller: null, started: false};
 let booted = false;
 let lastPath = "";
 
@@ -64,14 +74,13 @@ function say(message, isError = false) {
   statusLine.className = isError ? "status error" : "status";
 }
 
-function setContext(text) {
-  if (contextLine) contextLine.textContent = `Проверка научных данных · ${text}`;
-}
-
 function renderTracks(active = app.track) {
+  // Область больше не переключается в шапке: RAG/Solar выбираются только
+  // на экране загрузки. Ссылка на паспорт остаётся отдельным пунктом.
+  if (!trackBar) return;
   fill(trackBar, app.descriptors.map(item => el("a", {
     class: "track",
-    href: buildHash("/", {track: item.track}),
+    href: buildHash("/catalog", {track: item.track}),
     "aria-current": item.track === active ? "page" : null,
     text: item.label || item.track,
   })));
@@ -88,7 +97,7 @@ function message(title, detail, extra) {
   fill(view, el("div", {class: "empty"},
     el("h1", {class: "empty-title", text: title}),
     detail ? el("p", {class: "muted", text: detail}) : null,
-    extra || el("p", {}, el("a", {href: "#/", text: "К каталогу"})),
+    extra || el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
   ));
 }
 
@@ -110,6 +119,11 @@ function splitDocId(raw) {
 
 async function route() {
   let {path, params} = parse();
+  if (!isSignedIn()) {
+    wizard.hidden = true;
+    authScreen.show();
+    return;
+  }
   const legacyTab = path.match(/^\/doc\/([^/]+)\/(issues|entities|sources)$/);
   if (legacyTab) {
     path = `/doc/${legacyTab[1]}`;
@@ -126,6 +140,9 @@ async function route() {
   document.body.classList.toggle("wizard-active", wizardActive);
   if (wizardActive) {
     app.controller?.abort();
+    setUploadEnabled(true);
+    document.body.dataset.view = "";
+    document.title = "ВИНИТИ · Каталог результатов";
     renderWizard();
     booted = true;
     document.getElementById("bootError").hidden = true;
@@ -144,10 +161,28 @@ async function route() {
     app.controller?.abort();
     document.body.dataset.view = "passport";
     passportLink.setAttribute("aria-current", "page");
-    setContext("паспорт статьи");
     setUploadEnabled(true);
     renderTracks("");
     renderPassport(view, {say, go, patch, params});
+    if (booted && pathChanged) focusView();
+    booted = true;
+    document.getElementById("bootError").hidden = true;
+    return;
+  }
+
+  if (path === "/profile") {
+    app.controller?.abort();
+    document.body.dataset.view = "profile";
+    passportLink.removeAttribute("aria-current");
+    renderTracks("");
+    setUploadEnabled(true);
+    renderProfile(view, {
+      account: currentAccount(),
+      params,
+      navigate: hash => { location.hash = hash; },
+      onLogout: leaveAccount,
+      onSave: updated => accountMenu.sync(updated),
+    });
     if (booted && pathChanged) focusView();
     booted = true;
     document.getElementById("bootError").hidden = true;
@@ -167,14 +202,13 @@ async function route() {
       message(
         `Раздел «${label}» пока не подключён.`,
         "Обработчик области недоступен.",
-      el("p", {}, el("a", {href: "#/?track=rag", text: "Перейти в каталог RAG"})),
+      el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
     );
     return;
   }
   app.track = descriptor.track;
   document.getElementById("demo").hidden = descriptor.demo === false;
   document.body.dataset.view = match ? "doc" : "catalog";
-  setContext(match ? "карточка статьи" : "каталог результатов");
   setUploadEnabled(true);
   renderTracks();
   if (docId && params.track && params.track !== descriptor.track) {
@@ -218,7 +252,7 @@ async function route() {
     fill(view, el("div", {class: "notice bad", role: "alert"},
       el("strong", {text: "Не удалось загрузить данные"}),
       el("p", {text: error.message}),
-      el("p", {}, el("a", {href: "#/", text: "Вернуться в каталог"})),
+      el("p", {}, el("a", {href: "#/", text: "Добавить PDF"})),
     ));
     say(error.message, true);
   }
@@ -287,8 +321,8 @@ function renderWizard() {
   dropZone.hidden = ready;
   profileStep.hidden = !ready;
   document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Профиль" : "Шаг 1 из 2 · Документ";
-  document.getElementById("wizardTitle").textContent = ready ? "Как обработать статью?" : "Загрузите научную статью";
-  document.getElementById("wizardHint").textContent = ready ? "Выберите существующий профиль или создайте свой." : "Перетащите PDF в область ниже или выберите файл на устройстве.";
+  document.getElementById("wizardTitle").textContent = ready ? "Выберите профиль обработки" : "Начните с PDF";
+  document.getElementById("wizardHint").textContent = ready ? "Готовый профиль или свой вариант для этой статьи." : "RAG: до 20 МиБ, Solar: до 32 МиБ.";
   document.getElementById("selectedFile").textContent = ready ? selectedPDF.name : "";
   fill(document.getElementById("profileChoices"), ...["solar", "rag"].map(track => {
     const available = app.descriptors.some(item => item.track === track);
@@ -307,8 +341,8 @@ function selectPDF(file) {
     error.hidden = false;
     return;
   }
-  if (file.size > 20 * 1024 * 1024) {
-    error.textContent = "Файл больше 20 МиБ. Выберите PDF меньшего размера.";
+  if (file.size > 32 * 1024 * 1024) {
+    error.textContent = "Файл больше 32 МиБ. Выберите PDF меньшего размера.";
     error.hidden = false;
     return;
   }
@@ -330,22 +364,64 @@ dropZone.addEventListener("drop", event => selectPDF(event.dataTransfer.files[0]
 document.getElementById("wizardBack").addEventListener("click", () => {
   selectedPDF = null; fileInput.value = ""; renderWizard();
 });
+document.getElementById("createProfile").addEventListener("click", async event => {
+  if (!selectedPDF) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  const link = event.currentTarget;
+  link.setAttribute("aria-busy", "true");
+  link.textContent = "Готовим профиль…";
+  try {
+    await stashProfilePDF(selectedPDF);
+  } catch (error) {
+    // Переход не должен зависеть от хранилища: на странице профиля PDF
+    // можно выбрать повторно.
+    console.warn("Не удалось передать PDF в ручной профиль:", error.message);
+  }
+  location.assign(link.href);
+});
 document.getElementById("wizardSubmit").addEventListener("click", async () => {
   const track = document.querySelector('input[name="wizardProfile"]:checked')?.value;
   if (!selectedPDF || !track) return;
+  if (track === "rag" && selectedPDF.size > 20 * 1024 * 1024) {
+    const error = document.getElementById("wizardError");
+    error.textContent = "Для RAG нужен PDF размером до 20 МиБ. Выберите Solar или другой PDF.";
+    error.hidden = false;
+    return;
+  }
   const button = document.getElementById("wizardSubmit");
   button.disabled = true;
   const error = document.getElementById("wizardError"); error.hidden = true;
-  const result = await busy("Обработка PDF…", () => uploadPDF(selectedPDF, track));
+  const progress = document.getElementById("processingProgress");
+  const bar = document.getElementById("progressBar");
+  progress.hidden = false;
+  bar.value = 0;
+  document.getElementById("progressLabel").textContent = "Передача PDF…";
+  document.getElementById("progressCount").textContent = "0 из 4 этапов";
+  const result = await busy("Обработка PDF…", () => uploadPDFWithProgress(selectedPDF, track, event => {
+    bar.value = event.completed;
+    document.getElementById("progressLabel").textContent = event.label;
+    document.getElementById("progressCount").textContent = `${event.completed} из ${event.total} этапов`;
+  }));
   button.disabled = false;
   if (!result) { error.textContent = uploadState.textContent; error.hidden = false; return; }
+  progress.hidden = true;
   selectedPDF = null;
   openDocument(result);
 });
 
-function openDocument(item) {
+function openDocument(item, kind = "upload") {
   const track = item.track || app.track;
   const id = item.document_id || `${track}:${item.id}`;
+  const account = currentAccount();
+  if (account) {
+    const updated = recordActivity(account, {
+      title: kind === "demo" ? "Открыт демо-документ" : "Разобран PDF",
+      detail: [id, track ? `область ${track}` : ""].filter(Boolean).join(" · "),
+      kind: kind === "demo" ? "account" : "upload",
+    });
+    accountMenu.sync(updated || account);
+  }
   location.hash = `#/doc/${encodeURIComponent(id)}?track=${encodeURIComponent(track)}`;
 }
 
@@ -369,18 +445,113 @@ demoButton.addEventListener("click", async () => {
   const result = await busy("Открываю демо…", () => openDemo(app.track));
   if (!result) return;
   say("");
-  openDocument(result);
+  openDocument(result, "demo");
 });
 
-app.descriptors = await tracks();
-if (!app.descriptors.length) {
-  setUploadEnabled(false);
-  message(
-    "Не удалось загрузить интерфейс.",
-    "Модули областей недоступны. Запустите сервер: .venv/bin/python tools/mock_api.py",
-  );
-} else {
+async function startApp() {
+  if (app.started) return;
+  app.started = true;
+  app.descriptors = await tracks();
+  if (!app.descriptors.length) {
+    setUploadEnabled(false);
+    message(
+      "Не удалось загрузить интерфейс.",
+      "Модули областей недоступны. Запустите сервер: .venv/bin/python tools/mock_api.py",
+    );
+    return;
+  }
   if (!location.hash) history.replaceState(null, "", buildHash("/", {track: app.track}));
   window.addEventListener("hashchange", route);
   await route();
 }
+
+let toastTimer = null;
+
+function toast(message) {
+  const node = document.getElementById("toast");
+  if (!node || !message) return;
+  node.textContent = message;
+  node.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { node.hidden = true; }, 4000);
+}
+
+function focusAfterAuth() {
+  if (document.body.classList.contains("wizard-active")) {
+    document.getElementById("wizardTitle")?.focus?.({preventScroll: true});
+  } else {
+    focusView();
+  }
+}
+
+async function enterApp(account, notice = "") {
+  accountMenu.sync(account);
+  authScreen.hide();
+  lastPath = "";
+  // Вход ведёт на мастер загрузки, а не на каталог. Прямые ссылки на
+  // документ и его источник сохраняются.
+  const {path} = parse();
+  if (!path.startsWith("/doc/")) {
+    history.replaceState(null, "", buildHash("/", {track: app.track}));
+  }
+  // Адрес не трогаем сверх этого: глубокая ссылка должна открыться и при
+  // первом, и при повторном входе.
+  if (!app.started) await startApp();
+  else await route();
+  focusAfterAuth();
+  if (notice) toast(notice);
+}
+
+function leaveAccount() {
+  signOutAccount();
+  app.controller?.abort();
+  accountMenu.sync(null);
+  selectedPDF = null;
+  fileInput.value = "";
+  fileName.textContent = "Загрузить PDF";
+  fileName.title = "";
+  lastPath = "";
+  booted = false;
+  clearTimeout(toastTimer);
+  const toastNode = document.getElementById("toast");
+  if (toastNode) toastNode.hidden = true;
+  fill(view);
+  say("");
+  setUploadEnabled(false);
+  authScreen.reset();
+  authScreen.show("Вы вышли из аккаунта.", false);
+}
+
+async function boot() {
+  let account = null;
+  try {
+    account = await restoreSession();
+  } catch (error) {
+    // Сервер недоступен: показываем вход, а не пустой каталог.
+    authScreen.show("Не удалось проверить сессию. Проверьте, что сервер запущен.", true);
+    return;
+  }
+  if (!account) {
+    document.getElementById("bootError").hidden = true;
+    authScreen.show();
+    return;
+  }
+  authScreen.hide();
+  accountMenu.sync(account);
+  await startApp();
+}
+
+// Истёкшая cookie превращает любой запрос в 401: возвращаем экран входа,
+// не оставляя пользователя с пустыми таблицами.
+window.addEventListener("viniti:unauthorized", () => {
+  if (!isSignedIn()) return;
+  signOutAccount();
+  app.controller?.abort();
+  accountMenu.sync(null);
+  lastPath = "";
+  booted = false;
+  setUploadEnabled(false);
+  authScreen.show("Сессия истекла. Войдите снова.", true);
+});
+
+await boot();
