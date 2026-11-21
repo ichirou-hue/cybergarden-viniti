@@ -102,13 +102,21 @@ class EnvelopeTest(unittest.TestCase):
         self.assertEqual(envelope["run"]["source_revision"], solar_version.PARSER_VERSION)
         self.assertTrue(envelope["warnings"])
 
-    def test_no_results_is_partial_with_a_reason(self):
+    def test_no_results_is_done_with_a_reason(self):
         result = fake_result()
         result["tables"]["results"] = []
         result["tables"]["issues"] = []
         envelope = self.envelope(result)
-        self.assertEqual(envelope["status"], "partial")
+        # The parser finished and found nothing: that is an answer, not a
+        # half-read document. The UI shows its own "no results" notice.
+        self.assertEqual(envelope["status"], "done")
         self.assertTrue(any("Результаты не найдены" in text for text in envelope["warnings"]))
+
+    def test_unreadable_page_marks_the_document_partial(self):
+        result = fake_result()
+        result["warnings"] = ["Страница 3: текстовый слой пуст или отсутствует."]
+        envelope = self.envelope(result)
+        self.assertEqual(envelope["status"], "partial")
 
     def test_envelope_is_json_serializable(self):
         # The store persists the envelope as one JSON column.
@@ -177,6 +185,20 @@ class IngestTest(unittest.TestCase):
             reparsed = store.ingest("S1.pdf", self.pdf)
         self.assertTrue(parse.called)
         self.assertEqual(reparsed["handler_revision"], solar_version.PARSER_VERSION)
+
+    def test_stale_cache_with_another_name_reuses_the_card(self):
+        store = self.store()
+        summary = store.ingest("S1.pdf", self.pdf)
+        with store._connect() as connection, connection:
+            stale = dict(summary, handler_revision=solar_version.PARSER_VERSION - 1)
+            connection.execute("UPDATE solar_documents SET summary = ?",
+                               (json.dumps(stale, ensure_ascii=False),))
+        again = store.ingest("S1-renamed.pdf", self.pdf)
+        # Same bytes, new name, old revision: still one card, refreshed in place.
+        self.assertEqual(again["document_id"], summary["document_id"])
+        with store._connect() as connection:
+            rows = connection.execute("SELECT COUNT(*) FROM solar_documents").fetchone()[0]
+        self.assertEqual(rows, 1)
 
     def test_non_pdf_is_refused(self):
         with self.assertRaises(ValueError):

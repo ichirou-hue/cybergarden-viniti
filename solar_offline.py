@@ -1209,9 +1209,14 @@ def _bandgap(page_texts, material=""):
             value = number_text(match.group(1))
             if not value or not 0.2 <= float(value) <= 5:
                 continue
-            lead = text[max(0, match.start() - 60):match.start()]
-            found = lead + match.group(0)
-            if BANDGAP_NOISE.search(match.group(0)):
+            window = text[max(0, match.start() - 60):match.start()]
+            # The comparison may precede the number ("just above the bulk bandgap
+            # of CdS"), so the lead counts, but only inside its own sentence:
+            # "higher than 3 eV. The absorber has ..." says nothing about 1.65.
+            cut = max(window.rfind(". "), window.rfind("; "))
+            found = (window[cut + 1:] if cut >= 0 else window) + match.group(0)
+            # "wide bandgap" alone is not a comparison and is handled below.
+            if BANDGAP_NOISE.search(found):
                 continue
             if WIDE_GAP.search(found):
                 context = text[max(0, match.start() - 60):match.end() + 60]

@@ -206,9 +206,11 @@ class SolarStore:
         duration = int((time.monotonic() - started) * 1000)
         warnings = list(result.get("warnings") or [])
         # An excluded paper is a finished answer, not a failed parse: the parser
-        # deliberately left the subject tables empty and said why.
+        # deliberately left the subject tables empty and said why. "partial" is
+        # reserved for pages the parser saw but could not read.
         excluded = publication.get("in_scope") == "false"
-        status = "done" if results or excluded else "partial"
+        unreadable = [warning for warning in warnings if "текстовый слой пуст" in warning]
+        status = "partial" if unreadable else "done"
         if excluded:
             reason = publication.get("exclusion_reason") or "причина не указана"
             warnings.append(f"Статья вне области исследования: {reason}.")
@@ -243,16 +245,23 @@ class SolarStore:
         if not data.startswith(b"%PDF-"):
             raise ValueError("Файл не является PDF.")
         content_hash = hashlib.sha256(data).hexdigest()
+        cached_id = None
         with closing(self._connect()) as conn:
-            old = conn.execute("SELECT summary FROM solar_documents WHERE content_hash=?", (content_hash,)).fetchone()
+            old = conn.execute(
+                "SELECT document_id, summary FROM solar_documents "
+                "WHERE content_hash=? ORDER BY updated_at DESC LIMIT 1",
+                (content_hash,)).fetchone()
         if old:
             summary = json.loads(old["summary"])
             # A cached envelope was produced by a specific parser revision: after
             # bumping PARSER_VERSION the site must reparse, not serve old rows.
             if summary.get("handler_revision") == solar_version.PARSER_VERSION:
                 return summary
+            # Reparse into the same card, whatever name the upload came with,
+            # otherwise one PDF shows up twice in the catalogue.
+            cached_id = old["document_id"]
         started = time.monotonic()
-        document_id = f"solar:{Path(name).stem[:32] or 'article'}-{content_hash[:8]}".lower()
+        document_id = cached_id or f"solar:{Path(name).stem[:32] or 'article'}-{content_hash[:8]}".lower()
         publication_id = f"S{content_hash[:12].upper()}"
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "article.pdf"

@@ -219,7 +219,9 @@ solar_offline.build(bytes)           таблицы из координат сл
 области `rag` не пересекаются, даже если бы имена совпали.
 Отдельно от сдачи живёт кэш веб-каталога `data/solar.sqlite3`: таблица
 `solar_documents` хранит summary, конверт и исходный PDF. Это представление для сайта,
-а не часть выгрузки; сдача всегда собирается из `solar_offline` заново.
+а не часть выгрузки; сдача всегда собирается из `solar_offline` заново. У RAG такой же
+кэш `data/rag.sqlite3` с таблицей `rag_documents` (`track`, `content_hash`, `summary`,
+`envelope`, `pdf`); он тоже не участвует в выгрузке.
 
 Значения всех колонок хранятся текстом. Числовые зеркала (`<column>_num`, а также
 `value_num`, `norm_num`, `page_num`) существуют только для фильтрации и сортировки;
@@ -290,10 +292,11 @@ python tools\check_submission.py dev_gold dev --json-report report.json
   `measurement_id`, `aggregation`, `time_point`.
 - Единицы несовместимы как строки: `1000 W/m2` и `100 mW/cm2` - одна освещённость.
   Сравнение условий возможно только после нормализации (`norm.py`).
-- Лимиты размера PDF не один: `library.py` (прототип) - 20 МиБ, `solar_api.py` -
-  32 МиБ, `solar_facts.prepare_pdf` - 40 МиБ. В корпусе есть `area1/test/P042.pdf`
-  (25.1 MiB) и `rag/test/P058.pdf` (26.9 MiB), поэтому жёсткий лимит 20 МиБ их
-  отбрасывает. Сводить лимиты к одному - отдельная задача, сейчас их три.
+- Лимиты размера PDF не один, и это важно для корпуса. `library.py` и `solar_api.py` -
+  32 МиБ, `solar_facts.prepare_pdf` и `server.PARSE_MAX_BYTES` - 40 МиБ, а загрузка
+  RAG через сайт (`rag_api.py`, `X-Track: rag`) - 20 МиБ. Поэтому `area1/test/P042.pdf`
+  (25.1 MiB) проходит, а `rag/test/P058.pdf` (26.9 MiB) через сайт не загрузится, хотя
+  `batch` её разбирает. Сводить лимиты к одному - отдельная задача, сейчас их три.
 - Ревизия экстрактора: `extract.PARSER_VERSION` и `jobs.extractor_revision`. `batch` по
   умолчанию читает ревизию непосредственно из `extract.PARSER_VERSION`, а `batch --resume`
   пропускает публикацию, если `status = ok` и ревизия совпала. Поменял извлечение -
