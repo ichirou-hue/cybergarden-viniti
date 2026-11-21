@@ -27,15 +27,26 @@ TRACK = "solar"
 
 
 def _anchor(source):
-    """One source in the shape the frontend evidence dialog expects."""
+    """One source in the shape the frontend evidence dialog expects.
+
+    The drawable box comes from the verified ``pdf_source`` source itself, so
+    nothing is guessed; ``bboxes`` keeps the RAG list shape for a multi-line
+    fragment.
+    """
+    bbox = source.get("bbox")
+    boxes = [list(map(float, bbox))] \
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4 else []
     return {
         "source_id": source["id"],
         "page": source["page"],
+        "section": source.get("section", ""),
+        "figure": source.get("figure", ""),
         "kind": source.get("kind") or "text",
         "table": source.get("table", ""),
         "fragment": source.get("quote", ""),
         "quote": source.get("quote", ""),
-        "bbox": source.get("bbox"),
+        "bbox": boxes[0] if boxes else None,
+        "bboxes": boxes,
     }
 
 

@@ -125,6 +125,9 @@ pdf_source.extract(bytes)            текст страниц (pypdf), табл
 `batch.py` крутит эту цепочку по одной публикации и ведёт `jobs`; `pipeline.py` вызывает
 `batch.run`, `issues`, `export_csv` и `tools/gate` по очереди на каждую область.
 `server.py` и `serve_data.py` читают ту же базу и ничего не пересчитывают.
+Карточка `solar:` повторяет контракт якорей RAG: `anchors/{id}.json` и
+`anchors/{id}.png`; геометрию (`bbox`/`bboxes`) `solar_api` берёт из `pdf_source`
+sources при ingest, PNG рисует тот же `rag_api.render_anchor_png`.
 
 У области solar основной экстрактор - детерминированный `solar_offline`, а не
 `extract.TableFiller`. `batch.py` и `pipeline.py` вызывают его по умолчанию через

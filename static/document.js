@@ -360,9 +360,130 @@ function detailRow(result, ctx, columns) {
     : null;
 
   const row = el("tr", {class: "detail"},
-    el("td", {colspan: columns.length + 1}, list, issues, fragment));
+    el("td", {colspan: columns.length + 2}, list, issues, fragment));
   row.hidden = true;
   return row;
+}
+
+/* ------------------------------------------------------------- выбор строк */
+
+function resultSourceId(result) {
+  const source = result.source;
+  if (!source) return null;
+  const id = source.source_id;
+  return id === undefined || id === null || id === "" ? null : String(id);
+}
+
+function createSelection(ctx, docId) {
+  const entries = new Map();
+  const visible = [];
+  let lastIndex = -1;
+
+  const count = el("span", {class: "selection-count", "aria-live": "polite"});
+  const pages = el("span", {class: "selection-pages"});
+  const show = el("button", {
+    type: "button", class: "primary", text: "Показать в PDF",
+    title: "Открыть источник; если выбрано несколько, откроется самый ранний по странице",
+  });
+  const clear = el("button", {type: "button", class: "secondary", text: "Сбросить"});
+  const head = el("input", {type: "checkbox", "aria-label": "Выбрать все строки на странице"});
+  const panel = el("div", {
+    class: "bar selection", role: "group", "aria-label": "Выбранные строки", hidden: true,
+  }, count, pages, el("span", {class: "selection-actions"}, show, clear));
+
+  function has(resultId) {
+    return entries.has(resultId);
+  }
+
+  function update() {
+    const total = entries.size;
+    panel.hidden = total === 0;
+    count.textContent = `Выбрано: ${number(total)}`;
+    const numbers = [...new Set([...entries.values()]
+      .map(entry => entry.source && entry.source.page)
+      .filter(page => page !== undefined && page !== null))]
+      .sort((a, b) => a - b);
+    pages.textContent = numbers.length
+      ? `Страницы: ${numbers.slice(0, 8).join(", ")}${numbers.length > 8 ? ` +${numbers.length - 8}` : ""}`
+      : "";
+    show.disabled = total === 0;
+    const selectable = visible.filter(item => item.sourceId);
+    const chosen = selectable.filter(item => entries.has(item.result.result_id)).length;
+    head.checked = selectable.length > 0 && chosen === selectable.length;
+    head.indeterminate = chosen > 0 && chosen < selectable.length;
+    head.disabled = selectable.length === 0;
+  }
+
+  function setItem(index, checked) {
+    const item = visible[index];
+    if (!item || !item.sourceId) return;
+    if (checked) {
+      entries.set(item.result.result_id, {
+        source: item.result.source,
+        label: item.result.metric_name || item.result.result_id,
+      });
+    } else {
+      entries.delete(item.result.result_id);
+    }
+    item.checkbox.checked = checked;
+    item.row.classList.toggle("selected", checked);
+  }
+
+  function toggle(index, checked, shift) {
+    if (shift && lastIndex >= 0 && lastIndex < visible.length) {
+      const from = Math.min(lastIndex, index);
+      const to = Math.max(lastIndex, index);
+      for (let position = from; position <= to; position += 1) setItem(position, checked);
+    } else {
+      setItem(index, checked);
+    }
+    lastIndex = index;
+    update();
+  }
+
+  function reset(items) {
+    visible.length = 0;
+    visible.push(...items);
+    lastIndex = -1;
+    update();
+  }
+
+  head.addEventListener("change", () => {
+    const checked = head.checked;
+    visible.forEach((item, index) => setItem(index, checked));
+    lastIndex = -1;
+    update();
+  });
+
+  clear.addEventListener("click", () => {
+    entries.clear();
+    visible.forEach(item => {
+      item.checkbox.checked = false;
+      item.row.classList.remove("selected");
+    });
+    lastIndex = -1;
+    update();
+  });
+
+  show.addEventListener("click", () => {
+    const chosen = [...entries.values()]
+      .sort((a, b) => (a.source.page ?? 0) - (b.source.page ?? 0));
+    if (!chosen.length) return;
+    const first = chosen[0];
+    openEvidence({docId, source: first.source, label: first.label, signal: ctx.signal})
+      .then(() => {
+        if (chosen.length > 1) {
+          ctx.say(`Открыт первый из ${chosen.length} выбранных источников: страница ${first.source.page ?? "?"}.`);
+        }
+      })
+      .catch(error => {
+        if (error.name === "AbortError") return;
+        ctx.say(`Не удалось открыть источник: ${error.message}`, true);
+      });
+  });
+
+  update();
+  return {panel, head, has, toggle, reset};
 }
 
 async function renderResults(body, ctx, summary, facets, facetsOk) {
@@ -409,12 +530,15 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
     controls.push(el("label", {}, filter.label, select));
   }
 
+  const selection = createSelection(ctx, ctx.docId);
   const head = el("thead", {}, el("tr", {},
+    el("th", {scope: "col", class: "select-cell"}, selection.head),
     el("th", {scope: "col", class: "expander"}),
     ...descriptor.columns.map(column => el("th", {scope: "col", text: column.label})),
   ));
   const widths = {metric: 120, value: 190, config: 120, dataset: 130, group: 140, status: 105, check: 160, source: 180};
   const cols = el("colgroup", {},
+    el("col", {style: "width: 40px"}),
     el("col", {style: "width: 28px"}),
     ...descriptor.columns.map(column => el("col", {style: `width: ${widths[column.key] || 120}px`})),
   );
@@ -436,6 +560,7 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
     facetsOk ? null : el("p", {class: "notice warn", role: "status",
       text: "Фильтры по значениям недоступны: не удалось загрузить фасеты. Поиск и отметка «только с замечаниями» работают."}),
     count,
+    selection.panel,
     placeholder,
     box,
     pager,
@@ -518,7 +643,7 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
       state.page = pages;
       return load();
     }
-    drawResultRows(data, rows, ctx, descriptor, state.result);
+    drawResultRows(data, rows, ctx, descriptor, state.result, selection);
     fill(placeholder);
     box.hidden = data.total === 0;
     if (!data.total) {
@@ -608,24 +733,47 @@ async function renderResults(body, ctx, summary, facets, facetsOk) {
   await load();
 }
 
-function drawResultRows(data, rows, ctx, descriptor, targetId) {
+function drawResultRows(data, rows, ctx, descriptor, targetId, selection) {
   rows.replaceChildren();
-  if (!data.items.length) return;
+  const items = [];
   for (const result of data.items) {
+    const index = items.length;
+    const sourceId = resultSourceId(result);
+    const checked = selection.has(result.result_id);
     const expander = el("button", {
       type: "button", class: "ghost", "aria-expanded": "false",
       "aria-label": `Подробности ${result.result_id}`, text: "▸",
     });
+    const checkbox = el("input", {
+      type: "checkbox", class: "row-check", checked: checked || null,
+      disabled: sourceId ? null : "",
+      "aria-label": sourceId
+        ? `Выбрать ${result.result_id}: ${result.metric_name || "результат"}`
+        : `У результата ${result.result_id} нет источника`,
+    });
     const detail = detailRow(result, ctx, descriptor.columns);
     detail.id = `detail-${result.result_id}`;
     expander.setAttribute("aria-controls", detail.id);
-    const row = el("tr", {class: "result"}, el("td", {class: "expander"}, expander));
+    const row = el("tr", {class: "result" + (checked ? " selected" : "")},
+      el("td", {class: "select-cell"}, checkbox),
+      el("td", {class: "expander"}, expander),
+    );
     for (const column of descriptor.columns) row.append(cell(column, result, ctx));
 
     expander.addEventListener("click", () => {
       detail.hidden = !detail.hidden;
       expander.setAttribute("aria-expanded", detail.hidden ? "false" : "true");
       expander.textContent = detail.hidden ? "▸" : "▾";
+    });
+    checkbox.addEventListener("click", event => {
+      selection.toggle(index, checkbox.checked, event.shiftKey);
+    });
+    row.addEventListener("click", event => {
+      if (event.detail > 1) return;
+      if (event.target.closest("button, a, input, label, select")) return;
+      const text = window.getSelection && window.getSelection();
+      if (text && !text.isCollapsed) return;
+      selection.toggle(index, !selection.has(result.result_id), event.shiftKey);
     });
     if (targetId && result.result_id === targetId) {
       row.classList.add("target");
@@ -634,8 +782,10 @@ function drawResultRows(data, rows, ctx, descriptor, targetId) {
       expander.setAttribute("aria-expanded", "true");
       expander.textContent = "▾";
     }
+    items.push({result, row, checkbox, sourceId});
     rows.append(row, detail);
   }
+  selection.reset(items);
 }
 
 /* ------------------------------------------------------------------ сущности */
