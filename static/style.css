@@ -208,8 +208,12 @@ input[type=search]::placeholder { color: #7d9296; }
 .doc-hero h1 {
   font-size: clamp(1.6rem, 3vw, 2.5rem); line-height: 1.16; letter-spacing: -.035em;
   margin: 6px 0 10px; max-width: 32ch;
+  /* Длинные слова без пробелов (химические названия из PDF) должны переноситься,
+     иначе строка вылезает из колонки и уходит под кнопки справа. */
+  overflow-wrap: anywhere;
 }
-.doc-hero .doc-main { min-width: 0; }
+.doc-hero .doc-main { min-width: 0; flex: 1 1 24ch; }
+.doc-hero .doc-actions { flex: 0 1 auto; justify-content: flex-end; }
 
 /* ---------------------------------------------------------------- сводка */
 
@@ -454,6 +458,11 @@ dialog img {
 @media (max-width: 1024px) {
   .quote { min-width: 300px; }
   .source-cell button { padding: 4px 8px; font-size: .82rem; }
+  /* Заголовок документа и кнопки в одну строку не помещаются: колонка заголовка
+     сжимается настолько, что длинные названия рвутся через каждые несколько букв. */
+  .doc-hero { flex-direction: column; align-items: start; }
+  .doc-hero .doc-main { flex: 1 1 auto; }
+  .doc-hero .doc-actions { justify-content: flex-start; }
 }
 
 @media (max-width: 880px) {
