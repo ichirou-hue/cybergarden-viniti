@@ -4,6 +4,7 @@
 // Ключ совпадает с auth.js (PROFILE_PREFIX).
 
 export const TEST_ACCOUNT = {
+  id: "test-user",
   name: "Тестовый Пользователь",
   email: "test@viniti.ru",
   org: "ВИНИТИ РАН",
@@ -17,7 +18,7 @@ export const TEST_SESSION_COOKIE = "mock_session";
 const MOCK_URL = process.env.MOCK_URL || "http://127.0.0.1:8799";
 
 function profileKey(account) {
-  return `viniti.profile.v1:${account.email}`;
+  return `viniti.profile.v1:${account.id || account.email}`;
 }
 
 export function seedWindow(target, account = TEST_ACCOUNT) {

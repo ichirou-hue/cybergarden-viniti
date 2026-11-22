@@ -143,7 +143,7 @@ await step("демо", async () => {
   check("демо: CSV выключен", await csvButton().isDisabled());
   check("демо: PDF выключен", await page.locator('#view input[type="file"]').isDisabled());
   check("демо: в герое нет CSV", !(await heroActions()).some(text => text.includes("Скачать CSV")), (await heroActions()).join(" | "));
-  check("демо: в герое импорт и PDF", (await heroActions()).some(text => text.includes("Импорт паспорта JSON")) &&
+  check("демо: в герое импорт и PDF", (await heroActions()).some(text => text.includes("Открыть паспорт")) &&
     (await heroActions()).some(text => text.includes("Привязать исходный PDF")), (await heroActions()).join(" | "));
   check("демо: каталожные действия скрыты", !(await page.locator("#upload").isVisible()));
   check("демо: в шапке только «Паспорт»", await page.locator(".track-switch .track").count() === 1);
@@ -540,7 +540,11 @@ await step("мобильная ширина", async () => {
   await mp.goto(`${base}/#/catalog?track=rag`, {waitUntil: "networkidle"});
   await mp.waitForTimeout(500);
   const catalog = await mp.locator("#view .results").evaluate(el => ({scrollWidth: el.scrollWidth, clientWidth: el.clientWidth}));
-  check("мобилка: каталог скроллится внутри", catalog.scrollWidth > catalog.clientWidth, JSON.stringify(catalog));
+  // Дизайн-решение: на телефоне второстепенные колонки скрыты, поэтому
+  // каталог тоже обходится без внутренней горизонтальной прокрутки.
+  check("мобилка: каталог без внутреннего скролла", catalog.scrollWidth <= catalog.clientWidth + 1, JSON.stringify(catalog));
+  const pageOverflow = await mp.evaluate(() => ({page: document.documentElement.scrollWidth, viewport: innerWidth}));
+  check("мобилка: каталог без overflow страницы", pageOverflow.page <= pageOverflow.viewport, JSON.stringify(pageOverflow));
 
   const exportData = await (await context.request.get(`${base}/api/documents/rag:d020/export.json`)).json();
   await mp.goto(`${base}/#/passport`, {waitUntil: "networkidle"});

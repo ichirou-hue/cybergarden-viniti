@@ -130,9 +130,9 @@ class SolarIndependentQA(unittest.TestCase):
     def run_cli(self, pdf, output, *options):
         environment = {k: v for k, v in os.environ.items()
                        if k not in {"OPENROUTER_API_KEY", "OPENROUTER_MODEL"}}
-        return subprocess.run([sys.executable, str(ROOT / "solar_extract.py"), str(pdf),
+        return subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "solar_extract.py"), str(pdf),
                                "-o", str(output), *options], env=environment,
-                              capture_output=True, text=True, timeout=30)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
 
     def test_cli_missing_key_no_partial_export(self):
         with TemporaryDirectory() as tmp:

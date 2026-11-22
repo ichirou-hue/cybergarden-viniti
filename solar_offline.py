@@ -125,6 +125,16 @@ def clean(text):
     return " ".join(unicodedata.normalize("NFKC", text or "").replace("\u2212", "-").split())
 
 
+def _dedupe_label(label):
+    """Device label in the form the prose/table duplicate check compares.
+
+    ``Control`` printed in a table and ``control`` written in a sentence name
+    the same sample. An empty label stays empty: a value with no named device is
+    not evidence that it belongs to a table row of some other device.
+    """
+    return clean(label).lower()
+
+
 def metric_from_text(text):
     """Return the metric named in a header label or sentence fragment."""
     text = clean(text)
@@ -826,7 +836,14 @@ def _group_records(page, lines):
 
 # ---------------------------------------------------------------- prose
 
-SENTENCE_END = re.compile(r"[.!?][\"')\]]?$")
+# One definition for the whole module: a second one further down used to shadow
+# this name, so the wrapped-delta check silently read a different rule than the
+# one written next to it. A line that ends a sentence stops the delta verb of
+# the previous line from governing the next one; a comma keeps the list open, so
+# a wrapped delta list still reads as a delta. A colon or semicolon ends the
+# clause as before. Closing quotes and brackets belong to the ending
+# (``... 16.5 %."``).
+SENTENCE_END = re.compile(r"[.!?:;][\"')\]]?\s*$")
 ABBREVIATIONS = ("e.g.", "i.e.", "et al.", "Fig.", "Figs.", "vs.", "ca.", "approx.", "ref.", "Eq.")
 
 
@@ -933,13 +950,24 @@ def prose_records(page_text, devices):
     a subscript, a year, a reference or a relative change.
     """
     records = []
+    previous = ""
+    delta_mode = False
     for offset, sentence in _sentences(page_text):
         metrics = [item for item in metric_mentions(sentence) if item["metric"] in MY_METRICS]
         if not metrics:
+            previous = sentence
+            delta_mode = False
             continue
         numbers = _number_mentions(sentence)
         if not numbers:
+            previous = sentence
+            delta_mode = False
             continue
+        # "improves Voc of 0.127 V, Jsc of 3.1 ..." governs every item of the
+        # list, including one that wraps to the next line.
+        delta_mode = _delta_governed(sentence, metrics) \
+            or (delta_mode and not SENTENCE_END.search(previous))
+        context = "" if SENTENCE_END.search(previous) else previous
         pairs = []
         # A list such as "JSC, VOC, FF and η were 31.3, 0.41, 59 and 7.8" pairs
         # the metrics and the values in order; nearest-name pairing would give
@@ -957,8 +985,13 @@ def prose_records(page_text, devices):
                 after = [m for m in metrics if m["start"] >= number["end"]]
                 if after:
                     pairs.append((after[0], number))
+        labels = _label_sequence(sentence, numbers, devices)
         for metric, number in pairs:
-            if not _prose_pair_ok(metric, number, sentence):
+            # A second sentence on the same printed line is not governed by the
+            # delta verb of the first one.
+            governed = delta_mode and SENTENCE_BREAK.search(sentence[:metric["start"]]) is None
+            left = (context + " " + sentence[:number["start"]]).strip()
+            if not _prose_pair_ok(metric, number, sentence, governed, left):
                 continue
             name = _prose_metric(metric["metric"], number, sentence)
             records.append({
@@ -968,11 +1001,13 @@ def prose_records(page_text, devices):
                                             decimal_of(number["value"])),
                 "spread_value": "",
                 "aggregation": "",
-                "device_label": _nearby_label(sentence, number["end"], devices),
+                "device_label": labels.get(number["start"]) or
+                _nearby_label(sentence, number["end"], devices),
                 "quote": sentence.strip(),
                 "sentence": sentence,
                 "page": None,
             })
+        previous = sentence
     return records
 
 
@@ -1006,8 +1041,75 @@ RELATIVE = re.compile(
     re.I,
 )
 
+# "improves Voc of 0.127 V" names the gain over another device, not the Voc of
+# this one. The verb governs the metric, so it must sit directly before the
+# metric name; an adjective ("the improved device showed a PCE of 16.5 %") does
+# not make the measurement a delta. A change goes both ways, so the negative
+# verbs are in the set: "the PCE decreased by 1.2 %" is as much a delta as an
+# increase.
+DELTA_STEMS = (
+    r"improv|increas|enhanc|boost|gain|reduc|decreas|drop|declin|diminish|shrink|"
+    r"lower|rais|grow|grew|ris(?:e|es|en|ing)|fall|fell|climb")
+# Bare "lower" is a comparative adjective ("the lower PCE of 12 %"), so the
+# list-governing check takes only inflected verb forms of it.
+DELTA_GOVERNING_STEMS = (
+    r"improv|increas|enhanc|boost|gain|reduc|decreas|drop|declin|diminish|shrink|"
+    r"lower(?:s|ed|ing)|rais|grow|grew|ris(?:e|es|en|ing)|fall|fell|climb")
+DELTA_VERB = re.compile(r"\b(?:" + DELTA_STEMS + r")\w*", re.I)
+SENTENCE_BREAK = re.compile(r"[.!?][\"')\]]?\s")
+DELTA_BEFORE = re.compile(
+    r"\b(?:" + DELTA_GOVERNING_STEMS + r")\w*\s+"
+    r"(?:(?:the|its|their|a|an)\s+)?(?:\w+\s+){0,1}$",
+    re.I,
+)
+# The delta is linked to its number by "of" or "by", not by "to": "improved to
+# 16.5 %" is the final value of a measurement, not a change. An adverb between
+# the link and the number ("increased by roughly 1.2 %") does not make it a
+# value either.
+DELTA_ADVERB = (r"(?:about|approximately|approx\.|ca\.|around|roughly|nearly|"
+                r"almost|some|~)?")
+DELTA_LINK = re.compile(r"\b(?:of|by)\s*" + DELTA_ADVERB + r"\s*$", re.I)
+# "an increase of 25 % in PCE" writes the change before the metric name.
+DELTA_NUMBER_BEFORE = re.compile(
+    r"\b(?:" + DELTA_STEMS + r")\w*\s+(?:of|by)\s*" + DELTA_ADVERB + r"\s*$", re.I)
 
-def _prose_pair_ok(metric, number, sentence):
+# "efficiency exceeding 9 %" is a lower bound taken from the literature, not a
+# measured PCE. The threshold word has to sit right before the number, so
+# "PCE over the 1000 h test was 15 %" is still read.
+THRESHOLD_END = re.compile(
+    r"\b(?:exceed\w*|over|above|more\s+than|greater\s+than|higher\s+than)\s*$", re.I)
+
+
+def _delta_phrase(metric, number, sentence, governed=False, left=""):
+    """True when the number is a printed change, not the metric's value.
+
+    ``governed`` says a delta verb governs the sentence's metric list, which
+    keeps ``improves Voc of 0.127 V, Jsc of 3.1 ...`` from turning each item of
+    the list into a measurement. ``left`` is the text before the number,
+    including the wrapped line above when the list continues there.
+    """
+    if metric["end"] <= number["start"]:
+        between = sentence[metric["end"]:number["start"]]
+        if DELTA_LINK.search(between) is None:
+            return False
+        return bool(governed or DELTA_VERB.search(between))
+    return bool(DELTA_NUMBER_BEFORE.search(left)
+                or (governed and DELTA_LINK.search(left) is not None))
+
+
+def _delta_governed(sentence, metrics):
+    """True when a delta verb directly precedes a metric in this sentence."""
+    return any(DELTA_BEFORE.search(sentence[:metric["start"]]) for metric in metrics)
+
+
+def _threshold_phrase(metric, number, sentence):
+    """True when the number is a lower bound printed next to the metric."""
+    start, end = (metric["end"], number["start"]) if metric["end"] <= number["start"] \
+        else (number["end"], metric["start"])
+    return THRESHOLD_END.search(sentence[start:end]) is not None
+
+
+def _prose_pair_ok(metric, number, sentence, governed=False, left=""):
     """Reject numbers that only look like measurements."""
     text = number_text(number["value"])
     unit = number["unit"] or ""
@@ -1024,18 +1126,75 @@ def _prose_pair_ok(metric, number, sentence):
             return False
     if re.match(r"^\s*(?:±|\+/-)", sentence[number["end"]:number["end"] + 6]):
         return False
+    if _delta_phrase(metric, number, sentence, governed, left) \
+            or _threshold_phrase(metric, number, sentence):
+        return False
     return RELATIVE.search(sentence[number["end"]:number["end"] + 14]) is None
 
 
+def _label_sequence(sentence, numbers, devices):
+    """Labels of a printed list, in the order the values are written.
+
+    ``The efficiency of NiO/GO and NiO are 15.3 % and 7.8 %`` names the samples
+    and then the values; pairing by position keeps the second value with the
+    second sample, while nearest-name pairing would give both to ``NiO/GO``.
+    An empty mapping means the sentence is not such a list and the caller has
+    to fall back to the nearest label.
+    """
+    found = {}
+    for device in devices:
+        form = clean(device["label"]).lower()
+        if not form:
+            continue
+        pattern = r"(?<![\w])" + re.escape(form) + r"(?![\w])"
+        for match in re.finditer(pattern, sentence.lower()):
+            # ``NiO`` also matches at the start of ``NiO/GO``; the longer label
+            # is the sample actually named at that position.
+            if len(device["label"]) > len(found.get(match.start(), "")):
+                found[match.start()] = device["label"]
+    if len(found) < 2 or len(found) != len(numbers):
+        return {}
+    ordered = sorted(found.items())
+    # Every name has to be written before the first value, otherwise the order
+    # of the values does not follow the order of the names.
+    if ordered[-1][0] >= numbers[0]["start"]:
+        return {}
+    return {number["start"]: label for (_, label), number in zip(ordered, numbers)}
+
+
 def _nearby_label(sentence, position, devices):
-    """Device named in the sentence before a value, leftmost match of the set."""
+    """Device named in the sentence before a value, leftmost match of the set.
+
+    The whole label is matched first, so ``NiO/GO`` is preferred over its own
+    prefix ``NiO`` when both start at the same word: taking the shorter would
+    move the value to a different device without any evidence for it. A label
+    whose printed form does not repeat in the sentence falls back to its tokens.
+    """
+    best = _label_at(sentence, position, devices, whole=True)
+    if best:
+        return best
+    return _label_at(sentence, position, devices, whole=False)
+
+
+def _label_at(sentence, position, devices, whole):
+    """Leftmost label occurrence before ``position``; longer label on a tie."""
     best = ""
     best_position = -1
     lowered = sentence.lower()
     for device in devices:
-        for token in _label_tokens(device["label"]):
-            for match in re.finditer(r"(?<![\w])" + re.escape(token), lowered):
-                if match.start() <= position and match.start() > best_position:
+        if whole:
+            forms = [clean(device["label"]).lower()]
+        else:
+            forms = _label_tokens(device["label"])
+        for form in forms:
+            if not form:
+                continue
+            pattern = r"(?<![\w])" + re.escape(form) + (r"(?![\w])" if whole else "")
+            for match in re.finditer(pattern, lowered):
+                if match.start() > position:
+                    continue
+                if best_position < 0 or match.start() < best_position \
+                        or (match.start() == best_position and len(device["label"]) > len(best)):
                     best, best_position = device["label"], match.start()
     return best
 
@@ -1190,6 +1349,15 @@ def _absorber(page_text):
 BANDGAP = re.compile(
     r"(?:band[\s\-\u2010\u2011]*gap|\bEg\b)[^.]{0,80}?(\d+(?:[.,]\d+)?)\s*(?:eV|эВ)",
     re.I)
+# A range prints the unit on the last bound only ("between 1.62 and 1.51 eV")
+# as often as on both ("between 1.62 eV and 1.51 eV"). The template wants the
+# first bound of the stated range, and BANDGAP cannot reach it across the dot of
+# "1.62", so the range is matched before the single value.
+BANDGAP_RANGE = re.compile(
+    r"(?:band[\s\-\u2010\u2011]*gap|\bEg\b)[^.]{0,60}?"
+    r"\b(?:between|from)\s+(\d+(?:[.,]\d+)?)\s*(?:eV|эВ)?\s*"
+    r"(?:and|to|[-\u2013])\s*\d+(?:[.,]\d+)?\s*(?:eV|эВ)",
+    re.I)
 # "wide bandgap, higher than 3 eV" describes a transport layer, not the
 # absorber; taking the first match would put that number on every material.
 # Only the words glued to this bandgap count: "more than 104 cm-1" elsewhere in
@@ -1205,31 +1373,46 @@ def _bandgap(page_texts, material=""):
     A value inside a comparison ("higher than", "above") is skipped: the
     template wants the absorber value, not a threshold. "Wide bandgap" is
     skipped only when the context is not the absorber - a wide-gap absorber is
-    still an absorber, while a wide-gap transport layer is not.
+    still an absorber, while a wide-gap transport layer is not. A stated range
+    contributes its first bound, in the order the paper writes it.
     """
     for page in sorted(page_texts, key=int):
         text = clean(page_texts[page])
-        for match in BANDGAP.finditer(text):
-            value = number_text(match.group(1))
+        matches = [(match.start(), match.group(1), match.group(0))
+                   for match in BANDGAP_RANGE.finditer(text)]
+        matches.extend((match.start(), match.group(1), match.group(0))
+                       for match in BANDGAP.finditer(text))
+        # Both patterns can start at the same word ("band gap between 1.62 eV
+        # and ..." is also a single value for BANDGAP). Sorting is stable, so
+        # the range comes first and its quote, which contains both bounds,
+        # survives the dedupe below.
+        matches.sort(key=lambda item: item[0])
+        seen = set()
+        for start, raw, quote in matches:
+            if start in seen:
+                continue
+            seen.add(start)
+            value = number_text(raw)
             if not value or not 0.2 <= float(value) <= 5:
                 continue
             # Only the words glued to this gap count: "more than 104 cm-1 with a
             # band gap of 1.62 eV" is an absorption coefficient plus a real gap,
             # while "just above the bulk bandgap of CdS" is a comparison. A
             # sentence-wide window would let either phrase veto the other.
-            lead = text[max(0, match.start() - 24):match.start()]
-            found = lead + match.group(0)
+            lead = text[max(0, start - 24):start]
+            found = lead + quote
             if BANDGAP_NOISE.search(found):
                 continue
             if WIDE_GAP.search(found):
-                context = text[max(0, match.start() - 60):match.end() + 60]
+                context = text[max(0, start - 60):start + len(quote) + 60]
                 absorber = "absorber" in context.lower() \
                     or (material and _compact(material) in _compact(context))
                 if not absorber:
                     continue
-            if BANDGAP_AFTER.match(text[match.end():match.end() + 20]):
+            after = text[start + len(quote):start + len(quote) + 20]
+            if BANDGAP_AFTER.match(after):
                 continue
-            return value, page, match.group(0)
+            return value, page, quote
     return "", None, ""
 
 
@@ -1782,14 +1965,23 @@ def build(data, publication_id):
     candidates = table_rows + prose_rows
     # A sentence that repeats a number already read from a table is the same
     # result said twice; keeping both only adds a row that no gold bucket wants.
-    table_values = {(record["metric_name"], number_text(record["raw_value"]))
+    # The key carries the device and the sweep, because the same metric/value on
+    # another device or another measurement is a different result and dropping
+    # it would silently lose data.
+    table_values = {(_dedupe_label(record["device_label"]),
+                     record["metric_name"],
+                     number_text(record["raw_value"]),
+                     record.get("scan", ""))
                     for record in table_rows}
     kept = []
     for record in candidates:
         if record["metric_name"] not in RESULT_METRICS:
             continue
         if record["origin"] == "prose" \
-                and (record["metric_name"], number_text(record["raw_value"])) in table_values:
+                and (_dedupe_label(record["device_label"]),
+                     record["metric_name"],
+                     number_text(record["raw_value"]),
+                     record.get("scan", "")) in table_values:
             continue
         value = decimal_of(record["raw_value"])
         unit = record["raw_unit"]

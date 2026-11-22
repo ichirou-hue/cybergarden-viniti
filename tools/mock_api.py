@@ -7,11 +7,11 @@
 """
 import argparse
 import csv
+import hashlib
 import hmac
 import json
 import mimetypes
 import sys
-import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -31,17 +31,6 @@ STATUSES = ("queued", "running", "done", "partial", "failed")
 MOCK_CSRF = "mock-csrf-token"
 MOCK_USERS = {}
 MOCK_SESSION_COOKIE = "mock_session"
-PARSE_JOBS = {}
-MOCK_SOURCES = [
-    {"id": 1, "page": 1, "bbox": [10, 10, 200, 20], "kind": "text",
-     "quote": "The device absorber material is MAPbI3."},
-    {"id": 2, "page": 1, "bbox": [10, 30, 220, 40], "kind": "text",
-     "quote": "Device A achieved a power conversion efficiency of 21.4 %."},
-    {"id": 3, "page": 2, "bbox": [10, 10, 200, 20], "kind": "text",
-     "quote": "The open-circuit voltage was 1.10 V under AM1.5."},
-    {"id": 4, "page": 2, "bbox": [10, 30, 240, 40], "kind": "text",
-     "quote": "RAG retrieval accuracy was 0.82 on the benchmark dataset."},
-]
 
 
 def mock_user(username):
@@ -110,6 +99,38 @@ DOCS = [
 BY_ID = {doc["document_id"]: doc for doc in DOCS}
 for _doc in DOCS:
     _doc.setdefault("authors", ["A. Author", "B. Author"])
+
+# Ответ ручного профиля: страницы, фрагменты с координатами и предупреждения.
+# Его отдают и /api/profile/source, и завершённый /api/parse/<id>/result.
+MOCK_SOURCE = {
+    "title": "Synthetic profiling article", "author": "Mock",
+    "pages": 2, "warnings": [], "page_texts": {"1": "mock"},
+    "fallback_pages": [],
+    "sources": [
+        {"id": 1, "page": 1, "bbox": [10, 10, 200, 20], "kind": "text",
+         "quote": "The device absorber material is MAPbI3."},
+        {"id": 2, "page": 1, "bbox": [10, 30, 220, 40], "kind": "text",
+         "quote": "Device A achieved a power conversion efficiency of 21.4 %."},
+        {"id": 3, "page": 2, "bbox": [10, 10, 200, 20], "kind": "text",
+         "quote": "The open-circuit voltage was 1.10 V under AM1.5."},
+        {"id": 4, "page": 2, "bbox": [10, 30, 240, 40], "kind": "text",
+         "quote": "RAG retrieval accuracy was 0.82 on the benchmark dataset."},
+    ],
+}
+# Задания разбора живут в памяти процесса: мок отвечает готовым результатом
+# сразу, чтобы страницы профиля и разбора не ждали фоновой задачи.
+MOCK_PARSE_JOBS = {}
+MOCK_MANIFEST = {
+    "stages": [
+        {"name": "sources", "status": "ok"},
+        {"name": "interpret", "status": "ok"},
+        {"name": "passport", "status": "ok"},
+        {"name": "audit", "status": "ok"},
+        {"name": "export", "status": "ok"},
+    ],
+    "counts": {"interpreted_records": 2, "validation_issues": 0, "audit_findings": 1},
+    "artifacts": {"manifest.json": {}, "interpretation.json": {}, "audit.json": {}},
+}
 
 CONFIGS = [
     {"config_id": "C01", "label": "BM25", "detail": "retrieval_method=sparse"},
@@ -366,6 +387,21 @@ def anchor_index(doc):
     return ANCHOR_INDEX[key]
 
 
+def upload_document(track, name):
+    """Создаёт карточку загруженного PDF в памяти и возвращает её summary."""
+    stem = Path(name).stem
+    slug = "".join(ch for ch in stem if ch.isalnum() or ch in "-_")[:40] or "article"
+    new_id = f"{track}:{slug.lower()}"
+    if new_id not in BY_ID:
+        template = dict(BY_ID["rag:d005"])
+        template.update(document_id=new_id, track=track, publication_id=slug.upper(), title=name,
+                        status="partial", results_count=0, issues_count=0, pages=1,
+                        mock_upload=True, authors=["A. Author", "B. Author"])
+        BY_ID[new_id] = template
+        DOCS.append(template)
+    return BY_ID[new_id]
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -455,6 +491,45 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"csrf_token": MOCK_CSRF})
             return
 
+        if path == "/api/llm":
+            self.send_json({"configured": True, "enabled": True, "available": True})
+            return
+
+        if path.startswith("/api/parse/"):
+            if not self.require_session():
+                return
+            job_id, _, rest = path[len("/api/parse/"):].partition("/")
+            job = MOCK_PARSE_JOBS.get(unquote(job_id))
+            if job is None:
+                self.error("Разбор не найден.", 404)
+                return
+            if rest == "result":
+                self.send_json({"document": {"pages": MOCK_SOURCE["pages"]},
+                                "sources": MOCK_SOURCE["sources"],
+                                "warnings": MOCK_SOURCE["warnings"]})
+                return
+            if rest == "llm":
+                if job.get("llm", "off") == "off":
+                    self.error("Манифест LLM не создавался.", 404)
+                    return
+                self.send_json(MOCK_MANIFEST)
+                return
+            if rest == "file/llm/interpretation.json":
+                if job.get("llm", "off") == "off":
+                    self.error("Файл не создавался.", 404)
+                    return
+                self.send_json({"status": "ok", "tables": {
+                    "measurements": [
+                        {"device_id": "DV1", "metric_name": "PCE", "metric_value": "21.4", "metric_unit": "%"},
+                        {"device_id": "DV1", "metric_name": "Voc", "metric_value": "1.10", "metric_unit": "V"},
+                    ]}})
+                return
+            if rest:
+                self.error("Маршрут не найден.", 404)
+                return
+            self.send_json(job)
+            return
+
         if path == "/api/documents":
             items = [doc for doc in DOCS if doc["track"] == single.get("track", "rag")]
             q = single.get("q", "").lower()
@@ -487,25 +562,6 @@ class Handler(BaseHTTPRequestHandler):
                 "items": [{"document_id": doc["document_id"], "status": doc["status"],
                            "error": doc["error"]} for doc in docs],
             })
-            return
-
-        if path.startswith("/api/parse/"):
-            segments = [unquote(part) for part in path.split("/") if part]
-            job = PARSE_JOBS.get(segments[2]) if len(segments) > 2 else None
-            if job is None:
-                self.error("Разбор не найден.", 404)
-                return
-            if len(segments) == 3:
-                self.send_json(job)
-                return
-            if len(segments) == 4 and segments[3] == "result":
-                self.send_json({
-                    "document": {"pages": 2, "filename": job["filename"]},
-                    "sources": MOCK_SOURCES,
-                    "warnings": [],
-                })
-                return
-            self.error("Маршрут не найден.", 404)
             return
 
         segments = [unquote(part) for part in path.split("/") if part]
@@ -720,19 +776,10 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/documents", "/api/documents/stream", "/api/demo", "/api/profile/source", "/api/parse"):
             if not self.require_session() or not self.require_csrf():
                 return
-        if path == "/api/parse":
-            run_id = "mock-" + uuid.uuid4().hex[:10]
-            filename = unquote(self.headers.get("X-Filename", "article.pdf"))
-            PARSE_JOBS[run_id] = {
-                "id": run_id, "status": "ok", "profile": self.headers.get("X-Profile", "solar"),
-                "parser": "docling", "filename": filename, "warnings": [],
-            }
-            self.send_json(PARSE_JOBS[run_id], 202)
-            return
-        if path == "/api/documents" and self.headers.get_content_type() != "application/pdf":
+        if path in ("/api/documents", "/api/documents/stream") and self.headers.get_content_type() != "application/pdf":
             self.error("Ожидается application/pdf.", 415)
             return
-        if path == "/api/documents" and length == 0:
+        if path in ("/api/documents", "/api/documents/stream") and length == 0:
             self.error("Нужен PDF размером до 20 МиБ.", 413)
             return
         if path == "/api/demo":
@@ -742,41 +789,29 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json(BY_ID["rag:d020"], 201)
             return
-        if path == "/api/documents/stream":
-            track = self.headers.get("X-Track", "rag")
-            if track not in TRACKS:
-                self.error("Неизвестная область.", 400)
-                return
-            name = unquote(self.headers.get("X-Filename", "article.pdf"))
-            stem = Path(name).stem
-            slug = "".join(ch for ch in stem if ch.isalnum() or ch in "-_")[:40] or "article"
-            new_id = f"{track}:{slug.lower()}"
-            if new_id not in BY_ID:
-                template = dict(BY_ID["rag:d005"])
-                template.update(document_id=new_id, track=track, publication_id=slug.upper(),
-                                title=name, status="partial", results_count=0, issues_count=0,
-                                pages=1, mock_upload=True, authors=["A. Author", "B. Author"])
-                BY_ID[new_id] = template
-                DOCS.append(template)
-            events = [
-                {"completed": 0, "total": 4, "label": "PDF загружен"},
-                {"completed": 1, "total": 4, "label": "Страницы PDF прочитаны"},
-                {"completed": 2, "total": 4, "label": "Извлечение"},
-                {"completed": 3, "total": 4, "label": "Сборка карточки"},
-                {"completed": 4, "total": 4, "label": "Готово", "result": BY_ID[new_id]},
-            ]
-            payload = ("\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n").encode()
-            self.send_data(payload, "application/x-ndjson")
-            return
         if path == "/api/profile/source":
-            self.send_json({
-                "title": "Synthetic profiling article", "author": "Mock",
-                "pages": 2, "warnings": [], "page_texts": {"1": "mock"},
-                "fallback_pages": [],
-                "sources": MOCK_SOURCES,
-            })
+            self.send_json(MOCK_SOURCE)
             return
-        if path != "/api/documents":
+        if path == "/api/parse":
+            if not body:
+                self.error("Нужен PDF.", 400)
+                return
+            # Один разбор на имя файла: повторная загрузка возвращает тот же job.
+            name = unquote(self.headers.get("X-Filename", "article.pdf"))
+            job_id = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
+            if job_id not in MOCK_PARSE_JOBS:
+                MOCK_PARSE_JOBS[job_id] = {
+                    "id": job_id, "status": "ok", "profile": self.headers.get("X-Profile", "solar"),
+                    "parser": self.headers.get("X-Parser", "auto"),
+                    "ocr": self.headers.get("X-OCR", "auto"), "charts": self.headers.get("X-Charts") == "1",
+                    "llm": self.headers.get("X-LLM", "off"), "filename": name,
+                    "created_at": 1763769600, "updated_at": 1763769600, "elapsed_seconds": 1.5,
+                    "summary": {"pages": MOCK_SOURCE["pages"], "sources": len(MOCK_SOURCE["sources"]),
+                                "candidates": 2, "warnings": 0},
+                }
+            self.send_json(MOCK_PARSE_JOBS[job_id], 202)
+            return
+        if path not in ("/api/documents", "/api/documents/stream"):
             self.error("Маршрут не найден.", 404)
             return
         track = self.headers.get("X-Track", "rag")
@@ -784,17 +819,19 @@ class Handler(BaseHTTPRequestHandler):
             self.error("Неизвестная область.", 400)
             return
         name = unquote(self.headers.get("X-Filename", "article.pdf"))
-        stem = Path(name).stem
-        slug = "".join(ch for ch in stem if ch.isalnum() or ch in "-_")[:40] or "article"
-        new_id = f"{track}:{slug.lower()}"
-        if new_id not in BY_ID:
-            template = dict(BY_ID["rag:d005"])
-            template.update(document_id=new_id, track=track, publication_id=slug.upper(), title=name,
-                            status="partial", results_count=0, issues_count=0, pages=1,
-                            mock_upload=True, authors=["A. Author", "B. Author"])
-            BY_ID[new_id] = template
-            DOCS.append(template)
-        self.send_json(BY_ID[new_id], 201)
+        summary = upload_document(track, name)
+        if path == "/api/documents/stream":
+            events = [
+                {"completed": 0, "total": 4, "label": "PDF загружен"},
+                {"completed": 1, "total": 4, "label": "Страницы PDF прочитаны"},
+                {"completed": 2, "total": 4, "label": "Таблицы и значения извлечены"},
+                {"completed": 3, "total": 4, "label": "Замечания проверены"},
+                {"completed": 4, "total": 4, "label": "Готово", "result": summary},
+            ]
+            body = "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events)
+            self.send_data(body.encode("utf-8"), "application/x-ndjson; charset=utf-8")
+            return
+        self.send_json(summary, 201)
 
 
 def main():

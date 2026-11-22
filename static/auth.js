@@ -56,13 +56,13 @@ export function firstName(name) {
   return String(name || "Профиль").trim().split(/\s+/)[0] || "Профиль";
 }
 
-export function modeLabel(account) {
-  if (!account) return "";
-  return "Аккаунт на сервере";
-}
+// Логин на сервере: латиница, цифры и . _ + - @, от 3 до 254 символов.
+// Тот же набор разрешает auth.USERNAME_RE, поэтому проверка здесь только
+// повторяет контракт и не даёт отправить заведомо отклоняемое значение.
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9_.+@-]{2,253}$/;
 
-export function modeChip(account) {
-  return account ? modeLabel(account).toLowerCase() : "";
+export function loginShaped(value) {
+  return LOGIN_RE.test(String(value || "").trim());
 }
 
 function sinceLabel(date) {
@@ -73,8 +73,33 @@ function text(value, fallback = "") {
   return String(value === null || value === undefined ? fallback : value).trim();
 }
 
+// Mirrors auth.email_problem: the server stays authoritative, but the form must
+// not send values the API will reject (for example a numeric-only "TLD" like
+// name@example.45). The final domain label has to start with a letter.
+const EMAIL_MAX = 254;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 256;
+
+export function emailOk(value) {
+  const email = String(value || "");
+  if (!email || email.length > EMAIL_MAX) return false;
+  const at = email.indexOf("@");
+  if (at <= 0 || at !== email.lastIndexOf("@")) return false;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (local.length > 64) return false;
+  if (local.includes("..")) return false;
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9_.+-]*[A-Za-z0-9])?$/.test(local)) return false;
+  const labels = domain.split(".");
+  if (labels.length < 2) return false;
+  const labelOk = label => label.length <= 63
+    && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label);
+  if (!labels.every(labelOk)) return false;
+  return /^[A-Za-z][A-Za-z0-9-]*[A-Za-z0-9]$/.test(labels[labels.length - 1]);
+}
+
 function emailShaped(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+  return emailOk(value);
 }
 
 function nameFromUsername(username) {
@@ -280,33 +305,32 @@ function updateStoredProfile(patch) {
   return cachedAccount;
 }
 
-// Регистрация: сервер проверяет пароль и ставит cookie, локально остаются
-// только описательные поля профиля.
-export async function registerAccount({name, email, org, password}) {
-  const data = await postJSON("/api/auth/register", {username: email, password});
+// Регистрация: логин и пароль проверяет сервер, cookie сессии ставит он же.
+// Локально остаётся только описательная часть профиля.
+export async function registerAccount({login, email, password}) {
+  const data = await postJSON("/api/auth/register", {username: login, password});
   setCSRF(data.csrf_token);
   applyUser(data.user);
   updateStoredProfile({
-    name: text(name) || nameFromUsername(email),
+    name: nameFromUsername(login),
     email: text(email),
-    org: text(org) || "Без организации",
     role: "Исследователь",
-    bio: "Заполните описание в настройках профиля, чтобы коллеги понимали, с какими данными вы работаете.",
+    bio: "",
   });
   return recordActivity(cachedAccount, {
     title: "Аккаунт создан",
-    detail: "Пароль проверяется на сервере, профиль хранится в этом браузере.",
+    detail: "Добро пожаловать в каталог.",
     kind: "account",
   });
 }
 
-export async function loginAccount(email, password) {
-  const data = await postJSON("/api/auth/login", {username: email, password});
+export async function loginAccount(login, password) {
+  const data = await postJSON("/api/auth/login", {username: login, password});
   setCSRF(data.csrf_token);
   const account = applyUser(data.user);
   return recordActivity(cachedAccount || account, {
     title: "Вход в аккаунт",
-    detail: "Сессия подтверждена сервером.",
+    detail: "",
     kind: "account",
   });
 }
@@ -363,10 +387,6 @@ export function describeWhen(timestamp) {
   return `${date.getDate()} ${MONTHS[date.getMonth()]}`;
 }
 
-function emailOk(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
-}
-
 // Экран первого входа: фон на всю страницу и карточка регистрации по центру.
 // root - узел #authScreen из index.html, все поля и кнопки берутся из него.
 export function mountAuthScreen(root, {onEnter}) {
@@ -377,28 +397,37 @@ export function mountAuthScreen(root, {onEnter}) {
   const tabsRoot = root.querySelector("[data-tabs]");
   const tabButtons = tabsRoot ? [...tabsRoot.querySelectorAll("[role=tab]")] : [];
 
-  const FIELDS = ["regName", "regOrg", "regEmail", "regPassword", "loginEmail", "loginPassword"];
+  const FIELDS = ["regLogin", "regEmail", "regPassword", "loginUser", "loginPassword"];
 
   const validators = {
-    regName: () => {
-      const value = byId("regName").value.trim();
-      return value.length >= 2 ? "" : "Укажите имя и фамилию.";
-    },
-    regOrg: () => {
-      const value = byId("regOrg").value.trim();
-      return value.length >= 2 ? "" : "Укажите организацию.";
+    regLogin: () => {
+      const value = byId("regLogin").value.trim();
+      if (!value) return "Придумайте логин.";
+      return loginShaped(value)
+        ? ""
+        : "Логин: от 3 символов, латиница, цифры и знаки . _ + - @.";
     },
     regEmail: () => {
       const value = byId("regEmail").value.trim();
-      return emailOk(value) ? "" : "Введите email, например name@viniti.ru.";
+      // Email необязателен: вход выполняется по логину. Но если его указали,
+      // сервер и клиент проверяют его одинаково строго.
+      if (!value) return "";
+      return emailOk(value) ? "" : "Проверьте email, например name@example.com.";
     },
     regPassword: () => {
       const value = byId("regPassword").value;
-      return value.length >= 8 ? "" : "Пароль должен быть не короче 8 символов.";
+      if (value.length < PASSWORD_MIN) {
+        return `Пароль должен быть не короче ${PASSWORD_MIN} символов.`;
+      }
+      if (value.length > PASSWORD_MAX) {
+        return `Пароль должен быть не длиннее ${PASSWORD_MAX} символов.`;
+      }
+      return "";
     },
-    loginEmail: () => {
-      const value = byId("loginEmail").value.trim();
-      return emailOk(value) ? "" : "Введите email, например name@viniti.ru.";
+    loginUser: () => {
+      const value = byId("loginUser").value.trim();
+      if (!value) return "Введите логин или email.";
+      return loginShaped(value) ? "" : "Логин: от 3 символов, без пробелов.";
     },
     loginPassword: () => {
       const value = byId("loginPassword").value;
@@ -422,26 +451,19 @@ export function mountAuthScreen(root, {onEnter}) {
       input.setAttribute("aria-invalid", "true");
       error.textContent = message;
       error.hidden = false;
-      input.setAttribute("aria-describedby", id === "regPassword"
-        ? "regPassword-hint regPassword-error"
-        : `${id}-error`);
+      input.setAttribute("aria-describedby", `${id}-error`);
       return true;
     }
     input.classList.remove("is-invalid");
     input.removeAttribute("aria-invalid");
     error.textContent = "";
     error.hidden = true;
-    if (id === "regPassword") input.setAttribute("aria-describedby", "regPassword-hint");
-    else input.removeAttribute("aria-describedby");
+    input.removeAttribute("aria-describedby");
     return false;
   }
 
   function clearErrors() {
     for (const id of FIELDS) checkField(id, "");
-    const consent = byId("regConsent");
-    const consentError = byId("regConsent-error");
-    if (consent) consent.removeAttribute("aria-invalid");
-    if (consentError) consentError.hidden = true;
     setStatus("");
   }
 
@@ -495,14 +517,6 @@ export function mountAuthScreen(root, {onEnter}) {
     });
   }
 
-  byId("regConsent")?.addEventListener("change", event => {
-    if (event.currentTarget.checked) {
-      event.currentTarget.removeAttribute("aria-invalid");
-      const error = byId("regConsent-error");
-      if (error) error.hidden = true;
-    }
-  });
-
   async function send(button, task) {
     if (button) button.disabled = true;
     try {
@@ -517,32 +531,20 @@ export function mountAuthScreen(root, {onEnter}) {
   byId("registerForm")?.addEventListener("submit", event => {
     event.preventDefault();
     let errors = 0;
-    for (const id of ["regName", "regOrg", "regEmail", "regPassword"]) {
+    for (const id of ["regLogin", "regEmail", "regPassword"]) {
       if (checkField(id, validators[id]())) errors += 1;
-    }
-    const consent = byId("regConsent");
-    const consentError = byId("regConsent-error");
-    if (!consent.checked) {
-      consent.setAttribute("aria-invalid", "true");
-      consentError.textContent = "Подтвердите согласие, чтобы создать аккаунт.";
-      consentError.hidden = false;
-      errors += 1;
-    } else {
-      consent.removeAttribute("aria-invalid");
-      consentError.hidden = true;
     }
     if (errors) {
       setStatus("Проверьте отмеченные поля.", true);
-      (root.querySelector("#panelReg .is-invalid") || consent).focus();
+      (root.querySelector("#panelReg .is-invalid") || byId("regLogin")).focus();
       return;
     }
     setStatus("Создаём аккаунт…");
     const button = byId("registerForm").querySelector('button[type="submit"]');
     send(button, async () => {
       const account = await registerAccount({
-        name: byId("regName").value.trim(),
+        login: byId("regLogin").value.trim(),
         email: byId("regEmail").value.trim(),
-        org: byId("regOrg").value.trim(),
         password: byId("regPassword").value,
       });
       hide();
@@ -554,18 +556,18 @@ export function mountAuthScreen(root, {onEnter}) {
   byId("loginForm")?.addEventListener("submit", event => {
     event.preventDefault();
     let errors = 0;
-    if (checkField("loginEmail", validators.loginEmail())) errors += 1;
+    if (checkField("loginUser", validators.loginUser())) errors += 1;
     if (checkField("loginPassword", validators.loginPassword())) errors += 1;
     if (errors) {
-      setStatus("Проверьте email и пароль.", true);
-      (root.querySelector("#panelLogin .is-invalid") || byId("loginEmail")).focus();
+      setStatus("Проверьте логин и пароль.", true);
+      (root.querySelector("#panelLogin .is-invalid") || byId("loginUser")).focus();
       return;
     }
     setStatus("Проверяем пароль…");
     const button = byId("loginForm").querySelector('button[type="submit"]');
     send(button, async () => {
       const account = await loginAccount(
-        byId("loginEmail").value.trim(),
+        byId("loginUser").value.trim(),
         byId("loginPassword").value,
       );
       hide();
@@ -600,7 +602,8 @@ export function mountAuthScreen(root, {onEnter}) {
     const storageNote = byId("authStorageNote");
     if (storageNote) storageNote.hidden = storageWorks();
     setStatus(message, isError);
-    byId("regName")?.focus({preventScroll: true});
+    selectTab(0, false);
+    byId("regLogin")?.focus({preventScroll: true});
   }
 
   function hide() {

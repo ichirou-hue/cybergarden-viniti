@@ -217,7 +217,7 @@ function emptyState(ctx) {
     el("div", {class: "bar center"},
       el("button", {
         type: "button", class: "secondary", text: "Загрузить PDF",
-        onclick: () => document.getElementById("file")?.click(),
+        onclick: () => document.getElementById("startWizard")?.click(),
       }),
       el("button", {
         type: "button", class: "secondary", text: "Открыть демо",

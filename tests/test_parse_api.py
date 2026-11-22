@@ -217,6 +217,44 @@ class ParseApiTest(unittest.TestCase):
             "Content-Type": "application/pdf", "X-Profile": "nosuch"})
         self.assertEqual(status, 404)
 
+    def test_failed_parse_hides_raw_subprocess_output_in_job_error(self):
+        from subprocess import CompletedProcess
+        sensitive = (
+            "Traceback (most recent call last):\n"
+            "  File \"C:\\\\private\\\\worker.py\", line 12\n"
+            "openai.AuthenticationError: invalid api key sk-live-secret"
+        )
+        completed = CompletedProcess([], 1, stdout="", stderr=sensitive)
+        with patch("server.subprocess.run", return_value=completed):
+            status, body = self.send_auth(self.base + "/api/parse", tiny_pdf(), {
+                "Content-Type": "application/pdf", "X-Profile": "solar",
+                "X-Parser": "pdfplumber"})
+            self.assertEqual(status, 202, body)
+            job = self.wait(json.loads(body)["id"])
+        self.assertEqual(job["status"], "error")
+        self.assertEqual(job["error"],
+                         "Ошибка внешнего провайдера LLM; подробности в логе сервера.")
+        self.assertNotIn("Traceback", job["error"])
+        self.assertNotIn("private", job["error"])
+        self.assertNotIn("sk-live", job["error"])
+        self.assertNotIn("openai", job["error"].lower())
+        # Details stay in the server-side log, not in the API payload.
+        log_path = self.root / "parses" / job["id"] / "parse.log"
+        self.assertIn("sk-live-secret", log_path.read_text(encoding="utf-8"))
+
+    def test_failed_parse_spawn_hides_local_path_in_job_error(self):
+        error = FileNotFoundError(2, "No such file", str(Path("private") / "python.exe"))
+        with patch("server.subprocess.run", side_effect=error):
+            status, body = self.send_auth(self.base + "/api/parse", tiny_pdf(), {
+                "Content-Type": "application/pdf", "X-Profile": "solar",
+                "X-Parser": "pdfplumber"})
+            self.assertEqual(status, 202, body)
+            job = self.wait(json.loads(body)["id"])
+        self.assertEqual(job["status"], "error")
+        self.assertEqual(job["error"],
+                         "Не удалось запустить разбор: не найден интерпретатор или скрипт.")
+        self.assertNotIn("private", job["error"])
+
     def test_parse_rejects_charts_without_docling(self):
         status, _ = self.send_auth(self.base + "/api/parse", tiny_pdf(), {
             "Content-Type": "application/pdf", "X-Profile": "solar",

@@ -13,11 +13,22 @@ SCHEME = "pbkdf2_sha256"
 DEFAULT_ITERATIONS = 210_000
 MIN_ITERATIONS = 100_000
 MAX_ITERATIONS = 2_000_000
+# The browser form mirrors these bounds (``static/auth.js`` PASSWORD_MIN/MAX).
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 256
 COOKIE_NAME = "viniti_session"
 # The browser form registers a work email, so the login name is allowed to look
 # like one. The character set stays narrow (no spaces or slashes) because the
 # value is echoed back and compared case-insensitively.
 USERNAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+@-]{2,253}\Z")
+
+# Email rules used when the login name contains "@". They are deliberately
+# narrower than USERNAME_RE and are the single authority for both the API and
+# the browser form (``static/auth.js`` mirrors them).
+MAX_EMAIL_LENGTH = 254
+EMAIL_LOCAL_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.+-]*[A-Za-z0-9])?\Z")
+EMAIL_LABEL_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\Z")
+EMAIL_TOP_LABEL_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*[A-Za-z0-9]\Z")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -64,8 +75,9 @@ def hash_password(password, iterations=DEFAULT_ITERATIONS):
     iterations = int(iterations)
     if not MIN_ITERATIONS <= iterations <= MAX_ITERATIONS:
         raise ValueError("Недопустимое число итераций PBKDF2.")
-    if not isinstance(password, str) or not 8 <= len(password) <= 256:
-        raise ValueError("Пароль должен содержать от 8 до 256 символов.")
+    if not isinstance(password, str) or not MIN_PASSWORD_LENGTH <= len(password) <= MAX_PASSWORD_LENGTH:
+        raise ValueError(
+            f"Пароль должен содержать от {MIN_PASSWORD_LENGTH} до {MAX_PASSWORD_LENGTH} символов.")
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
     return f"{SCHEME}${iterations}${salt.hex()}${digest.hex()}"
@@ -84,6 +96,34 @@ def verify_password(password, encoded):
         return False
     actual = hashlib.pbkdf2_hmac("sha256", str(password).encode(), salt, iterations)
     return hmac.compare_digest(actual, expected)
+
+def email_problem(value):
+    """Return a user-facing reason when ``value`` is not a usable work email.
+
+    ``None`` means the address passes.  The final domain label must start with a
+    letter, so a numeric-only "TLD" such as ``tdhbtdnd@tdbbdb.45`` is rejected
+    instead of being accepted as an email.  Plain logins without "@" are not
+    this function's business: ``register`` keeps accepting them for
+    compatibility.
+    """
+    if not isinstance(value, str) or not value:
+        return "Некорректный email."
+    if len(value) > MAX_EMAIL_LENGTH:
+        return f"Email должен быть не длиннее {MAX_EMAIL_LENGTH} символов."
+    if value.count("@") != 1:
+        return "Email должен содержать ровно один символ @."
+    local, domain = value.split("@")
+    if not 1 <= len(local) <= 64 or not EMAIL_LOCAL_RE.fullmatch(local) or ".." in local:
+        return "Некорректная часть email до @."
+    labels = domain.split(".")
+    if len(labels) < 2:
+        return "Email должен содержать домен с точкой, например name@viniti.ru."
+    if any(len(label) > 63 or not EMAIL_LABEL_RE.fullmatch(label) for label in labels):
+        return "Некорректный домен email."
+    if not EMAIL_TOP_LABEL_RE.fullmatch(labels[-1]):
+        return "Некорректный email: домен верхнего уровня должен начинаться с буквы."
+    return None
+
 
 class Auth:
     def __init__(self, path, *, iterations=None, session_ttl=None, clock=time.time):
@@ -109,6 +149,10 @@ class Auth:
     def register(self, username, password):
         if not isinstance(username, str) or not USERNAME_RE.fullmatch(username):
             raise AuthError("Некорректное имя пользователя.", 422)
+        if "@" in username:
+            problem = email_problem(username)
+            if problem:
+                raise AuthError(problem, 422)
         try:
             password_hash = hash_password(password, self.iterations)
         except ValueError as error:

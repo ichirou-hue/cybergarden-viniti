@@ -157,7 +157,7 @@ class DoclingOfflineQATest(unittest.TestCase):
                 out = Path(tmp) / "result"
                 execution = subprocess.run(
                     [sys.executable, str(ROOT / "extract_document.py"), "unused.pdf", "-o", str(out), *flags],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 self.assertNotEqual(execution.returncode, 0)
                 self.assertNotIn("Traceback", execution.stderr)

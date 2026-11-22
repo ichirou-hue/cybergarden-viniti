@@ -249,7 +249,8 @@ export function renderPassport(root, ctx) {
   });
 
   const importButton = el("button", {
-    type: "button", class: "primary", text: "Импорт паспорта JSON",
+    type: "button", class: "primary", text: "Открыть паспорт (JSON)",
+    title: "Готовый файл JSON: его скачивает разбор PDF",
     onclick: () => document.getElementById("passport")?.click(),
   });
 
@@ -418,9 +419,10 @@ export function renderPassport(root, ctx) {
   fill(root,
     el("section", {class: "hero passport-hero"},
       el("div", {},
-        el("p", {class: "eyebrow", text: "Локальный паспорт"}),
+        el("p", {class: "eyebrow", text: "Результат разбора"}),
         el("h1", {}, "Паспорт", el("br"), "публикации", el("span", {class: "dot", text: "."})),
         el("p", {class: "lede", text: source.title}),
+        el("p", {class: "passport-note", text: "Таблицы, значения и цитаты одной статьи. Файл JSON с этим результатом скачивает разбор PDF."}),
       ),
       el("div", {class: "actions"}, importButton, pdfLabel),
     ),
@@ -431,7 +433,7 @@ export function renderPassport(root, ctx) {
       el("div", {}, el("span", {text: "Требуют разбора"}), reviewCount),
     ),
     source.demo ? el("p", {class: "notice warn", text:
-      "Демонстрационные значения. Импортируйте паспорт, чтобы работать со своими данными."}) : null,
+      "Демонстрационные значения. Откройте файл JSON из разбора, чтобы работать со своими данными."}) : null,
     ...(source.warnings || []).map(text => el("p", {class: "notice warn", text})),
     inferredCount ? el("p", {class: "notice", text:
       `Проверка не запускалась: для ${number(inferredCount)} `

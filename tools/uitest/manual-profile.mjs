@@ -21,7 +21,7 @@ const pdf = {name: "article.pdf", mimeType: "application/pdf", buffer: Buffer.fr
 
 // Прямой вход: экран профиля просит PDF и не тянет чужую логику паспорта.
 await page.goto(`${base}/manual-profile`, {waitUntil: "networkidle"});
-check("профиль: заголовок экрана", (await page.locator("h1").first().textContent()).includes("Создать"));
+check("профиль: заголовок экрана", (await page.locator("h1").first().textContent()).includes("Поля извлечения"));
 check("профиль: стрелка назад ведёт на главную",
   await page.locator('a[aria-label="Назад на главную"]').getAttribute("href") === "/");
 check("профиль: блока паспорта и его кнопок нет",
@@ -114,6 +114,15 @@ check("мастер: PDF передан в профиль", handoff.includes("ha
 await page.reload({waitUntil: "networkidle"});
 check("профиль: PDF не подхватывается повторно",
   await page.locator("#profilePanel").evaluate(node => node.hidden));
+
+// Стрелка назад возвращает выбранный PDF в мастер, а не теряет его.
+await page.setInputFiles("#profilePdf", {...pdf, name: "back.pdf"});
+await page.waitForSelector("#profileForm:not([hidden])", {timeout: 15000});
+await page.click('a[aria-label="Назад на главную"]');
+await page.waitForSelector("#profileStep:not([hidden])", {timeout: 10000});
+check("профиль: назад возвращает PDF в мастер",
+  (await page.locator("#selectedFile").textContent()).includes("back.pdf"),
+  await page.locator("#selectedFile").textContent());
 
 await browser.close();
 const failed = results.filter(item => !item.ok);
