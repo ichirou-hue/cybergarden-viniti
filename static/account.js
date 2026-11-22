@@ -3,10 +3,9 @@ import {
   accountStats,
   currentAccount,
   describeWhen,
+  emailOk,
   firstName,
   initials,
-  modeChip,
-  modeLabel,
   updateAccount,
 } from "./auth.js";
 
@@ -50,8 +49,7 @@ export function mountAccountMenu({navigate, onLogout}) {
     setText("accountName", firstName(account.name));
     setText("accountMenuAvatar", initials(account.name));
     setText("accountMenuName", account.name);
-    setText("accountMenuEmail", account.email || "Аккаунт без email");
-    setText("accountMode", modeLabel(account));
+    setText("accountMenuEmail", account.email || "Email не указан");
     setText("accountLogout", "Выйти из аккаунта");
     button.setAttribute("aria-label", `Меню профиля: ${account.name}`);
   }
@@ -178,8 +176,7 @@ export function renderProfile(view, ctx) {
     el("div", {},
       el("p", {class: "eyebrow", text: "Личный кабинет"}),
       title,
-      el("p", {class: "lede", text: "Данные аккаунта, история действий и настройки извлечения."})),
-    el("span", {class: "badge ok", text: modeLabel(account)}));
+      el("p", {class: "lede", text: "Данные аккаунта, история действий и настройки извлечения."})));
 
   const settingsPanel = el("section", {
     class: "panel profile-panel profile-settings",
@@ -236,8 +233,8 @@ export function renderProfile(view, ctx) {
       el("label", {}, "Роль",
         el("input", {type: "text", name: "role", value: account.role})),
       el("label", {}, "Email",
-        el("input", {type: "email", name: "email", value: account.email, readonly: true,
-          title: "Email совпадает с логином серверной сессии"})),
+        el("input", {type: "email", name: "email", value: account.email, placeholder: "name@example.com",
+          autocomplete: "email"})),
       el("label", {class: "profile-form-wide"}, "Чем занимаюсь",
         el("textarea", {name: "bio", rows: "3"})),
       el("p", {class: "profile-form-status", role: "status", "aria-live": "polite", text: flash}),
@@ -255,8 +252,16 @@ export function renderProfile(view, ctx) {
       form.elements.name.focus();
       return;
     }
+    const email = form.elements.email.value.trim();
+    if (email && !emailOk(email)) {
+      formStatus.textContent = "Проверьте email, например name@example.com.";
+      formStatus.classList.add("bad");
+      form.elements.email.focus();
+      return;
+    }
     const updated = updateAccount({
       name,
+      email,
       org: form.elements.organization.value.trim() || "Без организации",
       role: form.elements.role.value.trim() || "Исследователь",
       bio: form.elements.bio.value.trim(),
@@ -278,7 +283,6 @@ export function renderProfile(view, ctx) {
       el("div", {}, el("dt", {text: "Email"}), el("dd", {text: account.email || "не указан"})),
       el("div", {}, el("dt", {text: "Организация"}), el("dd", {text: account.org})),
       el("div", {}, el("dt", {text: "В каталоге с"}), el("dd", {text: account.since}))),
-    el("span", {class: "profile-chip", text: modeChip(account)}),
     el("nav", {class: "profile-side-nav", "aria-label": "Разделы профиля"},
       el("a", {href: "#/catalog", text: "Каталог"}),
       el("a", {href: "#/profile", "aria-current": "page", text: "Обзор"}),
@@ -302,8 +306,7 @@ export function renderProfile(view, ctx) {
     el("div", {class: "profile-stats"},
       statCard("Документы", stats.docs),
       statCard("Действия", stats.actions),
-      statCard("Последняя загрузка", describeWhen(stats.last)),
-      statCard("В каталоге с", account.since)));
+      statCard("Последняя загрузка", describeWhen(stats.last))));
 
   const activity = el("section", {class: "panel profile-panel", "aria-labelledby": "profileActivityTitle"},
     el("h2", {id: "profileActivityTitle", text: "Активность"}),

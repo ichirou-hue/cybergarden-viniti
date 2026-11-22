@@ -7,6 +7,7 @@ tests build synthetic PDFs with reportlab, so they need no corpus on disk.
 
 import contextlib
 from io import BytesIO, StringIO
+import inspect
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -147,6 +148,32 @@ class TableExtractionTest(unittest.TestCase):
             self.assertEqual(row["bandgap_value"], "1.65")
             self.assertEqual(row["bandgap_unit"], "eV")
 
+    def test_bandgap_range_reaches_the_material_row(self):
+        # The quote of a range covers both bounds, so the value still has to be
+        # found in it and the eV unit still has to be attached to that source.
+        tables = extract(
+            TABLE_PAGE + ["The absorber has a band gap between 1.62 eV and 1.51 eV."],
+            table=True)["tables"]
+        self.assertEqual(len(tables["materials"]), 2)
+        for row in tables["materials"]:
+            self.assertEqual(row["bandgap_value"], "1.62")
+            self.assertEqual(row["bandgap_unit"], "eV")
+            self.assertEqual(row["bandgap_method"], "cited")
+
+    def test_bandgap_range_takes_the_first_bound(self):
+        # The template carries one absorber value, so a stated range contributes
+        # its first bound - both with the unit repeated and with it written once.
+        for text in (
+            "The CZTS absorber has a band gap between 1.62 eV and 1.51 eV.",
+            "The CZTS absorber has a band gap between 1.62 and 1.51 eV.",
+            "The CZTS absorber has a band gap from 1.62 to 1.51 eV.",
+        ):
+            with self.subTest(text=text):
+                value, page, quote = solar_offline._bandgap({"1": text}, "CZTS")
+                self.assertEqual(value, "1.62")
+                self.assertEqual(page, "1")
+                self.assertIn("1.62", quote)
+
     def test_publication_is_in_scope(self):
         self.assertEqual(len(self.tables["publications"]), 1)
         self.assertIn("CsPbI2Br", self.tables["publications"][0]["title"])
@@ -210,6 +237,166 @@ class ProseExtractionTest(unittest.TestCase):
         self.assertIn(("Voc", "1.05"), found)
         self.assertIn(("Jsc", "21.0"), found)
         self.assertIn(("PCE", "16.5"), found)
+
+    def test_delta_list_after_improves_is_not_a_measurement(self):
+        # D002: these are gains over the single-layer device, not its values.
+        records = solar_offline.prose_records(
+            "The NiO/GO as a double hole transport layer improves Voc of 0.127 V, "
+            "Jsc of 3.1 mAcm-2, fill factor of 25.4%, and PCE of 7.5%.",
+            [],
+        )
+        self.assertEqual(records, [])
+
+    def test_delta_list_wrapped_to_the_next_line_is_still_a_delta(self):
+        # D002 prints the list over two lines; the second line starts with the
+        # fill-factor value and has no delta verb of its own.
+        page = ("improves Voc of 0.127 V, Jsc of 3.1 mAcm-2, fill factor of\n"
+                "25.4%, and PCE of 7.5%. Note those equivalent PCE\n")
+        self.assertEqual(solar_offline.prose_records(page, []), [])
+
+    def test_delta_after_increase_is_not_a_measurement(self):
+        for phrase in (
+            "The PCE increased by 1.2% after the treatment.",
+            "The increase in PCE of 1.2% is due to the transport layer.",
+            "An increase of 1.2% in PCE was observed.",
+            "The device showed a PCE gain of 0.8%.",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(solar_offline.prose_records(phrase, []), [])
+
+    def test_metric_delta_verb_before_by_or_of_is_not_a_measurement(self):
+        # "PCE increased by 1.2 %" is a change, not the value of the metric. A
+        # decrease is as much a change as an increase, and the adverb between
+        # the link and the number does not turn it into a measurement.
+        for phrase in (
+            "The PCE increased by 1.2% after the treatment.",
+            "The PCE reduced by 1.2% after the treatment.",
+            "The PCE gained by 1.2% after the treatment.",
+            "The PCE gained of 1.2% after the treatment.",
+            "The PCE decreased by 1.2% after the treatment.",
+            "The PCE dropped by 1.2% after the treatment.",
+            "The PCE increased by roughly 1.2% after the treatment.",
+            "The Voc decreased by 0.05 V after the treatment.",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(solar_offline.prose_records(phrase, []), [])
+
+    def test_delta_verb_with_to_keeps_the_final_value(self):
+        # "improved to 16.5 %" names the value reached, not the size of the gain.
+        records = solar_offline.prose_records(
+            "The NiO/GO device improved to a PCE of 16.5%.", [])
+        self.assertEqual([(row["metric_name"], row["raw_value"]) for row in records],
+                         [("PCE", "16.5")])
+
+    def test_threshold_after_metric_is_not_a_pce(self):
+        for phrase in (
+            "A mesoscopic solar cell with efficiency exceeding 9% was reported.",
+            "The champion device had a PCE above 20%.",
+            "Reported PCE over 22% in the literature.",
+            "Devices with PCE more than 18% are rare.",
+        ):
+            with self.subTest(phrase=phrase):
+                records = solar_offline.prose_records(phrase, [])
+                self.assertFalse([row for row in records if row["metric_name"] == "PCE"],
+                                 records)
+
+    def test_adjective_improved_does_not_hide_a_real_value(self):
+        records = solar_offline.prose_records(
+            "The improved NiO/GO device showed a PCE of 16.5%.", [])
+        self.assertEqual([(row["metric_name"], row["raw_value"]) for row in records],
+                         [("PCE", "16.5")])
+
+    def test_delta_does_not_leak_into_the_next_sentence_on_one_line(self):
+        # A printed line may hold two sentences; the delta verb of the first one
+        # must not swallow the measurement of the second.
+        records = solar_offline.prose_records(
+            "The bilayer improves Voc of 0.12 V. The PCE of 15.3% is the average.", [])
+        self.assertEqual([(row["metric_name"], row["raw_value"]) for row in records],
+                         [("PCE", "15.3")])
+
+    def test_delta_does_not_wrap_past_a_finished_sentence(self):
+        # The same rule has to hold across printed lines: a line that ends a
+        # sentence closes the delta, a comma or an open list keeps it going.
+        page = ("The bilayer improves Voc of 0.12 V.\n"
+                "The PCE of 15.3% is the average.\n")
+        records = solar_offline.prose_records(page, [])
+        self.assertEqual([(row["metric_name"], row["raw_value"]) for row in records],
+                         [("PCE", "15.3")])
+
+    def test_sentence_end_rule_is_defined_once(self):
+        # Two competing SENTENCE_END definitions used to disagree about a quote
+        # after the full stop, and the later one silently won at runtime.
+        source = inspect.getsource(solar_offline)
+        self.assertEqual(source.count("SENTENCE_END = re.compile"), 1)
+        self.assertIsNotNone(solar_offline.SENTENCE_END.search('a PCE of 16.5 %."'))
+        self.assertIsNotNone(solar_offline.SENTENCE_END.search("the metrics were:"))
+        self.assertIsNone(solar_offline.SENTENCE_END.search("Voc of 0.12 V,"))
+        self.assertIsNone(solar_offline.SENTENCE_END.search("fill factor of"))
+
+    def test_explicit_longer_label_wins_over_its_prefix(self):
+        devices = [{"id": "DV1", "label": "SC"}, {"id": "DV2", "label": "SC-1"}]
+        self.assertEqual(
+            solar_offline._nearby_label("The SC-1 cell reached a PCE", 26, devices),
+            "SC-1")
+
+    def test_nearest_full_label_wins_over_a_shorter_prefix(self):
+        # D002: "NiO/GO and NiO are 15.3 % and 7.8 %". The names come in the
+        # same order as the values, so the second value stays with NiO even
+        # though the compound label also starts with the token NiO.
+        devices = [{"id": "DV1", "label": "NiO"}, {"id": "DV2", "label": "NiO/GO"}]
+        records = solar_offline.prose_records(
+            "The efficiency of NiO/GO and NiO are 15.3% and 7.8%.", devices)
+        self.assertEqual([(row["raw_value"], row["device_label"]) for row in records],
+                         [("15.3", "NiO/GO"), ("7.8", "NiO")])
+
+    def test_label_order_pairing_needs_matching_counts(self):
+        # One name and two values is not a list: the nearest label is kept and
+        # no device is invented for the second value.
+        devices = [{"id": "DV1", "label": "NiO"}]
+        records = solar_offline.prose_records(
+            "The NiO cell gave a PCE of 15.3% and 7.8% under illumination.", devices)
+        self.assertEqual([row["device_label"] for row in records], ["NiO", "NiO"])
+
+    def test_prose_value_without_a_named_device_keeps_an_empty_id(self):
+        records = solar_offline.prose_records(
+            "The reported PCE of 21.3% is taken from the literature.",
+            [{"id": "DV1", "label": "NiO"}])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["device_label"], "")
+
+
+class ProseTableDedupeTest(unittest.TestCase):
+    """The prose/table duplicate check must not merge distinct results."""
+
+    ROWS = (("Control", "1000", "20.0", "0.70", "16.5"),
+            ("Target", "1050", "21.0", "0.75", "17.0"))
+    # The prose sentence is added per test, so the shared page must not carry a
+    # second one that would be read as a duplicate of the target.
+    PAGE = [line for line in TABLE_PAGE if "target device showed" not in line]
+
+    def _pce(self, lines):
+        tables = extract(self.PAGE + lines, table=True, rows=self.ROWS)["tables"]
+        return [(row["device_id"], row["raw_value"])
+                for row in tables["results"] if row["metric_name"] == "PCE"]
+
+    def test_same_value_on_two_devices_is_kept(self):
+        # 16.5 % printed in the table for the control and in a sentence for Cs5
+        # are two results of two devices; dropping the prose row loses data.
+        found = self._pce([
+            "The Cs5 device showed a PCE of 16.5% under AM1.5G illumination.",
+            "The Cs5 device was annealed at one hundred degrees.",
+        ])
+        self.assertIn(("DV1", "16.5"), found)
+        self.assertIn(("DV2", "17.0"), found)
+        self.assertIn(("DV-Cs5", "16.5"), found)
+
+    def test_prose_repeat_of_the_same_table_row_is_dropped(self):
+        # The same metric, value and device said twice is one result.
+        found = self._pce([
+            "The Control device showed a PCE of 16.5% under AM1.5G illumination.",
+            "The Control device was annealed at one hundred degrees.",
+        ])
+        self.assertEqual(found, [("DV1", "16.5"), ("DV2", "17.0")])
 
 
 class DatabaseProcessorTest(unittest.TestCase):

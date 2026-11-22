@@ -19,11 +19,12 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
 import threading
-from time import time
+from time import sleep, time
 import uuid
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -75,6 +76,15 @@ except ValueError:
 PARSE_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}")
 PARSE_KINDS = {"tables", "figures", "charts"}
 PARSE_LLM_MODES = {"off", "mock", "api"}
+PARSE_ACTIVE_STATUSES = frozenset({"queued", "running"})
+# A catalog slice must not expose the stored PDF, its hash or the server-side
+# folder.  Only the fields a catalog card needs are copied into the list.
+PARSE_LIST_FIELDS = (
+    "id", "status", "filename", "profile", "profile_source", "parser", "ocr",
+    "charts", "llm", "document_id", "created_at", "updated_at", "started_at",
+    "elapsed_seconds", "error",
+)
+PARSE_LIST_SUMMARY_FIELDS = ("pages", "sources", "candidates", "warnings")
 # Network LLM mode is a deployment decision, not a per-request one: the
 # operator must set this flag explicitly, and the key stays in the environment.
 PARSE_LLM_NETWORK = os.environ.get("VINITI_PARSE_LLM", "").strip().lower() in {
@@ -87,6 +97,283 @@ def llm_api_status(environ=None):
     status["enabled"] = bool(PARSE_LLM_NETWORK)
     status["available"] = bool(status["configured"] and PARSE_LLM_NETWORK)
     return status
+
+
+PARSE_FAILURE_DEFAULT = "Разбор завершился с ошибкой; подробности в логе сервера."
+# A job left active by a stopped server is terminal, not silently resumable:
+# nobody can prove the old worker finished, and re-running an unknown job on
+# startup would invent work the user did not ask for.
+PARSE_INTERRUPTED_ERROR = "Разбор прерван перезапуском сервера; запустите его снова."
+PARSE_STALE_ERROR = "Разбор прерван: процесс не завершился за отведённое время."
+# ``job.json`` is read by request threads while the worker replaces it.  On
+# Windows ``os.replace`` needs delete access to the target, so an open reader
+# turns the atomic write into a sharing violation.  One in-process lock removes
+# that race; the retry only covers handles held by another process.
+PARSE_JOB_LOCK = threading.RLock()
+PARSE_JOB_REPLACE_ATTEMPTS = 10
+PARSE_JOB_REPLACE_DELAY = 0.05
+
+
+def parse_failure_error(completed):
+    """Stable user-facing message for a failed parse subprocess.
+
+    Raw stderr/stdout can quote the PDF, provider responses and local paths.
+    They stay in parse.log and diagnostics; ``job.error`` receives only a
+    category so an authenticated reader cannot pull those details from the API.
+    """
+    text = f"{completed.stderr or ''}\n{completed.stdout or ''}".lower()
+    if "modulenotfounderror" in text or "importerror" in text:
+        return "Разбор недоступен: не установлены зависимости парсера."
+    if any(marker in text for marker in (
+            "openai", "openrouter", "provider", "api key", "unauthorized")):
+        return "Ошибка внешнего провайдера LLM; подробности в логе сервера."
+    if "permissionerror" in text or "permission denied" in text:
+        return "Разбор не смог получить доступ к файлам; подробности в логе сервера."
+    if "filenotfounderror" in text or "no such file" in text:
+        return "Разбор не нашёл нужный файл; подробности в логе сервера."
+    if "memoryerror" in text:
+        return "Разбор остановлен: не хватило памяти."
+    return PARSE_FAILURE_DEFAULT
+
+
+def parse_spawn_error(error):
+    """Stable message for an OSError raised while starting the parse process."""
+    if isinstance(error, FileNotFoundError):
+        return "Не удалось запустить разбор: не найден интерпретатор или скрипт."
+    if isinstance(error, PermissionError):
+        return "Не удалось запустить разбор: нет доступа к интерпретатору или скрипту."
+    return "Не удалось запустить разбор; подробности в логе сервера."
+
+
+class ParseClosed(RuntimeError):
+    """Raised when a server that is shutting down refuses new parser work."""
+
+
+def parse_child_options():
+    """Start the parser in its own group so a stop can reach its children.
+
+    The worker itself only owns the direct process, but Docling and its
+    converters may spawn helpers.  A dedicated group is what makes
+    ``killpg``/``taskkill /T`` able to stop that whole tree instead of leaving
+    grandchildren writing into ``data/parses/<id>``.
+    """
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def stop_parse_tree(process, *, force):
+    """Stop the child's process group, falling back to the direct process.
+
+    POSIX: the child runs in its own session, so ``killpg`` reaches the parser
+    and everything it spawned.  Windows has no group signal for console
+    children, so ``taskkill /T`` walks the tree by parent pid.  A failed
+    ``taskkill`` is not treated as success: the direct ``terminate``/``kill``
+    still runs, so a missing or restricted tool cannot leave the job alive.
+    """
+    pid = getattr(process, "pid", None)
+    if getattr(process, "returncode", None) is not None:
+        # Already reaped: a recycled pid must not be killed by mistake.
+        return
+    if os.name == "nt":
+        if pid:
+            try:
+                completed = subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(pid)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=10, check=False,
+                )
+                if completed.returncode == 0:
+                    return
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    elif pid:
+        try:
+            os.killpg(pid, signal.SIGKILL if force else signal.SIGTERM)
+            return
+        except OSError:
+            pass
+    try:
+        (process.kill if force else process.terminate)()
+    except OSError:
+        pass
+
+
+class ParseChildren:
+    """Live parse subprocesses so a server stop does not leave orphans.
+
+    A daemon worker thread dies with the interpreter, but ``subprocess.run``
+    would leave its child writing into the job folder after the server is gone.
+    ``main`` installs one registry per server; handlers without it keep the old
+    ``subprocess.run`` path, so embedded servers and tests are unchanged.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._processes = set()
+        self._closing = False
+
+    @property
+    def closing(self):
+        return self._closing
+
+    def spawn(self, command, *, env, timeout):
+        """Run one child like ``subprocess.run`` and keep it terminable."""
+        with self._lock:
+            if self._closing:
+                raise ParseClosed("Сервер останавливается; новый разбор не запускается.")
+            process = subprocess.Popen(
+                command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", env=env,
+                **parse_child_options(),
+            )
+            self._processes.add(process)
+        try:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                stop_parse_tree(process, force=True)
+                process.communicate()
+                raise
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        finally:
+            with self._lock:
+                self._processes.discard(process)
+
+    def terminate_all(self, grace=1.0):
+        """Stop every live child tree and refuse new work; return how many.
+
+        Each process is asked to stop as a tree first, then waited for so the
+        entry is reaped.  Only a child that outlives the grace period is killed
+        forcibly, and that wait is bounded too: shutdown must not hang on a
+        parser that ignores the first request.
+        """
+        with self._lock:
+            self._closing = True
+            processes = list(self._processes)
+        for process in processes:
+            stop_parse_tree(process, force=False)
+        deadline = time() + grace
+        for process in processes:
+            remaining = max(0.0, deadline - time())
+            try:
+                process.wait(timeout=remaining)
+                continue
+            except subprocess.TimeoutExpired:
+                pass
+            except OSError:
+                continue
+            stop_parse_tree(process, force=True)
+            try:
+                process.wait(timeout=grace)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+        return len(processes)
+
+
+def run_parse_child(children, command, *, env, timeout):
+    """Run the parser child, through the registry when the server has one."""
+    if children is not None:
+        return children.spawn(command, env=env, timeout=timeout)
+    return subprocess.run(
+        command, cwd=ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=timeout, check=False,
+        env=env,
+    )
+
+
+def write_parse_job(folder, job):
+    """Atomically replace ``job.json``; shared by worker, watchdog and recovery.
+
+    Readers and the writer share ``PARSE_JOB_LOCK`` because on Windows
+    ``os.replace`` needs delete access to the target: a reader that has
+    ``job.json`` open turns the replace into a sharing violation, and the
+    worker would report a fake parse failure.  The bounded retry covers a
+    handle held by another process (antivirus, backup); it does not hide a
+    persistent error, because the last attempt re-raises.
+    """
+    folder = Path(folder)
+    temporary = folder / f".job-{uuid.uuid4().hex}.json"
+    with PARSE_JOB_LOCK:
+        temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False),
+                             encoding="utf-8")
+        try:
+            replace_parse_job(temporary, folder / "job.json")
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+
+def replace_parse_job(source, target):
+    """Replace ``target`` atomically, retrying only a transient sharing error."""
+    for attempt in range(PARSE_JOB_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt + 1 >= PARSE_JOB_REPLACE_ATTEMPTS:
+                raise
+            sleep(PARSE_JOB_REPLACE_DELAY)
+
+
+def read_parse_job(folder):
+    """Read one ``job.json`` under the same lock the writer holds."""
+    with PARSE_JOB_LOCK:
+        try:
+            return json.loads((Path(folder) / "job.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+
+def mark_parse_interrupted(folder, job, message=PARSE_INTERRUPTED_ERROR):
+    """Give a stale job a terminal state without claiming any result."""
+    job.update(status="error", error=message, updated_at=round(time(), 3))
+    write_parse_job(folder, job)
+    return job
+
+
+def parse_job_stale(job, now=None):
+    """Whether a ``running`` job can no longer be owned by a live worker.
+
+    The worker's own ``subprocess.run`` timeout is ``PARSE_TIMEOUT``; the extra
+    minute covers writing the error and releasing the slot.  ``queued`` jobs are
+    not age-checked: they may legitimately wait for a parse slot that long.
+    """
+    if job.get("status") != "running":
+        return False
+    started = job.get("started_at", job.get("created_at", 0)) or 0
+    return (time() if now is None else now) - started > PARSE_TIMEOUT + 60
+
+
+def refresh_parse_job(folder, job):
+    """Apply the stale watchdog and persist the verdict.
+
+    The single-job route and the active list both call this, so they cannot
+    disagree about a job whose worker died without writing its own error.
+    Ownership, ``sha256``, ``document_id`` and ``started_at`` stay untouched:
+    ``mark_parse_interrupted`` only rewrites status, error and ``updated_at``.
+    The decision is re-read under the job lock, so a worker that finished
+    between the caller's read and this write is not overwritten by a stale
+    error.
+    """
+    if not parse_job_stale(job):
+        return job
+    with PARSE_JOB_LOCK:
+        current = read_parse_job(folder)
+        if not current:
+            return job
+        if not parse_job_stale(current):
+            return current
+        try:
+            mark_parse_interrupted(folder, current, message=PARSE_STALE_ERROR)
+        except OSError:
+            # A read-only folder still answers truthfully for this request; the
+            # disk copy is left as it was instead of pretending the write worked.
+            current.update(status="error", error=PARSE_STALE_ERROR)
+        return current
 
 
 def static_file(path):
@@ -211,10 +498,35 @@ class Handler(BaseHTTPRequestHandler):
     # uploads stay private, but the demo is a fixed card that two accounts can
     # open without the content-addressed ingest answering 409 to the second one.
     SHARED_DOCUMENTS = frozenset({"rag:demo"})
+    DEMO_DOCUMENTS = frozenset({"rag:demo"})
 
     @classmethod
     def shared_document(cls, document_id):
         return document_id in cls.SHARED_DOCUMENTS
+
+    @classmethod
+    def document_scope(cls, document_id):
+        """Explicit ownership marker for catalog cards and document envelopes.
+
+        The demo card is readable by every signed-in account, but it is not a
+        run of that account.  Keeping the distinction in the payload stops a
+        new account from showing the shared demo as its own upload while the
+        old fields stay untouched.
+        """
+        if document_id in cls.SHARED_DOCUMENTS:
+            return {
+                "shared": True,
+                "demo": document_id in cls.DEMO_DOCUMENTS,
+                "ownership": "shared",
+            }
+        return {"shared": False, "demo": False, "ownership": "owner"}
+
+    @classmethod
+    def annotate_document(cls, item):
+        if not isinstance(item, dict):
+            return item
+        document_id = item.get("document_id") or item.get("id") or ""
+        return {**item, **cls.document_scope(document_id)}
 
     def owns_document(self, area, document_id):
         session = self.current_session()
@@ -350,15 +662,14 @@ class Handler(BaseHTTPRequestHandler):
         return self.profile_root_for(session)
 
     def profile_roots(self, name):
-        """Read roots in order: the user's folder, then the pre-auth flat one."""
+        """Read roots for one profile: builtins, or the current user's folder.
+
+        The old flat ``data/profiles`` directory has no owner information, so
+        exposing it here would let any authenticated user read another person's
+        saved profile. Only builtins and per-user folders are visible now.
+        """
         root = self.profile_scope(name)
-        if root is None:
-            return []
-        roots = [Path(root)]
-        legacy = self.profiles_root()
-        if legacy is not None and Path(legacy) not in roots:
-            roots.append(Path(legacy))
-        return roots
+        return [] if root is None else [Path(root)]
 
     def load_profile(self, name):
         last = None
@@ -399,11 +710,6 @@ class Handler(BaseHTTPRequestHandler):
                     root=self.profiles_root(), include_users=False)})
                 return
             items = profiles_store.list_profiles(root=self.profile_root_for(session))
-            known = {item["id"] for item in items}
-            # Profiles saved before per-user folders stay readable and listed.
-            for item in profiles_store.list_profiles(root=self.profiles_root()):
-                if item.get("source") != "builtin" and item["id"] not in known:
-                    items.append(item)
             self.send_json({"profiles": items})
             return
         if len(segments) != 3:
@@ -546,7 +852,6 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("Не удалось создать каталог разбора")
             self.error("Не удалось сохранить PDF для разбора.", 500)
             return
-        session = self.current_session()
         job = {
             "id": run_id, "status": "queued", "profile": name, "profile_source": source,
             "parser": parser, "ocr": ocr if parser == "docling" else "off", "charts": charts,
@@ -567,19 +872,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(job, 202)
 
     def read_job(self, folder):
-        try:
-            return json.loads((folder / "job.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        return read_parse_job(folder)
 
     def write_job(self, folder, job):
-        temporary = folder / f".job-{uuid.uuid4().hex}.json"
-        temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-        os.replace(temporary, folder / "job.json")
+        write_parse_job(folder, job)
 
     def run_parse(self, folder, profile_path, parser, ocr, charts, llm="off"):
         slot = getattr(self.server, "docling_slot", None) if parser == "docling" else None
         slots = getattr(self.server, "parse_slots", None)
+        children = getattr(self.server, "parse_children", None)
         with diagnostics.context(job_id=folder.name, parser=parser):
             try:
                 if slots is not None:
@@ -621,19 +922,20 @@ class Handler(BaseHTTPRequestHandler):
                     # Keep the worker's explicit network opt-in aligned with the
                     # admission check, including embedded/test HTTP servers.
                     child_env["VINITI_PARSE_LLM"] = "api"
-                completed = subprocess.run(
-                    command, cwd=ROOT, capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
-                    env=child_env,
-                )
+                completed = run_parse_child(
+                    children, command, env=child_env, timeout=PARSE_TIMEOUT)
                 self.write_log(folder, completed)
                 job = self.read_job(folder)
                 if completed.returncode:
-                    lines = (completed.stderr or completed.stdout or "").strip().splitlines()
-                    message = lines[-1] if lines else "Разбор завершился с ошибкой."
-                    job.update(status="error", error=message[:500], returncode=completed.returncode)
+                    # A child stopped by server shutdown is not a parser
+                    # failure, and it must not be retried silently either.
+                    interrupted = children is not None and children.closing
+                    job.update(status="error",
+                               error=(PARSE_INTERRUPTED_ERROR if interrupted
+                                      else parse_failure_error(completed)),
+                               returncode=completed.returncode)
                     # No message text here: the subprocess stderr may quote the
-                    # document, and the same string is already in job.json.
+                    # document, and the same string is already in parse.log.
                     diagnostics.error(log, "parse.error",
                                       returncode=completed.returncode)
                 else:
@@ -664,9 +966,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_job(folder, job)
                 diagnostics.error(log, "parse.timeout",
                                   timeout_s=PARSE_TIMEOUT)
+            except ParseClosed:
+                job = self.read_job(folder)
+                job.update(status="error", error=PARSE_INTERRUPTED_ERROR,
+                           updated_at=round(time(), 3))
+                try:
+                    self.write_job(folder, job)
+                except OSError:
+                    pass
+                diagnostics.event(log, "parse.closed")
             except OSError as error:
                 job = self.read_job(folder)
-                job.update(status="error", error=f"Не удалось запустить разбор: {error}"[:500],
+                job.update(status="error", error=parse_spawn_error(error),
                            updated_at=round(time(), 3))
                 self.write_job(folder, job)
                 diagnostics.exception(log, "parse.spawn_failed",
@@ -691,8 +1002,45 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             log.warning("Не удалось записать parse.log")
 
+    def find_catalog_parse(self, document_id, owner_user_id=None):
+        """Id of an unfinished recognition job for this document and owner.
+
+        A repeated upload returns the stored card, so starting a second Docling
+        run for the same bytes would queue duplicate work and hand the client a
+        job id that hides the first one.  Only active jobs are reused: a
+        finished run keeps its result, and a failed one may be retried by the
+        next upload.
+        """
+        root = self.parses_root()
+        if not root.is_dir():
+            return None
+        for folder in root.iterdir():
+            if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
+                continue
+            job = self.read_job(folder)
+            if job.get("document_id") != document_id:
+                continue
+            if job.get("owner_user_id") != owner_user_id:
+                continue
+            if job.get("status") not in PARSE_ACTIVE_STATUSES:
+                continue
+            return folder.name
+        return None
+
     def start_catalog_parse(self, document_id, filename, data, owner_user_id=None):
-        """Run recognition independently of scientific result extraction."""
+        """Run recognition independently of scientific result extraction.
+
+        ``owner_user_id`` is the authenticated uploader: ``parse_get`` answers
+        404 unless the caller's session matches it, so the returned
+        ``recognition_job_id`` is only readable by the user who uploaded the
+        document.  An active job for the same document and owner is reused
+        instead of queued twice.
+        """
+        existing = self.find_catalog_parse(document_id, owner_user_id)
+        if existing is not None:
+            diagnostics.event(log, "parse.reused", job_id=existing,
+                              document_id=document_id)
+            return existing
         run_id = uuid.uuid4().hex[:16]
         folder = self.parses_root() / run_id
         folder.mkdir(parents=True, exist_ok=False)
@@ -705,9 +1053,94 @@ class Handler(BaseHTTPRequestHandler):
                "owner_user_id": owner_user_id}
         self.write_job(folder, job)
         threading.Thread(target=self.run_parse,
-                         args=(folder, ROOT / "profiles" / "solar.json", "docling", "auto", False),
+                         args=(folder, paths.PROFILES_DIR / "solar.json", "docling", "auto", False),
                          daemon=True).start()
         return run_id
+
+    def start_solar_recognition(self, track, summary, name, data, session):
+        """Attach a catalog recognition job id to a claimed Solar upload.
+
+        Recognition starts only after the document is claimed: a conflicting
+        upload must not attach its own job (or sources) to another user's card.
+        The job carries the uploader as owner so ``/api/parse/<id>`` stays
+        private.  Both the plain and the streamed upload call this, so they
+        cannot drift apart.
+        """
+        if track != "solar" or not isinstance(summary, dict):
+            return
+        if not summary.get("document_id"):
+            return
+        recognition = summary.get("recognition") or {}
+        if (recognition.get("status") == "done"
+                and recognition.get("revision") == RECOGNITION_REVISION):
+            return
+        try:
+            summary["recognition_job_id"] = self.start_catalog_parse(
+                summary["document_id"], name, data,
+                owner_user_id=session["user"]["id"])
+        except OSError:
+            diagnostics.error(log, "document.recognition.failed", area=track)
+
+    @staticmethod
+    def parse_job_view(job):
+        """Safe catalog view of one parse job.
+
+        ``job.json`` also holds the input hash, the byte count and the owner id.
+        Those stay in the single-job endpoint for compatibility, but the list
+        endpoint copies only display fields and a bounded summary.
+        """
+        item = {name: job[name] for name in PARSE_LIST_FIELDS if name in job}
+        summary = job.get("summary")
+        if isinstance(summary, dict):
+            item["summary"] = {
+                name: summary[name] for name in PARSE_LIST_SUMMARY_FIELDS
+                if name in summary
+            }
+        item["active"] = job.get("status") in PARSE_ACTIVE_STATUSES
+        return item
+
+    def parse_jobs(self, query, session):
+        """List parse jobs owned by the caller; other accounts get none.
+
+        The job lives in ``data/parses/<id>/job.json`` and is read on every
+        request, so leaving the page does not delete it and returning to
+        ``/api/parse/<id>`` restores the same state.  Navigation never cancels
+        the worker: there is deliberately no cancellation route here.
+        """
+        if session is None:
+            self.error("Требуется вход.", 401)
+            return
+        try:
+            limit, offset = self._page(query, default=50, maximum=200)
+        except ValueError as error:
+            self.error(str(error), 400)
+            return
+        active = (query.get("active") or [""])[0].strip().lower() in {
+            "1", "true", "yes", "on"}
+        status = (query.get("status") or [""])[0].strip()
+        if status == "active":
+            active, status = True, ""
+        document_id = (query.get("document_id") or [""])[0].strip()
+        owner = session["user"]["id"]
+        items = []
+        root = self.parses_root()
+        if root.is_dir():
+            for folder in root.iterdir():
+                if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
+                    continue
+                job = self.read_job(folder)
+                if not job or job.get("owner_user_id") != owner:
+                    continue
+                job = refresh_parse_job(folder, job)
+                if active and job.get("status") not in PARSE_ACTIVE_STATUSES:
+                    continue
+                if status and job.get("status") != status:
+                    continue
+                if document_id and job.get("document_id") != document_id:
+                    continue
+                items.append(self.parse_job_view(job))
+        items.sort(key=lambda item: item.get("created_at") or 0, reverse=True)
+        self.send_json({"total": len(items), "items": items[offset:offset + limit]})
 
     def parse_get(self, path, session=None):
         if session is None:
@@ -727,10 +1160,10 @@ class Handler(BaseHTTPRequestHandler):
         if job.get("owner_user_id") != session["user"]["id"]:
             self.error("Разбор не найден.", 404)
             return
-        started = job.get("started_at", job.get("created_at", 0))
-        if job.get("status") == "running" and time() - started > PARSE_TIMEOUT + 60:
-            # Не перезаписываем job на диске: рабочий процесс мог ещё завершиться.
-            job.update(status="error", error="Разбор прерван: процесс не завершился за отведённое время.")
+        if parse_job_stale(job):
+            # Persist the watchdog verdict so the list endpoint stops showing
+            # the job as active; the disk write is the single source of truth.
+            job = refresh_parse_job(folder, job)
         if len(segments) == 3:
             self.send_json(job)
             return
@@ -760,9 +1193,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def parse_file(self, base, parts):
         relative = PurePosixPath(*parts)
+        # The optional semantic layer is written next to the fixed LLM
+        # artifacts but is not part of the scientific tables. Take its name
+        # from the module instead of repeating "semantic.json" here, so the
+        # served whitelist keeps a single source. If the name later joins
+        # ARTIFACT_NAMES, the union simply stays a no-op.
+        llm_artifacts = {("llm", name) for name in llm_shell.ARTIFACT_NAMES}
+        llm_artifacts.add(("llm", llm_shell.SEMANTIC_ARTIFACT))
         allowed = relative.parts in (
             {("result.json",), ("parser.json",), ("candidates.csv",)}
-            | {("llm", name) for name in llm_shell.ARTIFACT_NAMES}
+            | llm_artifacts
         )
         if not allowed and (
             len(relative.parts) != 3 or relative.parts[0] != "assets"
@@ -999,6 +1439,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(llm_api_status())
             return
 
+        if path == "/api/parse":
+            self.parse_jobs(query, self.current_session())
+            return
+
         if path.startswith("/api/parse/"):
             self.parse_get(path, self.current_session())
             return
@@ -1017,7 +1461,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             store = self.auth_store()
             allowed = store.owned_documents("rag", session["user"]["id"])
-            items = [item for item in self.server.library.list()
+            items = [self.annotate_document(item) for item in self.server.library.list()
                      if item.get("id") in allowed or self.shared_document(item.get("id"))]
             self.send_json(items)
             return
@@ -1062,6 +1506,7 @@ class Handler(BaseHTTPRequestHandler):
                 "results": lambda doc: -int(doc.get("results_count", 0)),
             }.get(sort, lambda doc: doc.get("publication_id", ""))
             items.sort(key=key)
+            items = [self.annotate_document(doc) for doc in items]
             self.send_json({"total": len(items), "items": items[offset: offset + limit]})
             return
 
@@ -1088,7 +1533,8 @@ class Handler(BaseHTTPRequestHandler):
         key = segments[4] if len(segments) > 4 else ""
 
         if not resource:
-            self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
+            self.send_json(self.annotate_document(
+                {name: value for name, value in envelope.items() if name not in HEAVY_FIELDS}))
             return
 
         if resource == "facets":
@@ -1202,7 +1648,8 @@ class Handler(BaseHTTPRequestHandler):
         resource = resources[0] if resources else ""
         key = resources[1] if len(resources) > 1 else ""
         if not resource:
-            self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
+            self.send_json(self.annotate_document(
+                {name: value for name, value in envelope.items() if name not in HEAVY_FIELDS}))
         elif resource == "facets":
             self.send_json({"metrics": [], "ks": [], "datasets": [], "configs": [], "statuses": []})
         elif resource == "results":
@@ -1301,11 +1748,11 @@ class Handler(BaseHTTPRequestHandler):
             "partial": partial,
             "failed": failed,
             "items": [
-                {
+                self.annotate_document({
                     "document_id": doc.get("document_id"),
                     "status": doc.get("status"),
                     "error": doc.get("error", ""),
-                }
+                })
                 for doc in docs
             ],
         })
@@ -1485,13 +1932,15 @@ class Handler(BaseHTTPRequestHandler):
                 emit(0, "Документ уже загружен другим пользователем.",
                      error="Документ с таким содержимым уже загружен другим пользователем.")
             else:
+                if track == "solar":
+                    self.start_solar_recognition(track, result, name, data, session)
                 counts = (result or {}).get("counts") or {}
                 diagnostics.event(log, "document.ingest.done", area=track,
                                   duration_ms=int((time() - started) * 1000),
                                   document_id=document_id or "", stream=True,
                                   results=counts.get("results", 0),
                                   issues=counts.get("issues", 0))
-                emit(4, "Обработка завершена", result=result)
+                emit(4, "Обработка завершена", result=self.annotate_document(result))
         except ValueError as error:
             diagnostics.error(log, "document.ingest.rejected",
                               area=track, kind="ValueError")
@@ -1527,9 +1976,6 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if track == "solar":
                     summary = self.solar_store().ingest(name, data)
-                    recognition = summary.get("recognition", {})
-                    if recognition.get("status") != "done" or recognition.get("revision") != RECOGNITION_REVISION:
-                        summary["recognition_job_id"] = self.start_catalog_parse(summary["document_id"], name, data, session["user"]["id"])
                 elif track == "rag":
                     summary = self.rag_store().ingest(name, data, track=track)
                 else:
@@ -1551,6 +1997,8 @@ class Handler(BaseHTTPRequestHandler):
                                     document_id=summary.get("document_id", ""))
                 self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
                 return
+            if track == "solar":
+                self.start_solar_recognition(track, summary, name, data, session)
             counts = summary.get("counts") or {}
             diagnostics.event(log, "document.ingest.done", area=track,
                               duration_ms=int((time() - started) * 1000),
@@ -1559,7 +2007,7 @@ class Handler(BaseHTTPRequestHandler):
                               pages=summary.get("pages", 0),
                               results=counts.get("results", 0),
                               issues=counts.get("issues", 0))
-            self.send_json(summary, 201)
+            self.send_json(self.annotate_document(summary), 201)
             return
 
         # Демо-статья: генерируем PDF с настоящей таблицей и прогоняем экстрактор.
@@ -1577,7 +2025,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.claim_uploaded_document("rag", summary.get("document_id"), session):
             self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
             return
-        self.send_json(summary, 201)
+        self.send_json(self.annotate_document(summary), 201)
 
     def legacy_upload(self):
         if self.headers.get_content_type() != "application/pdf":
@@ -1616,34 +2064,65 @@ def serve_until_interrupt(server):
         server.serve_forever()
     except KeyboardInterrupt:
         print("Сервер остановлен.", flush=True)
+    finally:
+        shutdown_parse_workers(server)
+
+
+def shutdown_parse_workers(server):
+    """Stop live parser children and leave every active job terminal.
+
+    Daemon worker threads die with the interpreter, so without this the child
+    would keep writing into ``data/parses/<id>`` after the server exits and the
+    job would stay ``running`` until the next start.  Stopping the child makes
+    the job terminal now; ``recover_parse_jobs`` covers a thread that never got
+    to write its own error.  A worker that is still waiting for a parse slot can
+    only be interrupted at the next start, which is bounded, not infinite.
+    """
+    children = getattr(server, "parse_children", None)
+    stopped = children.terminate_all() if children is not None else 0
+    root = getattr(server, "parse_root", None)
+    interrupted = recover_parse_jobs(root) if root is not None else 0
+    if stopped or interrupted:
+        diagnostics.event(log, "parse.shutdown", stopped=stopped,
+                          interrupted=interrupted)
 
 
 def recover_parse_jobs(root):
-    """Mark jobs owned by a previous process as interrupted, never replaying API calls."""
+    """Mark jobs owned by a previous process as interrupted, never replaying API calls.
+
+    This is the only safe rule available at startup: a job that is still
+    ``queued`` or ``running`` cannot have a live worker, because workers live in
+    the server process that just started.  The result is a terminal error with a
+    retry hint, not a fabricated success, and the stored owner and input hash
+    stay untouched so the user still sees their own job.  The rule assumes one
+    server per ``parse_root``: two servers sharing the directory would treat the
+    other's live jobs as interrupted.
+    """
+    if root is None:
+        return 0
     root = Path(root)
     if not root.exists():
-        return
+        return 0
+    recovered = 0
     for folder in root.iterdir():
         if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
             continue
-        job_path = folder / "job.json"
-        try:
-            job = json.loads(job_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if job.get("status") not in {"queued", "running"}:
-            continue
-        job.update(status="error", error="Разбор прерван перезапуском сервера; запустите его снова.",
-                   updated_at=round(time(), 3))
-        temporary = folder / f".job-recover-{uuid.uuid4().hex}.json"
-        try:
-            temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-            os.replace(temporary, job_path)
-        except OSError:
+        # The read and the terminal write share the job lock: shutdown calls
+        # this while worker threads may still be finishing, and an unguarded
+        # read could collide with their atomic replace on Windows.
+        with PARSE_JOB_LOCK:
+            job = read_parse_job(folder)
+            if job.get("status") not in PARSE_ACTIVE_STATUSES:
+                continue
             try:
-                temporary.unlink(missing_ok=True)
+                mark_parse_interrupted(folder, job)
             except OSError:
-                pass
+                log.warning("Не удалось записать прерванный job %s", folder.name)
+                continue
+        recovered += 1
+    if recovered:
+        diagnostics.event(log, "parse.recovered", jobs=recovered, root=str(root))
+    return recovered
 
 
 def main():
@@ -1661,6 +2140,7 @@ def main():
         server.profiles_dir = paths.DATA_DIR / "profiles"
         server.parse_root = paths.DATA_DIR / "parses"
         recover_parse_jobs(server.parse_root)
+        server.parse_children = ParseChildren()
         server.parse_slots = threading.BoundedSemaphore(2)
         server.docling_slot = threading.Semaphore(1)
         diagnostics.event(log, "server.start", port=server.server_port,

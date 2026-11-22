@@ -180,10 +180,18 @@ class BatchTest(unittest.TestCase):
 
     def test_solar_has_its_own_extractor_revision(self):
         from viniti import extract, solar_offline
+        from viniti import solar_version
 
-        self.assertEqual(batch.default_revision("solar"), solar_offline.PARSER_VERSION)
+        # Solar and RAG keep separate revision streams: solar reads
+        # ``solar_version`` and RAG reads ``extract``, so bumping one does not
+        # rerun the other. The numbers may coincide - only the source differs.
+        self.assertEqual(solar_offline.PARSER_VERSION, solar_version.PARSER_VERSION)
+        self.assertEqual(batch.default_revision("solar"), solar_version.PARSER_VERSION)
         self.assertEqual(batch.default_revision("rag"), extract.PARSER_VERSION)
-        self.assertNotEqual(solar_offline.PARSER_VERSION, extract.PARSER_VERSION)
+        bumped = solar_version.PARSER_VERSION + 1
+        with patch("viniti.solar_version.PARSER_VERSION", bumped):
+            self.assertEqual(batch.default_revision("solar"), bumped)
+            self.assertEqual(batch.default_revision("rag"), extract.PARSER_VERSION)
 
 
 if __name__ == "__main__":

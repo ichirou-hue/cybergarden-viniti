@@ -27,12 +27,10 @@ async function fresh(viewport = {width: 1440, height: 950}, setup) {
   return {context, page, errors};
 }
 
-async function register(page, name = "Илья Сафонов", email = "i.safonov@viniti.ru") {
-  await page.fill("#regName", name);
-  await page.fill("#regOrg", "ЮФУ, ИКТ");
+async function register(page, login = "i.safonov", email = "i.safonov@viniti.ru") {
+  await page.fill("#regLogin", login);
   await page.fill("#regEmail", email);
   await page.fill("#regPassword", "password123");
-  await page.check("#regConsent");
   await page.locator("#registerForm button[type=submit]").click();
   await page.waitForSelector("#authScreen", {state: "hidden"});
   // Ждём, пока route отрисует целевой экран: класс снимается раньше.
@@ -40,7 +38,8 @@ async function register(page, name = "Илья Сафонов", email = "i.safon
     || Boolean(document.body.dataset.view));
 }
 
-const profileKey = email => `viniti.profile.v1:${email}`;
+// Профиль хранится по id пользователя, а мок-сервер выдаёт id, равный логину.
+const profileKey = login => `viniti.profile.v1:${login}`;
 
 // 1. Первый вход закрывает каталог
 {
@@ -49,20 +48,20 @@ const profileKey = email => `viniti.profile.v1:${email}`;
   check("вход: экран регистрации виден", await page.locator("#authScreen").isVisible());
   check("вход: каталог не отрисован", !(await page.locator("#view").isVisible()));
   check("вход: меню аккаунта скрыто", !(await page.locator("#account").isVisible()));
-  check("вход: фокус в поле имени", await page.evaluate(() => document.activeElement?.id) === "regName");
+  check("вход: фокус в поле логина", await page.evaluate(() => document.activeElement?.id) === "regLogin");
   await page.locator("#registerForm button[type=submit]").click();
   check("вход: пустая форма ругается", (await page.locator("#authStatus").textContent()).includes("Проверьте"));
-  check("вход: поле помечено", await page.locator("#regName").getAttribute("aria-invalid") === "true");
+  check("вход: поле помечено", await page.locator("#regLogin").getAttribute("aria-invalid") === "true");
 
   await register(page);
   check("регистрация: открылся мастер загрузки", await page.locator("#wizard").isVisible());
-  check("регистрация: имя в шапке", (await page.locator("#accountName").textContent()).trim() === "Илья");
+  check("регистрация: имя в шапке", (await page.locator("#accountName").textContent()).trim() === "I");
   check("регистрация: фокус ушёл в приложение", await page.evaluate(() => document.activeElement?.id) === "wizardTitle");
 
   await page.locator("#accountButton").click();
   check("поповер: раскрыт", await page.locator("#accountMenu").isVisible());
   check("поповер: aria-expanded", await page.locator("#accountButton").getAttribute("aria-expanded") === "true");
-  check("поповер: имя и email", (await page.locator("#accountMenuName").textContent()).includes("Илья Сафонов")
+  check("поповер: имя и email", (await page.locator("#accountMenuName").textContent()).includes("I Safonov")
     && (await page.locator("#accountMenuEmail").textContent()).includes("i.safonov@viniti.ru"));
   await page.keyboard.press("Escape");
   check("поповер: Escape закрывает", !(await page.locator("#accountMenu").isVisible()));
@@ -73,7 +72,9 @@ const profileKey = email => `viniti.profile.v1:${email}`;
   await page.waitForSelector("#profileTitle");
   check("профиль: маршрут", page.url().includes("#/profile"), page.url());
   check("профиль: заголовок вкладки", (await page.title()).includes("Профиль"));
-  check("профиль: статистика", await page.locator(".profile-stat").count() === 4);
+  check("профиль: статистика", await page.locator(".profile-stat").count() === 3);
+  check("профиль: дата в каталоге не дублируется",
+    (await page.locator("#view").textContent()).split("В каталоге с").length - 1 === 1);
   check("профиль: лента активности", (await page.locator(".profile-feed").textContent()).includes("Аккаунт создан"));
   check("профиль: настройки", await page.locator("#profileSettings").count() === 1);
 
@@ -101,11 +102,11 @@ const profileKey = email => `viniti.profile.v1:${email}`;
   check("выход: экран входа", await page.locator("#authScreen").isVisible());
   check("выход: заголовок вкладки", (await page.title()).includes("Вход"));
   check("выход: профиль сохранён", await page.evaluate(key => Boolean(localStorage.getItem(key)),
-    profileKey("i.safonov@viniti.ru")));
+    profileKey("i.safonov")));
 
   // Повторный вход с тем же email возвращает профиль
   await page.locator("#tabLogin").click();
-  await page.fill("#loginEmail", "i.safonov@viniti.ru");
+  await page.fill("#loginUser", "i.safonov");
   await page.fill("#loginPassword", "password123");
   await page.locator("#loginForm button[type=submit]").click();
   await page.waitForSelector("#authScreen", {state: "hidden"});
@@ -122,18 +123,18 @@ const profileKey = email => `viniti.profile.v1:${email}`;
 {
   const {context, page} = await fresh();
   await page.goto(`${base}/`, {waitUntil: "networkidle"});
-  await register(page, "Второй Пользователь", "second@viniti.ru");
+  await register(page, "second", "second@viniti.ru");
   await page.locator("#accountButton").click();
   await page.locator("#accountLogout").click();
   await page.waitForSelector("#authScreen", {state: "visible"});
   await page.locator("#tabLogin").click();
-  await page.fill("#loginEmail", "other@viniti.ru");
+  await page.fill("#loginUser", "other");
   await page.fill("#loginPassword", "password123");
   await page.locator("#loginForm button[type=submit]").click();
   await page.waitForTimeout(300);
-  check("вход: чужой email отклонён", await page.locator("#authScreen").isVisible());
+  check("вход: чужой логин отклонён", await page.locator("#authScreen").isVisible());
   check("вход: объяснение показано", (await page.locator("#authStatus").textContent()).includes("Неверное имя пользователя"));
-  await page.fill("#loginEmail", "second@viniti.ru");
+  await page.fill("#loginUser", "second");
   await page.fill("#loginPassword", "wrong-password");
   await page.locator("#loginForm button[type=submit]").click();
   await page.waitForTimeout(300);
@@ -154,9 +155,9 @@ const profileKey = email => `viniti.profile.v1:${email}`;
   await page.goto(`${base}/`, {waitUntil: "networkidle"});
   check("хранилище: экран входа", await page.locator("#authScreen").isVisible());
   check("хранилище: честное предупреждение", await page.locator("#authStorageNote").isVisible());
-  await register(page, "Третий Пользователь", "storage@viniti.ru");
+  await register(page, "third", "storage@viniti.ru");
   check("хранилище: регистрация работает в памяти", await page.locator("#wizard").isVisible());
-  check("хранилище: каталог доступен", (await page.locator("#accountName").textContent()).trim() === "Третий");
+  check("хранилище: каталог доступен", (await page.locator("#accountName").textContent()).trim() === "Third");
   check("хранилище: нет ошибок в консоли", errors.length === 0, errors.join(" | "));
   await context.close();
 }
@@ -169,7 +170,7 @@ const profileKey = email => `viniti.profile.v1:${email}`;
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check("мобильный: нет горизонтального скролла", overflow <= 0, String(overflow));
   await page.screenshot({path: "/tmp/viniti-auth-mobile.png"});
-  await register(page, "Мобильный Пользователь", "mobile@viniti.ru");
+  await register(page, "mobile", "mobile@viniti.ru");
   await page.locator("#accountButton").click();
   const box = await page.locator("#accountMenu").boundingBox();
   check("мобильный: поповер внутри экрана", box.x >= 0 && box.x + box.width <= 375, JSON.stringify(box));

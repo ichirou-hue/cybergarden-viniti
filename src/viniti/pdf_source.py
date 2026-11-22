@@ -1,3 +1,4 @@
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from io import BytesIO
 import re
@@ -201,6 +202,53 @@ def page_texts(data):
             return {page.page_number: page.extract_text() or "" for page in pdf.pages}
 
 
+def _gutter_cut(gaps):
+    """Pick the most supported cut, or None when no gap has three lines behind it.
+
+    ``gaps`` holds ``(left, right, line_index)`` triples, and a gap supports every
+    cut in ``[left + 4, right - 4]``. Comparing each gap midpoint against every
+    other gap is quadratic, and one dense page (about 86k gaps on D010 page 7)
+    spent tens of minutes there before export. The support intervals of one line
+    are merged into disjoint spans first, so counting covering lines is a plain
+    sweep over the sorted midpoints. The chosen cut and its tie-break (larger
+    count, then larger cut) stay the same as the pairwise check.
+    """
+    if not gaps:
+        return None
+    spans = {}
+    for left, right, index in gaps:
+        lo, hi = left + 4, right - 4
+        if lo <= hi:
+            spans.setdefault(index, []).append((lo, hi))
+    if not spans:
+        return None
+    intervals = []
+    for items in spans.values():
+        items.sort()
+        lo, hi = items[0]
+        for next_lo, next_hi in items[1:]:
+            if next_lo <= hi:
+                hi = max(hi, next_hi)
+                continue
+            intervals.append((lo, hi))
+            lo, hi = next_lo, next_hi
+        intervals.append((lo, hi))
+    cuts = sorted({(left + right) / 2 for left, right, _ in gaps})
+    diff = [0] * (len(cuts) + 1)
+    for lo, hi in intervals:
+        start = bisect_left(cuts, lo)
+        stop = bisect_right(cuts, hi)
+        if start < stop:
+            diff[start] += 1
+            diff[stop] -= 1
+    active, best = 0, None
+    for position, cut in enumerate(cuts):
+        active += diff[position]
+        if active >= 3 and (best is None or (active, cut) > best):
+            best = (active, cut)
+    return best[1] if best else None
+
+
 def column_sources(lines, page_number, tables=()):
     """Split repeated horizontal gutters; retain full-width headings as bands.
 
@@ -225,12 +273,17 @@ def column_sources(lines, page_number, tables=()):
                 gaps.append((left["x1"], right["x0"], len(prepared) - 1))
     # Baselines in different columns need not align. Also compare neighboring
     # line boxes with overlapping vertical ranges, independent of line merging.
-    nearby = sorted(enumerate(prepared), key=lambda item: item[1][0]["top"])
-    for offset, (index, (_, chars)) in enumerate(nearby):
-        a = bounds(chars)
+    # Boxes are computed once, and the inner loop walks indices instead of
+    # slicing the sorted list, so a dense page stays linear in the pairs it
+    # actually emits.
+    boxes = [bounds(chars) for _, chars in prepared]
+    nearby = sorted(range(len(prepared)), key=lambda index: prepared[index][0]["top"])
+    for offset, index in enumerate(nearby):
+        a = boxes[index]
         height = a[3] - a[1]
-        for other_index, (_, other_chars) in nearby[offset + 1:]:
-            b = bounds(other_chars)
+        for position in range(offset + 1, len(nearby)):
+            other_index = nearby[position]
+            b = boxes[other_index]
             if b[1] > a[3] + height / 2:
                 break
             left, right = (a, b) if a[0] < b[0] else (b, a)
@@ -239,13 +292,7 @@ def column_sources(lines, page_number, tables=()):
                 gaps.append((left[2], right[0], other_index))
     # Choose a cut inside the most widely supported whitespace interval, rather
     # than assuming that the page midpoint separates columns.
-    cuts = []
-    for left, right, _ in gaps:
-        cut = (left + right) / 2
-        supporters = {index for lo, hi, index in gaps if lo + 4 <= cut <= hi - 4}
-        if len(supporters) >= 3:
-            cuts.append((len(supporters), cut))
-    gutter = max(cuts)[1] if cuts else None
+    gutter = _gutter_cut(gaps)
     pending, result, band = [], [], 1
 
     def flush():

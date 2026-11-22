@@ -206,13 +206,65 @@ def document_structure(raw):
         for child in children(item):
             yield from runs(child, active_refs | {pointer})
 
+    # A payload may list the same inline group twice, or share one group between
+    # text items. Concatenating every group blindly prints the parent text twice
+    # ("SrCl2SrCl2"), so each group and each run is used at most once.
+    used_groups = set()
     for pointer, item in nodes.items():
         if not pointer.startswith("#/texts/"):
             continue
         groups = [child for child in children(item) if nodes[child].get("label") == "inline"]
-        if groups:
-            inline[pointer] = [run for group in groups for run in runs(group, set())]
+        fresh = [group for group in groups if group not in used_groups]
+        used_groups.update(fresh)
+        collected, seen_refs = [], set()
+        for group in fresh:
+            for run in runs(group, set()):
+                # A group that re-lists its own parent is malformed, not a
+                # second copy of the text.
+                if run["ref"] == pointer or run["ref"] in seen_refs:
+                    continue
+                seen_refs.add(run["ref"])
+                collected.append(run)
+        if collected:
+            inline[pointer] = collected
     return order, consumed, inline, body is not None
+
+
+def picture_captions(item, texts, index, warnings):
+    """Resolve picture caption references without trusting their shape.
+
+    Docling payloads differ between releases, so a malformed reference is a
+    warning about that caption, not a crash of the whole document: the figure
+    crop can still be published and reviewed.
+    """
+    references = item.get("captions", [])
+    if not isinstance(references, list):
+        warnings.append(f"Изображение {index}: список подписей не распознан; подпись не извлечена.")
+        return []
+    captions = []
+    for reference in references:
+        if not isinstance(reference, dict):
+            warnings.append(f"Изображение {index}: ссылка на подпись не распознана; пропущена.")
+            continue
+        pointer = reference.get("$ref", reference.get("cref", ""))
+        if not isinstance(pointer, str):
+            warnings.append(f"Изображение {index}: ссылка на подпись не распознана; пропущена.")
+            continue
+        parts = pointer.split("/")
+        if not (len(parts) == 3 and parts[:2] == ["#", "texts"] and parts[2].isascii() and parts[2].isdigit()):
+            warnings.append(f"Изображение {index}: подпись не указывает на текст; пропущена.")
+            continue
+        position = int(parts[2])
+        if position >= len(texts) or not isinstance(texts[position], dict):
+            warnings.append(f"Изображение {index}: подпись ссылается на отсутствующий текст; пропущена.")
+            continue
+        text = texts[position].get("text", "")
+        if not isinstance(text, str):
+            warnings.append(f"Изображение {index}: текст подписи не строка; пропущен.")
+            continue
+        if text.strip():
+            captions.append(text)
+    return captions
 
 
 def normalize_document(raw, *, charts=False):
@@ -288,18 +340,7 @@ def normalize_document(raw, *, charts=False):
         except ValueError as error:
             warnings.append(f"Изображение {index} пропущено: {error}")
             continue
-        captions = []
-        for reference in item.get("captions", []):
-            if not isinstance(reference, dict):
-                continue
-            pointer = reference.get("$ref", reference.get("cref", ""))
-            if not isinstance(pointer, str):
-                continue
-            parts = pointer.split("/")
-            if len(parts) == 3 and parts[:2] == ["#", "texts"] and parts[2].isascii() and parts[2].isdigit():
-                position = int(parts[2])
-                if position < len(raw.get("texts", [])):
-                    captions.append(raw["texts"][position].get("text", ""))
+        captions = picture_captions(item, raw.get("texts", []), index, warnings)
         figure = {**anchor, "id": index, "image": f"assets/figures/figure-{index:04}.png",
                   "caption": " ".join(captions), "status": "requires_review",
                   "docling_ref": f"#/pictures/{index - 1}"}
@@ -387,14 +428,30 @@ def prepare_pdf(name, data, *, ocr="auto", charts=False, converter=None):
         parsed, assets = normalize_document(raw, charts=charts)
         if parsed["pages"] != total_pages:
             raise ValueError("Docling обработал не все страницы; молчаливый частичный результат запрещён.")
-        picture_objects = conversion.document.pictures
+        pictures = getattr(conversion.document, "pictures", None)
+        if not isinstance(pictures, list) or len(pictures) < len(parsed["figures"]):
+            raise ValueError("Docling не вернул список изображений для сохранённых crop.")
         for figure in parsed["figures"]:
-            picture = picture_objects[figure["id"] - 1]
-            image = picture.get_image(conversion.document)
+            position = figure["id"] - 1
+            if not 0 <= position < len(pictures):
+                raise ValueError("Изображение Docling не сопоставлено с figure; результат не публикуется.")
+            picture = pictures[position]
+            try:
+                image = picture.get_image(conversion.document)
+            except (ValueError, OSError):
+                raise
+            except Exception:
+                # Third-party crop errors may contain paths or provider details.
+                raise ValueError("Docling не смог получить crop изображения; результат не публикуется.") from None
             if image is None:
                 raise ValueError("Docling не сохранил crop изображения; нельзя опубликовать неподтверждённый указатель.")
             stream = BytesIO()
-            image.save(stream, format="PNG")
+            try:
+                image.save(stream, format="PNG")
+            except (ValueError, OSError):
+                raise
+            except Exception:
+                raise ValueError("Docling не смог закодировать crop изображения в PNG.") from None
             assets[figure["image"]] = stream.getvalue()
             if sum(len(content) for content in assets.values()) > MAX_ASSET_BYTES:
                 raise ValueError("Изображения и таблицы превышают лимит артефактов 32 МиБ.")

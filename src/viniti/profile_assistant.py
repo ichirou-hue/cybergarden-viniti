@@ -2,6 +2,7 @@
 
 import json
 
+from .prompt_rules import DOCUMENT_RULES_RU
 from .llm_provider import complete, resolve_config
 
 FIELD_TYPES = {"text", "number", "boolean", "reference"}
@@ -45,7 +46,9 @@ def suggest(payload, *, complete_fn=complete):
     if not key or not model:
         raise RuntimeError("Помощник не настроен. Нужны OPENROUTER_API_KEY и OPENROUTER_MODEL на сервере.")
     messages = [{"role": "system", "content": (
-        "Ты помогаешь составить профиль извлечения научной статьи. Верни только JSON-объект "
+        "Ты помогаешь составить профиль извлечения научной статьи. "
+        + DOCUMENT_RULES_RU + " "
+        "Верни только JSON-объект "
         "с массивом suggestions до 8 элементов. Каждый элемент: entity (название типа сущности), "
         "field (название поля), type (text, number, boolean или reference), "
         "value (пример значения из PDF либо пустая строка), page (номер страницы либо null), "

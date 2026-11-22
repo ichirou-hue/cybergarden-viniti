@@ -41,15 +41,23 @@ check("сброс фильтров", /Публикаций: \d+/.test(await page
 
 // D014: пагинация
 await page.goto(`${base}/#/doc/rag:d014?track=rag`, {waitUntil: "networkidle"});
+// Переход по одному хэшу не ждёт запросов приложения: дожидаемся отрисовки карточки.
+await page.waitForFunction(() => document.querySelector(".doc-main .crumbs")?.textContent.includes("D014"));
 await page.click('.pager button:has-text("Далее")');
-await page.waitForTimeout(500);
+await page.waitForFunction(() => document.querySelector(".count")?.textContent.includes("страница 2 из"));
 check("пагинация: страница 2", (await page.locator(".count").textContent()).includes("страница 2 из"));
 check("пагинация: 50 строк", (await page.locator("tr.result").count()) === 50);
 
 // Фильтр метрики
 await page.goto(`${base}/#/doc/rag:d020?track=rag`, {waitUntil: "networkidle"});
+await page.waitForFunction(() => document.querySelector(".doc-main .crumbs")?.textContent.includes("D020"));
 await page.selectOption('select[aria-label="Метрика"]', "Recall");
-await page.waitForTimeout(500);
+await page.waitForFunction(() => location.hash.includes("metric=Recall"));
+// Хэш обновляется до ответа сервера: дожидаемся, пока таблица перерисуется.
+await page.waitForFunction(() => {
+  const cells = [...document.querySelectorAll("tr.result td.metric strong")];
+  return cells.length > 0 && cells.every(node => node.textContent === "Recall");
+});
 const metrics = await page.locator("tr.result td.metric strong").allTextContents();
 check("фильтр метрики", metrics.length > 0 && metrics.every(text => text === "Recall"), metrics.slice(0, 3).join(","));
 check("фильтр метрики: URL", page.url().includes("metric=Recall"), page.url());
@@ -124,11 +132,13 @@ check("result=: сообщение о ненайденной записи",
 // Загрузка PDF
 const response = await context.request.get(`${base}/api/documents/rag%3Ad020/pdf`);
 writeFileSync("/tmp/viniti-uitest-upload.pdf", await response.body());
-// Загрузка идёт из тулбара каталога: корень "/" открывает мастер.
+// Загрузка идёт из мастера: выбор файла открывает шаг области, разбор запускает кнопка.
 await page.goto(`${base}/#/catalog?track=rag`, {waitUntil: "networkidle"});
+await page.waitForSelector("#upload", {state: "visible"});
 await page.setInputFiles("#file", "/tmp/viniti-uitest-upload.pdf");
-await page.click('#upload button[type="submit"]');
-await page.waitForTimeout(800);
+await page.waitForSelector("#profileStep:not([hidden])", {timeout: 10000});
+await page.click("#wizardSubmit");
+await page.waitForTimeout(1200);
 check("загрузка: карточка открылась", page.url().includes("#/doc/rag%3A"), page.url());
 check("загрузка: статус частично", (await page.locator("#view").textContent()).includes("Обработано частично"));
 

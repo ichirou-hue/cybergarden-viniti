@@ -23,7 +23,7 @@ from .solar_schema import KEYS, TABLES, UNITS, VOCAB
 
 
 MAX_BYTES = 40 * 1024 * 1024
-REVISION = "solar-1"
+REVISION = "solar-2"
 NUMBER = re.compile(r"[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+-]?\d+)?")
 
 
@@ -147,6 +147,12 @@ def verify_entities(tables, evidence):
                 raise ValueError(f"{table}.{field}: единица не подтверждена источником.")
 
 
+# Raised text for a PDF without a native text layer. ``solar_api`` uses the
+# constant, not a copy of the sentence, so bumping REVISION cannot silently
+# break the catalogue fallback for image-only uploads.
+NO_TEXT_LAYER = "Нет текстового слоя. OCR в solar-2 пока не реализован."
+
+
 def prepare_pdf(name, data):
     if len(data) > MAX_BYTES:
         raise ValueError("Нужен PDF размером до 40 МиБ.")
@@ -160,7 +166,7 @@ def prepare_pdf(name, data):
     except PdfminerException:
         raise ValueError("PDF повреждён, зашифрован или не может быть разобран.") from None
     if not document["sources"]:
-        raise ValueError("Нет текстового слоя. OCR в solar-1 пока не реализован.")
+        raise ValueError(NO_TEXT_LAYER)
     return {
         **document, "publication_id": publication_id, "sha256": sha256(data).hexdigest(),
         "track": "solar", "schema_version": REVISION,
@@ -280,6 +286,13 @@ def check_links(tables):
             measurement = indexes["measurements"][row["measurement_id"]]
             if measurement["device_id"] and row["device_id"] not in {v.strip() for v in measurement["device_id"].split(";")}:
                 raise ValueError("Прибор результата не совпадает с прибором измерения.")
+        # A named result material must be the absorber of the referenced device.
+        # An empty side is unknown, not a licence to fill it from the other one;
+        # the reference existence check above already handled a missing device.
+        if row["device_id"] and row["material_id"]:
+            absorber = indexes["devices"][row["device_id"]]["absorber_material_id"]
+            if absorber and absorber != row["material_id"]:
+                raise ValueError("results.material_id: материал результата не совпадает с поглотителем прибора.")
         visited, current = set(), row
         while current["duplicate_of"]:
             if current["result_id"] in visited:
@@ -448,8 +461,86 @@ def check_consistency(tables):
                 raise ValueError("duplicate_of объединяет разные значения.")
 
 
+# Fields that bind a row to process conditions or to the size of the sample.
+# The inventory below only reports that such claims exist; it never decides
+# whether they are true and never suggests demoting, blanking or rewriting a
+# value. A row is a reference (table, key, field names), never a cell value.
+ATTRIBUTION_FIELDS = {
+    "layers": ("annealing_temperature", "annealing_time", "atmosphere", "deposition_method"),
+    "results": ("n_devices", "spread_value", "aggregation"),
+}
+ATTRIBUTION_ROW_LIMIT = 500
+ATTRIBUTION_NOTE = (
+    "Инвентарь полей, привязывающих строку к условиям процесса или размеру выборки. "
+    "Он не проверяет научную принадлежность и не доказывает корректность строк: "
+    "state=none значит только отсутствие таких полей, а не проверенную науку. "
+    "Все строки модели остаются неподтверждёнными."
+)
+
+
+def attribution_review(tables):
+    """A bounded inventory of process and sample-size claims, with no verdict.
+
+    This is metadata, not an oracle: it never demotes, blanks or rewrites a
+    value and never asserts that a row is scientifically attributed. Every model
+    row stays unverified, so ``requires_review`` is always true. ``state`` is
+    ``unverified`` only when at least one sensitive field is nonempty, and
+    ``none`` describes this inventory alone. Row references carry the table, the
+    row key and the nonempty field names, never a cell value or document text.
+    ``counts`` covers the whole input even when ``rows`` is capped, and
+    ``truncated`` says whether that cap was hit.
+
+    ``finalize`` calls this right after ``validate_candidates`` and before
+    ``normalize``, because normalization moves ``spread_value`` into ``note``
+    and would otherwise erase a claim the model actually made.
+    """
+    counts = {
+        "rows": 0, "fields": 0,
+        "by_table": {table: {"rows": 0, "fields": 0} for table in ATTRIBUTION_FIELDS},
+        "by_field": {
+            f"{table}.{field}": 0
+            for table, fields in ATTRIBUTION_FIELDS.items() for field in fields
+        },
+    }
+    rows = []
+    for table, fields in ATTRIBUTION_FIELDS.items():
+        for row in tables.get(table, []):
+            if not isinstance(row, dict):
+                continue
+            present = [
+                field for field in fields
+                if isinstance(row.get(field), str) and row[field].strip()
+            ]
+            if not present:
+                continue
+            counts["rows"] += 1
+            counts["fields"] += len(present)
+            counts["by_table"][table]["rows"] += 1
+            counts["by_table"][table]["fields"] += len(present)
+            for field in present:
+                counts["by_field"][f"{table}.{field}"] += 1
+            if len(rows) < ATTRIBUTION_ROW_LIMIT:
+                key = row.get(KEYS[table], "")
+                rows.append({
+                    "table": table, "key": key if isinstance(key, str) else "",
+                    "fields": present,
+                })
+    return {
+        "state": "unverified" if counts["fields"] else "none",
+        "requires_review": True,
+        "counts": counts,
+        "rows": rows,
+        "truncated": counts["rows"] > len(rows),
+        "note": ATTRIBUTION_NOTE,
+    }
+
+
 def finalize(candidate, document, *, model=""):
     tables, evidence = validate_candidates(deepcopy(candidate), document)
+    # Inventory the model claims before ``normalize`` moves a spread into the
+    # note, so a claim the model actually made is not lost from the inventory.
+    # This only reads: tables, normalization, issues and values are untouched.
+    attribution = attribution_review(tables)
     normalize(tables, evidence)
     check_consistency(tables)
     warnings = [*document["warnings"],
@@ -457,7 +548,10 @@ def finalize(candidate, document, *, model=""):
                 "OCR и оцифровка графиков не реализованы; единицы raw_unit нормализуются по словарю шаблона, остальные требуют ручной проверки."]
     return {
         **document, "tables": tables, "evidence": evidence, "warnings": warnings,
-        "extraction": {"revision": REVISION, "model": model, "source_verification": "literal"},
+        "extraction": {
+            "revision": REVISION, "model": model, "source_verification": "literal",
+            "attribution": attribution,
+        },
     }
 
 

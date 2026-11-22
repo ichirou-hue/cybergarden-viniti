@@ -1,12 +1,14 @@
 """Focused tests for the opt-in LLM provider; no network is used."""
 
 import json
+from contextlib import ExitStack
 from io import BytesIO
 import os
 from unittest import TestCase, mock
 from urllib.error import HTTPError
 from urllib.request import Request
 
+from viniti import llm_provider
 from viniti.llm_contract import LLMJsonFiller
 from viniti.llm_provider import (
     ENDPOINT, NoRedirect, ProviderConfigError, ProviderError,
@@ -209,3 +211,97 @@ class ProviderFailureTest(TestCase):
             complete([], api_key="secret-key", model="m", opener=opener)
         self.assertNotIn("secret body", str(error.exception))
         self.assertNotIn("secret-key", str(error.exception))
+
+
+class CompleteHardeningTest(TestCase):
+    """The legacy seam keeps its endpoint default but gains the new contract."""
+
+    def test_explicit_credentials_keep_the_legacy_endpoint(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            return envelope('{"ok": true}')
+
+        complete([], api_key="k", model="m", opener=opener)
+        self.assertEqual(seen["url"], ENDPOINT)
+
+    def test_base_url_argument_selects_another_endpoint(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            return envelope('{"ok": true}')
+
+        complete([], api_key="k", model="m", opener=opener,
+                 base_url="https://proxy.example/v1/")
+        self.assertEqual(seen["url"], "https://proxy.example/v1/chat/completions")
+
+    def test_environment_credentials_follow_the_configured_base_url(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            return envelope('{"ok": true}')
+
+        environment = {"OPENROUTER_API_KEY": "k", "OPENROUTER_MODEL": "m",
+                       "OPENROUTER_BASE_URL": "https://openrouter.example/api/v1"}
+        with mock.patch.dict(os.environ, environment):
+            complete([], opener=opener)
+        self.assertEqual(seen["url"], "https://openrouter.example/api/v1/chat/completions")
+
+    def test_environment_without_base_url_keeps_openrouter(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            return envelope('{"ok": true}')
+
+        environment = {"OPENROUTER_API_KEY": "k", "OPENROUTER_MODEL": "m"}
+        with mock.patch.dict(os.environ, environment):
+            os.environ.pop("OPENROUTER_BASE_URL", None)
+            complete([], opener=opener)
+        self.assertEqual(seen["url"], ENDPOINT)
+
+    def test_oversized_prompt_is_rejected_before_transport(self):
+        network = mock.Mock()
+        cases = (
+            ("too many messages", {"MAX_MESSAGES": 2},
+             [{"role": "user", "content": "{}"}] * 3),
+            ("content budget", {"MAX_CONTENT_CHARS": 8},
+             [{"role": "user", "content": "x" * 9}]),
+            ("request bytes", {"MAX_REQUEST_BYTES": 16},
+             [{"role": "user", "content": "y" * 64}]),
+        )
+        for name, limits, messages in cases:
+            with self.subTest(case=name), ExitStack() as stack:
+                for key, value in limits.items():
+                    stack.enter_context(mock.patch.object(llm_provider, key, value))
+                with self.assertRaises(ProviderConfigError):
+                    complete(messages, api_key="k", model="m", opener=network)
+        network.assert_not_called()
+
+    def test_malformed_message_is_rejected_before_transport(self):
+        network = mock.Mock()
+        for messages in ([{"role": "tool", "content": "{}"}],
+                         [{"role": "user", "content": None}],
+                         ["not a message"], "not a list"):
+            with self.subTest(messages=messages), \
+                    self.assertRaises(ProviderConfigError):
+                complete(messages, api_key="k", model="m", opener=network)
+        network.assert_not_called()
+
+    def test_redirect_is_refused_and_not_retried(self):
+        calls = []
+
+        def opener(*args, **kwargs):
+            calls.append(1)
+            raise HTTPError("url", 302, "moved", {"Location": "https://evil.example"}, BytesIO())
+
+        with self.assertRaises(ProviderError) as error:
+            complete([], api_key="secret-key", model="m", opener=opener,
+                     retries=2, sleep=lambda _: None)
+        self.assertIn("Редирект", str(error.exception))
+        self.assertNotIn("secret-key", str(error.exception))
+        self.assertNotIn("evil.example", str(error.exception))
+        self.assertEqual(len(calls), 1)

@@ -156,8 +156,9 @@ class DoclingOfflineQATest(unittest.TestCase):
             with self.subTest(flags=flags), TemporaryDirectory() as tmp:
                 out = Path(tmp) / "result"
                 execution = subprocess.run(
-                    [sys.executable, "-m", "viniti.extract_document", "unused.pdf", "-o", str(out), *flags],
-                    capture_output=True, text=True, timeout=30,
+                    [sys.executable, "-X", "utf8", "-m", "viniti", "extract-document",
+                     "unused.pdf", "-o", str(out), *flags],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 self.assertNotEqual(execution.returncode, 0)
                 self.assertNotIn("Traceback", execution.stderr)

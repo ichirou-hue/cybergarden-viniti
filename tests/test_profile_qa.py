@@ -57,7 +57,7 @@ class ProfileIndependentQA(unittest.TestCase):
             execution = subprocess.run(
                 [sys.executable, "-m", "viniti.extract_document", str(pdf),
                  "--profile", str(profile_path), "--mode", "scripts", "-o", str(output)],
-                env=environment, capture_output=True, text=True, timeout=30,
+                env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
             self.assertEqual(execution.returncode, 1)
             self.assertFalse(output.exists())
