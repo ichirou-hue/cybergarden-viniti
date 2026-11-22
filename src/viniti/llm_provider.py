@@ -112,7 +112,7 @@ def _load_dotenv(path=None):
             "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
             "OPENAI_LLM_TIMEOUT", "OPENAI_LLM_RETRIES",
             "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "VINITI_PARSE_LLM",
-        } or name in os.environ:
+        } or (name in os.environ and os.environ[name].strip()):
             continue
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
