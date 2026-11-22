@@ -344,8 +344,14 @@ def resolve_config(api_key=None, model=None):
     string means "not configured" and deliberately does not fall back. This
     keeps a caller from silently using a server-wide key when it asked for none.
     """
-    key = os.environ.get("OPENROUTER_API_KEY", "") if api_key is None else api_key
-    name = os.environ.get("OPENROUTER_MODEL", "") if model is None else model
+    if api_key is None:
+        key = os.environ.get("OPENAI_API_KEY", "") or os.environ.get("OPENROUTER_API_KEY", "")
+    else:
+        key = api_key
+    if model is None:
+        name = os.environ.get("OPENAI_MODEL", "") or os.environ.get("OPENROUTER_MODEL", "")
+    else:
+        name = model
     if not isinstance(key, str) or not isinstance(name, str):
         raise ProviderConfigError("Ключ и модель должны быть строками.")
     return key, name

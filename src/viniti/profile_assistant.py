@@ -279,7 +279,7 @@ def suggest(payload, *, complete_fn=complete, profile_source=None):
     # Let the provider resolve the configured host together with its key.
     # Passing explicit credentials to the legacy seam selects OpenRouter.
     options = {} if complete_fn is complete else {"api_key": key, "model": model}
-    response = complete_fn(messages, **options, max_tokens=1400, timeout=60, retries=1)
+    response = complete_fn(messages, **options, max_tokens=1200, timeout=60, retries=1)
     if not isinstance(response, dict) or not isinstance(response.get("suggestions"), list):
         raise ValueError("Помощник вернул неверный формат предложений.")
     suggestions = []
