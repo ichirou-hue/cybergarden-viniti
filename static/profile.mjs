@@ -428,7 +428,7 @@ async function startJob(file) {
 }
 
 function showParsed(data, filename) {
-  documentData = {...data, filename};
+  state.document = {...data, filename};
   clearHandoff();
   const sourceLine = byId("profileSource");
   if (sourceLine) {
