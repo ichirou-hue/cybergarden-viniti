@@ -3,14 +3,12 @@
 Run:  python -X utf8 -m unittest test_pdf_source -v
 """
 from io import BytesIO
-import random
-import time
 import unittest
 from unittest import mock
 
 import pdfplumber
 
-from viniti import pdf_source
+import pdf_source
 
 
 def ruled_pdf(rule_positions, page_size=(612, 792), texts=(), columns=None):
@@ -51,81 +49,6 @@ class FindTablesTest(unittest.TestCase):
         document = pdf_source.extract(data)
         self.assertEqual(document["pages"], 1)
         self.assertTrue(any(source["kind"] == "table" for source in document["sources"]))
-
-
-class GutterCutTest(unittest.TestCase):
-    """Плотные интервалы: перебор поддержки cut был O(gaps^2).
-
-    На D010 странице 7 около 86k gaps давали десятки минут до export_result.
-    Sweep-line обязан выбирать тот же cut, что и попарная проверка, поэтому
-    эталонное поведение здесь записано буквально старым циклом.
-    """
-
-    @staticmethod
-    def reference(gaps):
-        cuts = []
-        for left, right, _ in gaps:
-            cut = (left + right) / 2
-            supporters = {index for lo, hi, index in gaps if lo + 4 <= cut <= hi - 4}
-            if len(supporters) >= 3:
-                cuts.append((len(supporters), cut))
-        return max(cuts)[1] if cuts else None
-
-    def test_dense_overlapping_gaps_match_pairwise_reference(self):
-        rng = random.Random(20261122)
-        for _ in range(25):
-            gaps = []
-            for _ in range(90):
-                left = rng.uniform(0, 240)
-                gaps.append((left, left + rng.uniform(0, 70), rng.randrange(12)))
-            self.assertEqual(pdf_source._gutter_cut(gaps), self.reference(gaps), gaps)
-
-    def test_repeated_gaps_of_one_line_count_once(self):
-        gaps = [(100, 160, 0)] * 5 + [(100, 160, 1), (100, 160, 2)]
-        self.assertEqual(pdf_source._gutter_cut(gaps), 130)
-        self.assertEqual(self.reference(gaps), 130)
-
-    def test_two_supporting_lines_do_not_define_a_gutter(self):
-        gaps = [(100, 160, 0), (100, 160, 1)]
-        self.assertIsNone(pdf_source._gutter_cut(gaps))
-        self.assertIsNone(self.reference(gaps))
-
-    def test_equal_support_prefers_the_larger_cut(self):
-        gaps = []
-        for index in range(3):
-            gaps.append((100, 160, index))
-            gaps.append((300, 360, index))
-        self.assertEqual(pdf_source._gutter_cut(gaps), 330)
-        self.assertEqual(self.reference(gaps), 330)
-
-    def test_hundred_thousand_gaps_finish_within_timeout(self):
-        gaps = [(20.0 + index * 0.5, 60.0 + index * 0.5, index % 400)
-                for index in range(100_000)]
-        started = time.perf_counter()
-        cut = pdf_source._gutter_cut(gaps)
-        elapsed = time.perf_counter() - started
-        self.assertIsNotNone(cut)
-        self.assertLess(elapsed, 5.0, f"_gutter_cut took {elapsed:.1f}s on 100k gaps")
-
-    def test_dense_two_column_page_keeps_column_metadata(self):
-        from reportlab.pdfgen import canvas
-        buffer = BytesIO()
-        pdf = canvas.Canvas(buffer, pagesize=(612, 792))
-        for index in range(45):
-            top = 700 - index * 14
-            pdf.drawString(45, top, f"Left {index}")
-            pdf.drawString(335, top, f"Right {index}")
-        pdf.save()
-        started = time.perf_counter()
-        sources = pdf_source.extract(buffer.getvalue())["sources"]
-        elapsed = time.perf_counter() - started
-        self.assertLess(elapsed, 10.0, f"extract took {elapsed:.1f}s on a dense page")
-        self.assertEqual(len(sources), 90)
-        self.assertTrue(all(source["column_count"] == 2 for source in sources))
-        self.assertEqual(sum(source["column"] == 1 for source in sources), 45)
-        self.assertEqual(sum(source["column"] == 2 for source in sources), 45)
-        self.assertTrue(all("Right" not in source["quote"] for source in sources[:45]))
-        self.assertTrue(all("Left" not in source["quote"] for source in sources[45:]))
 
 
 class PageTextTest(unittest.TestCase):

@@ -5,7 +5,7 @@ Run:  python -X utf8 -m unittest test_norm -v
 from decimal import Decimal
 import unittest
 
-from viniti import norm
+import norm
 
 
 GOLD_SPECTRUM_VARIANTS = [

@@ -17,15 +17,11 @@ from io import BytesIO, StringIO
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-BOOTSTRAP_ROOT = Path(__file__).resolve().parent.parent
-if str(BOOTSTRAP_ROOT) not in sys.path:
-    sys.path.insert(0, str(BOOTSTRAP_ROOT))
-
-from viniti import paths  # noqa: E402  (the root must be on sys.path first)
-
-ROOT = paths.REPO_ROOT
-STATIC = paths.STATIC_DIR.resolve()
+ROOT = Path(__file__).resolve().parent.parent
+STATIC = ROOT / "static"
 MAX_BYTES = 20 * 1024 * 1024
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 TRACKS = {"rag": "RAG", "solar": "Solar"}
 STATUSES = ("queued", "running", "done", "partial", "failed")
@@ -370,7 +366,7 @@ def page_pdf(pages=10):
 
 def page_image(page, box):
     """Настоящий PNG: нужная страница и подсветка прямоугольником."""
-    from viniti.pdf_source import render
+    from pdf_source import render
 
     return render(page_pdf(), page, box)
 

@@ -10,10 +10,10 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import HTTPPasswordMgr, Request, build_opener, urlopen
 
-from viniti import auth
-from viniti.library import Library
-from viniti.rag_api import RagStore, demo_pdf
-from viniti.server import Handler, ThreadingHTTPServer
+import auth
+from library import Library
+from rag_api import RagStore, demo_pdf
+from server import Handler, ThreadingHTTPServer
 
 
 def tiny_pdf():

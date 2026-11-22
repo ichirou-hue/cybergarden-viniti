@@ -11,7 +11,8 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from viniti import batch, db as storage
+import batch
+import db as storage
 
 
 def tiny_pdf():
@@ -45,7 +46,7 @@ class BatchTest(unittest.TestCase):
         (self.kit / "dev").mkdir(parents=True)
         for name in ("D001", "D002", "D003"):
             (self.kit / "dev" / f"{name}.pdf").write_bytes(b"%PDF-1.4")
-        self.database = self.root / "viniti.batch.sqlite3"
+        self.database = self.root / "batch.sqlite3"
         storage.init(self.database)
         # Корень корпуса подменяется: в CI каталога _corpus/ нет.
         self.saved_roots = dict(batch.CORPUS_ROOTS)
@@ -171,16 +172,17 @@ class BatchTest(unittest.TestCase):
         self.assertEqual(results, 1)
 
     def test_default_processor_dispatches_by_area(self):
-        with patch("viniti.solar_offline.process", return_value="solar") as solar, \
-                patch("viniti.extract.process", return_value="extract") as legacy:
+        with patch("solar_offline.process", return_value="solar") as solar, \
+                patch("extract.process", return_value="extract") as legacy:
             self.assertEqual(batch.default_process("solar", "D001", "a.pdf"), "solar")
             self.assertEqual(batch.default_process("rag", "P001", "b.pdf"), "extract")
         solar.assert_called_once_with("solar", "D001", "a.pdf")
         legacy.assert_called_once_with("rag", "P001", "b.pdf")
 
     def test_solar_has_its_own_extractor_revision(self):
-        from viniti import extract, solar_offline
-        from viniti import solar_version
+        import extract
+        import solar_offline
+        import solar_version
 
         # Solar and RAG keep separate revision streams: solar reads
         # ``solar_version`` and RAG reads ``extract``, so bumping one does not
@@ -189,7 +191,7 @@ class BatchTest(unittest.TestCase):
         self.assertEqual(batch.default_revision("solar"), solar_version.PARSER_VERSION)
         self.assertEqual(batch.default_revision("rag"), extract.PARSER_VERSION)
         bumped = solar_version.PARSER_VERSION + 1
-        with patch("viniti.solar_version.PARSER_VERSION", bumped):
+        with patch("solar_version.PARSER_VERSION", bumped):
             self.assertEqual(batch.default_revision("solar"), bumped)
             self.assertEqual(batch.default_revision("rag"), extract.PARSER_VERSION)
 

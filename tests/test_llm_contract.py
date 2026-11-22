@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from viniti.llm_contract import LLMContractError, LLMJsonFiller, validate_candidates
+from llm_contract import LLMContractError, LLMJsonFiller, validate_candidates
 
 
 ITEM = {"id": 1, "page": 4, "kind": "text",

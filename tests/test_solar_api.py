@@ -18,9 +18,9 @@ from unittest import mock
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-from viniti import solar_api
-from viniti import solar_version
-from viniti.solar_schema import TABLES
+import solar_api
+import solar_version
+from solar_schema import TABLES
 
 
 def get(url):
@@ -224,11 +224,11 @@ class DocumentApiTest(unittest.TestCase):
     """The Solar document endpoints must serve what the envelope actually holds."""
 
     def setUp(self):
-        catalog_parse = mock.patch("viniti.server.Handler.start_catalog_parse", return_value="test-docling-job")
+        catalog_parse = mock.patch("server.Handler.start_catalog_parse", return_value="test-docling-job")
         catalog_parse.start()
         self.addCleanup(catalog_parse.stop)
-        from viniti.library import Library
-        from viniti.server import Handler, ThreadingHTTPServer
+        from library import Library
+        from server import Handler, ThreadingHTTPServer
         from tests.test_solar_offline import TABLE_PAGE, make_pdf
 
         self.directory = TemporaryDirectory()
@@ -371,7 +371,7 @@ def get_typed(url):
 
 class SolarAnchorTest(unittest.TestCase):
     def setUp(self):
-        from viniti.server import Handler, ThreadingHTTPServer
+        from server import Handler, ThreadingHTTPServer
 
         self.tmp = TemporaryDirectory()
         root = Path(self.tmp.name)

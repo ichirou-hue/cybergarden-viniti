@@ -4,7 +4,7 @@ import { uploadPDFWithProgress } from "../../static/api.js";
 const seen = [];
 globalThis.fetch = async (path, options) => {
   assert.equal(path, "/api/documents/stream");
-  const headers = options.headers instanceof Headers ? options.headers : new Headers(options.headers);
+  const headers = new Headers(options.headers);
   assert.equal(headers.get("X-Track"), "solar");
   const events = [
     {completed: 0, total: 4, label: "PDF загружен"},

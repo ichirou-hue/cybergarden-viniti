@@ -9,7 +9,9 @@ import pathlib
 import unittest
 from tempfile import TemporaryDirectory
 
-from viniti import db as storage, extract, verify
+import db as storage
+import extract
+import verify
 
 
 def source(identifier, page, quote, kind="text"):

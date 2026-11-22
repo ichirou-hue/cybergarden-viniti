@@ -134,7 +134,6 @@ const response = await context.request.get(`${base}/api/documents/rag%3Ad020/pdf
 writeFileSync("/tmp/viniti-uitest-upload.pdf", await response.body());
 // Загрузка идёт из мастера: выбор файла открывает шаг области, разбор запускает кнопка.
 await page.goto(`${base}/#/catalog?track=rag`, {waitUntil: "networkidle"});
-await page.waitForSelector("#upload", {state: "visible"});
 await page.setInputFiles("#file", "/tmp/viniti-uitest-upload.pdf");
 await page.waitForSelector("#profileStep:not([hidden])", {timeout: 10000});
 await page.click("#wizardSubmit");

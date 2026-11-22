@@ -16,7 +16,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest import mock
 
-from viniti import batch, db as storage, pdf_source
+import batch
+import db as storage
+import pdf_source
 from viniti import diagnostics
 
 
@@ -292,7 +294,7 @@ class BatchJobFieldsTest(LayerResetMixin, unittest.TestCase):
         (self.kit / "dev").mkdir(parents=True)
         for name in ("D001", "D002"):
             (self.kit / "dev" / f"{name}.pdf").write_bytes(b"%PDF-1.4")
-        self.database = root / "viniti.batch.sqlite3"
+        self.database = root / "batch.sqlite3"
         storage.init(self.database)
         self.saved_roots = dict(batch.CORPUS_ROOTS)
         self.addCleanup(batch.CORPUS_ROOTS.update, self.saved_roots)

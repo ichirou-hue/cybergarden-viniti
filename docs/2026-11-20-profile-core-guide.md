@@ -30,13 +30,13 @@ CLI автоматически не загружает `.env`; переменн�
 Первый, безопасный offline-проход по солнечной статье:
 
 ```bash
-.venv/bin/python -m viniti extract-document data/solar/dev/D001.pdf --profile solar --mode scripts -o data/solar/run-001
+.venv/bin/python extract_document.py data/solar/dev/D001.pdf --profile solar --mode scripts -o data/solar/run-001
 ```
 
 Этот режим пишет `result.json` и `candidates.csv`, не финальные таблицы. Для модельной обработки используйте новый, ещё не существующий каталог:
 
 ```bash
-.venv/bin/python -m viniti extract-document data/solar/dev/D001.pdf --profile solar --mode auto -o data/solar/run-001-auto
+.venv/bin/python extract_document.py data/solar/dev/D001.pdf --profile solar --mode auto -o data/solar/run-001-auto
 ```
 
 `auto` включает локальные кандидаты в контекст, но всё равно выполняет модельный проход, даже если regex нашёл совпадения. `model` запрашивает модель без предварительного script-поиска. В обоих режимах текст отправляется OpenRouter; без `OPENROUTER_API_KEY` и `OPENROUTER_MODEL` (либо `--model`) запуск завершится ошибкой.
@@ -44,7 +44,7 @@ CLI автоматически не загружает `.env`; переменн�
 Для демонстрационного generic-профиля:
 
 ```bash
-.venv/bin/python -m viniti extract-document data/solar/dev/D001.pdf --profile custom-example --mode scripts -o data/solar/custom-example-run
+.venv/bin/python extract_document.py data/solar/dev/D001.pdf --profile custom-example --mode scripts -o data/solar/custom-example-run
 ```
 
 Либо передайте `--profile path/to/profile.json`. `custom-example` показывает формат профиля и не является третьим научным кейсом.
@@ -70,7 +70,7 @@ JSON envelope ядра содержит `records`, `candidates`, `tables`, `sour
 Оцениватель сравнивает готовые solar CSV с gold; он не запускает извлечение и не проверяет цитаты против PDF. Команда для одного документа:
 
 ```bash
-.venv/bin/python -m viniti evaluate-extraction data/solar/run-001-auto docs/materials/solar-participant-kit/dev_gold --publication D001 -o data/solar/evaluation-D001.json
+.venv/bin/python evaluate_extraction.py data/solar/run-001-auto docs/materials/solar-participant-kit/dev_gold --publication D001 -o data/solar/evaluation-D001.json
 ```
 
 Первый аргумент должен быть каталогом с комплектом CSV (например, solar model-результатом); `-o` — новый JSON-файл. Для solar gold лежит в `docs/materials/solar-participant-kit/dev_gold`, а PDF для разработки — в соседнем `dev`. Не подставляйте RAG gold в solar-оцениватель и не смешивайте dev и test-материалы. Оценка считает совпадения результатов с раздельными basic/context ключами и micro/macro сводками; ограничения описаны в самом отчёте и `evaluate_extraction.py`. Это не независимый test-результат.

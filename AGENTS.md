@@ -22,37 +22,29 @@
 Хакатон ВИНИТИ РАН / ЮФУ: извлечение проверяемых научных результатов из PDF в связанные CSV.
 Две предметные области: `solar` (тонкоплёночные солнечные элементы) и `rag` (системы RAG).
 
-## Структура кода
-
-- Реализация backend находится в `src/viniti/`, предметный пакет RAG - в `src/rag/`.
-- Корневой `main.py` и пакетная команда `python -m viniti` - точки входа. Модули приложения не размещать в корне.
-- Пакеты устанавливаются из `pyproject.toml`; разработческая установка: `python -m pip install -e .`.
-- `tests/` содержит весь набор Python-тестов; UI-тесты лежат в `tools/uitest/`.
-- `tools/` содержит утилиты разработки и проверки; `docs/` - требования, планы и документацию.
-
 ## Состояние репозитория
 
 Ядро бекенда написано и работает для обеих областей:
 
-- `viniti.passport` -> `passport.json` - схема обеих областей (94 поля solar, 85 полей rag);
-- `viniti.db` - SQLite, таблицы на область, конверт `documents`/`blocks`/`jobs`;
-- `viniti.import_gold` - импорт эталона организаторов как есть, для сверки и для скорера;
-- `viniti.pdf_source` + `viniti.extract` + `viniti.verify` - разбор PDF, шов под экстрактор, проверка цитат;
-- `viniti.issues` - находки о несогласованности данных (таблица `issues`);
-- `viniti.export_csv` - официальная выгрузка (байт в байт как эталон) и произвольный срез;
-- `viniti.batch` - пакетный прогон корпуса с очередью задач в `jobs`;
-- `viniti.pipeline` - весь цикл одной командой: разбор -> находки -> CSV -> гейт;
-- `viniti.server` - HTTP API, `viniti.serve_data` - браузерный просмотр среза через Datasette;
-  `viniti.solar_api` - конверт одного документа для веб-каталога области solar, собранный
+- `passport.py` -> `passport.json` - схема обеих областей (94 поля solar, 85 полей rag);
+- `db.py` - SQLite, таблицы на область, конверт `documents`/`blocks`/`jobs`;
+- `import_gold.py` - импорт эталона организаторов как есть, для сверки и для скорера;
+- `pdf_source.py` + `extract.py` + `verify.py` - разбор PDF, шов под экстрактор, проверка цитат;
+- `issues.py` - находки о несогласованности данных (таблица `issues`);
+- `export_csv.py` - официальная выгрузка (байт в байт как эталон) и произвольный срез;
+- `batch.py` - пакетный прогон корпуса с очередью задач в `jobs`;
+- `pipeline.py` - весь цикл одной командой: разбор -> находки -> CSV -> гейт;
+- `server.py` - HTTP API, `serve_data.py` - браузерный просмотр среза через Datasette;
+  `solar_api.py` - конверт одного документа для веб-каталога области solar, собранный
   тем же `solar_offline.extract_pdf`, что и сдача, поэтому сайт и CSV не расходятся;
-- `viniti.solar_offline` - детерминированное извлечение области solar прямо в семь CSV
-  шаблона участников, без LLM; `viniti.solar_facts` - контракт кандидатов, проверка цитат,
-  нормализация единиц и согласованность, `viniti.solar_schema` - колонки и словари шаблона,
-  `viniti.solar_version` - общая ревизия экстрактора для `documents` и `jobs`;
-- `viniti.score` - precision/recall против эталона, `tools/gate.py` - гейт валидаторов;
-- `src/viniti/paths.py` - единственный источник корневых путей: `REPO_ROOT`, `DATA_DIR`,
-  `STATIC_DIR`, `PROFILES_DIR`, `PASSPORT`, `VOCAB`, `CORPUS_ROOTS`. Пакетные модули
-  берут готовые значения оттуда, а не считают их из своего `__file__`.
+- `solar_offline.py` - детерминированное извлечение области solar прямо в семь CSV
+  шаблона участников, без LLM; `solar_facts.py` - контракт кандидатов, проверка цитат,
+  нормализация единиц и согласованность, `solar_schema.py` - колонки и словари шаблона,
+  `solar_version.py` - общая ревизия экстрактора для `documents` и `jobs`;
+- `score.py` - precision/recall против эталона, `tools/gate.py` - гейт валидаторов;
+- `viniti/paths.py` - единственный источник корневых путей: `REPO_ROOT`, `DATA_DIR`,
+  `STATIC_DIR`, `PROFILES_DIR`, `PASSPORT`, `VOCAB`, `CORPUS_ROOTS`, `PARSE_SCRIPT`.
+  Корневые модули берут готовые значения оттуда, а не считают их из своего `__file__`.
 
 Качество извлечения - baseline, а не решение. `extract.TableFiller` берёт только строки
 таблиц, которые `pdf_source` уже разложил на ячейки, и только когда шапка с метриками
@@ -81,51 +73,52 @@ layers 0.34, measurements 0.55, issues 0.48, итого 0.37 на базе по�
 эталонному ключу не соответствует. Это ограничение метода, а не баг.
 
 Старый прототип (`library.py`, `rag_facts.py`, `analyze_pdfs.py`, `demo.py`) покрывал только
-`rag` и только 9 метрик из 37 616. Он оставлен ради `tests/test_smoke.py`. Новый код от него
+`rag` и только 9 метрик из 37 616. Он оставлен ради `test_smoke.py`. Новый код от него
 не зависит, и считать его поведение контрактом нельзя.
 
 ## Команды
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m pip install -r requirements-data.txt   # Datasette, только для serve_data.py
 
-.\.venv\Scripts\python.exe -X utf8 -m viniti passport --check         # схема не устарела
-.\.venv\Scripts\python.exe -X utf8 -m viniti db --init --stats        # создать БД и показать счётчики
-.\.venv\Scripts\python.exe -X utf8 -m viniti import-gold --area all   # залить эталон в data\viniti.sqlite3
+.\.venv\Scripts\python.exe -X utf8 passport.py --check               # схема не устарела
+.\.venv\Scripts\python.exe -X utf8 db.py --init --stats              # создать БД и показать счётчики
+.\.venv\Scripts\python.exe -X utf8 import_gold.py --area all         # залить эталон в data\viniti.sqlite3
 
-.\.venv\Scripts\python.exe -X utf8 -m viniti pipeline --area all --split dev --out out
-.\.venv\Scripts\python.exe -X utf8 -m viniti batch --area solar --split dev --resume
-.\.venv\Scripts\python.exe -X utf8 -m viniti export-csv --area rag --out out\rag
+.\.venv\Scripts\python.exe -X utf8 pipeline.py --area all --split dev --out out
+.\.venv\Scripts\python.exe -X utf8 batch.py --area solar --split dev --resume
+.\.venv\Scripts\python.exe -X utf8 export_csv.py --area rag --out out\rag
 .\.venv\Scripts\python.exe -X utf8 tools\gate.py --area all --submission out
-.\.venv\Scripts\python.exe -X utf8 -m viniti score --area solar --pred out\solar --ref _corpus\area1\dev_gold
+.\.venv\Scripts\python.exe -X utf8 score.py --area solar --pred out\solar --ref _corpus\area1\dev_gold
 
 # solar по умолчанию идёт через solar_offline.process; вернуть старый филлер -
 # --processor extract:process --extractor-revision 1
-.\.venv\Scripts\python.exe -X utf8 -m viniti db --init --db data\solar_offline.sqlite3
-.\.venv\Scripts\python.exe -X utf8 -m viniti batch --area solar --split dev --db data\solar_offline.sqlite3
+.\.venv\Scripts\python.exe -X utf8 db.py --init --db data\solar_offline.sqlite3
+.\.venv\Scripts\python.exe -X utf8 batch.py --area solar --split dev --db data\solar_offline.sqlite3
 
 # детерминированная сдача области solar без базы и без LLM
-.\.venv\Scripts\python.exe -X utf8 -m viniti solar-offline --pdf-dir _corpus\area1\dev --out out\solar_offline
-.\.venv\Scripts\python.exe -X utf8 -m viniti solar-offline _corpus\area1\dev\D001.pdf --out out\d001 --json
-.\.venv\Scripts\python.exe -X utf8 -m viniti score --area solar --pred out\solar_offline --ref _corpus\area1\dev_gold
+.\.venv\Scripts\python.exe -X utf8 solar_offline.py --pdf-dir _corpus\area1\dev --out out\solar_offline
+.\.venv\Scripts\python.exe -X utf8 solar_offline.py _corpus\area1\dev\D001.pdf --out out\d001 --json
+.\.venv\Scripts\python.exe -X utf8 score.py --area solar --pred out\solar_offline --ref _corpus\area1\dev_gold
 
-.\.venv\Scripts\python.exe -X utf8 -m viniti issues --area solar --verify    # находки + проверка цитат по PDF
-.\.venv\Scripts\python.exe -X utf8 -m viniti server --data data\viniti.sqlite3   # http://127.0.0.1:8765
-.\.venv\Scripts\python.exe -X utf8 -m viniti serve-data --print-only      # команда запуска Datasette
+.\.venv\Scripts\python.exe -X utf8 issues.py --area solar --verify    # находки + проверка цитат по PDF
+.\.venv\Scripts\python.exe -X utf8 server.py --data data\viniti.sqlite3   # http://127.0.0.1:8765
+.\.venv\Scripts\python.exe -X utf8 serve_data.py --print-only          # команда запуска Datasette
 
 .\.venv\Scripts\python.exe -X utf8 -m unittest -v
 ```
 
-`python -X utf8` рекомендуется: он гарантирует русский вывод в Windows независимо от кодировки консоли.
-То же касается записи CSV - пакетный экспорт пишет BOM и CRLF сам, кодировкой консоли это не управляется.
+`python -X utf8` обязателен: в консоли Windows кодировка cp1252, и русский вывод без флага
+падает или превращается в мусор. То же касается записи CSV - `export_csv.py` пишет BOM и CRLF
+сам, кодировкой консоли это не управляется.
 
-Зависимости приложения и метаданные пакетов объявлены в `pyproject.toml`; `requirements.txt`
-оставлен как ссылка на editable-установку (`-e .`). Отдельных конфигураций ruff/flake8/mypy нет.
+Линтеров, форматтеров и проверки типов в репозитории нет: ни `pyproject.toml`,
+ни `ruff`/`flake8`/`mypy`, ни `Makefile`. Не придумывать команды для них.
 
-Тесты импортируют `viniti.demo`, а он требует `reportlab`. Без установки проекта и зависимостей
-сборка тестов падает на `ModuleNotFoundError`,
+Тесты импортируют `demo.py`, а он требует `reportlab`. В окружении без
+`pip install -r requirements.txt` сборка тестов падает на `ModuleNotFoundError`,
 а не на логике - сначала ставьте зависимости. Тесты поднимают настоящий HTTP-сервер
 на `127.0.0.1` со случайным портом и ходят в него через `urlopen`.
 
@@ -133,15 +126,11 @@ CI (`.github/workflows/smoke.yml`) гоняет `python -m unittest -v` на ubu
 под Python 3.12. Локально может быть 3.14 - расхождение версий допустимо, но CI главный.
 Тесты не требуют ни `_corpus/`, ни `_refs/`: они строят синтетические PDF через `reportlab`
 и временные базы. Всё, что ходит в настоящий корпус, лежит в `tools/` и в `.slim/`.
-Корневые `test_*.py` и пакет `tests/` (включая `tests/unit/`) подхватываются одним
-discovery; узкие модульные тесты кладём в `tests/unit/`, чтобы корень не разрастался.
-`tests/test_layout.py` держит инвариант раскладки: `REPO_ROOT`, листовой `viniti/paths.py`,
-`PARSE_SCRIPT`, `static/` и `profiles/`.
 
-Аудиты обходят корневой `main.py` и каталоги `tools/`, `tests/`, `src/`.
-`tests/test_portability.py` проверяет разбор под Python 3.12, а `tools/coverage_report.py`
-меряет реализации в `src/` и подписывает строки путём от корня (`src/viniti/paths.py`),
-а не именем файла. Новый пакет с кодом надо
+Аудиты обходят не только корень и `tools/`: `tools/ci_parity.py` читает ещё `tests/`,
+`viniti/` и `rag/`, `tests/test_portability.py` проверяет их разбор под Python 3.12, а
+`tools/coverage_report.py` меряет корневые модули вместе с `viniti/**` и `rag/**` и подписывает
+строки путём от корня (`viniti/paths.py`), а не именем файла. Новый пакет с кодом надо
 добавить в эти три обхода, иначе он выпадет из аудита и из замера покрытия.
 
 ## Как связан код
@@ -189,17 +178,16 @@ pdf_source.extract(bytes)            текст страниц (pypdf), табл
 
 `batch.py` крутит эту цепочку по одной публикации и ведёт `jobs`; `pipeline.py` вызывает
 `batch.run`, `issues`, `export_csv` и `tools/gate` по очереди на каждую область.
-`viniti.server` и `viniti.serve_data` читают ту же базу и ничего не пересчитывают.
-`viniti.server` дополнительно запускает фоновые задачи Docling для распознавания загруженных
+`server.py` и `serve_data.py` читают ту же базу и ничего не пересчитывают.
+`server.py` дополнительно запускает фоновые задачи Docling для распознавания загруженных
 PDF; научные результаты хранятся отдельно.
 
-Корневые пути собраны в `src/viniti/paths.py`: `viniti.db`, `viniti.batch`, `viniti.import_gold`,
-`viniti.passport`, `viniti.pipeline`, `viniti.profiles_store`, `viniti.score`, `viniti.server`,
-`viniti.serve_data`, `viniti.filler_rag` и `viniti.extraction_core` берут `REPO_ROOT`/`DATA_DIR`/`PROFILES_DIR`/`PASSPORT`/
-`VOCAB`/`CORPUS_ROOTS` оттуда. Публичные имена модулей теперь пакетные:
-`viniti.db.PASSPORT`, `viniti.batch.CORPUS_ROOTS`, `viniti.import_gold.GOLD`,
-`viniti.score.DEFAULT_DB`. Команды запускаются через `python -m viniti <command>`.
-`viniti.batch.CORPUS_ROOTS` - копия
+Корневые пути собраны в `viniti/paths.py`: `db.py`, `batch.py`, `import_gold.py`,
+`passport.py`, `pipeline.py`, `profiles_store.py`, `score.py`, `server.py`, `serve_data.py`,
+`filler_rag.py` и `extraction_core.py` берут `REPO_ROOT`/`DATA_DIR`/`PROFILES_DIR`/`PASSPORT`/
+`VOCAB`/`CORPUS_ROOTS`/`PARSE_SCRIPT` оттуда. Публичные имена модулей при этом не менялись:
+`db.PASSPORT`, `batch.CORPUS_ROOTS`, `import_gold.GOLD`, `score.DEFAULT_DB` остаются на месте,
+поэтому команды, тесты и подпроцессы работают как раньше. `batch.CORPUS_ROOTS` - копия
 словаря из `paths`, её можно подменять в тестах, не задевая общий источник.
 Карточка `solar:` повторяет контракт якорей RAG: `anchors/{id}.json` и
 `anchors/{id}.png`; геометрию (`bbox`/`bboxes`) `solar_api` берёт из `pdf_source`
@@ -213,8 +201,8 @@ PyMuPDF; если изображение не загрузилось, viewer п�
 ограниченные фрагменты PDF. Ответ не меняет профиль автоматически: пользователь
 отмечает предложенные поля, а клиент добавляет только отмеченные.
 
-Диагностические события не меняют этот поток: `src/viniti/diagnostics.py` вызывается
-из тех же точек (`batch.run`, `pipeline.run_area`, границы запросов `viniti.server`,
+Диагностические события не меняют этот поток: `viniti/diagnostics.py` вызывается
+из тех же точек (`batch.run`, `pipeline.run_area`, границы запросов `server.py`,
 `solar_offline`, `parse_document`, fallback `pdf_source`), пишет только в stderr и
 не трогает ни stdout CLI, ни базу, ни файлы результата. Подробности - в разделе
 «Диагностика».
@@ -235,7 +223,7 @@ solar_offline.build(bytes)           таблицы из координат сл
 (`parser_version = 6`) и возвращает сводку. Ревизия solar берётся из
 `solar_version.PARSER_VERSION` (сейчас 6), иначе `--resume` пропустил бы публикации,
 которые старый экстрактор уже пометил `ok` под ревизией 1. `--processor` по-прежнему
-перекрывает выбор для точечных экспериментов. Тесты - `tests/test_solar_offline.py`,
+перекрывает выбор для точечных экспериментов. Тесты - `test_solar_offline.py`,
 синтетические PDF через `reportlab`.
 
 Шов под экстрактор - протокол `extract.Filler` с единственным методом
@@ -271,15 +259,15 @@ solar_offline.build(bytes)           таблицы из координат сл
 
 Две вещи надо править руками при расширении:
 
-- `passport.json` не пишется вручную: меняй `src/viniti/passport.py` и перегенерируй,
-  иначе `python -m viniti passport --check` и тесты схемы упадут. Числовые зеркала колонок
+- `passport.json` не пишется вручную: меняй `passport.py` и перегенерируй,
+  иначе `passport.py --check` и тесты схемы упадут. Числовые зеркала колонок
   (`<column>_num`) тоже берутся из паспорта - по `fields.*.type == "number"`.
-- `src/viniti/server.py`: статика отдаётся из `static/` по расширению, список файлов больше не
+- `server.py`: статика отдаётся из `static/` по расширению, список файлов больше не
   хардкодится. Новый эндпоинт добавляется в `do_GET` явно, общего regex на все
   маршруты статьи (`PAPER`) больше нет для новых путей.
-- Пути не собираются заново из `__file__` в пакетных модулях: источник живёт в
-  `src/viniti/paths.py`, а модуль берёт готовое значение. Иначе при переносе файла в
-  подпакет молча поедет `data/`, `static/` и `_corpus/`. `src/viniti/paths.py` - лист:
+- Пути не собираются заново из `__file__` в корневых модулях: новое место живёт в
+  `viniti/paths.py`, а модуль берёт готовое значение. Иначе при переносе файла в
+  подпакет молча поедет `data/`, `static/` и `_corpus/`. `viniti/paths.py` - лист:
   только `pathlib`, чтобы `batch --dry-run` работал без pdfplumber.
 
 Читающие эндпоинты `server.py`: `/api/passport` (схема, по области и целиком),
@@ -325,14 +313,7 @@ solar_offline.build(bytes)           таблицы из координат сл
   `POST /api/parse` (PDF + `X-Profile`, `X-Parser`, `X-OCR`, `X-Charts`, `X-LLM`) запускает
   его фоновым процессом; `GET /api/parse/<id>`, `/result`, `/llm` и `/file/<path>` отдают
   статус, JSON и артефакты. Результат лежит в `data/parses/<id>/`, исходный PDF -
-  рядом как `input.pdf`; `job.json` обновляется атомарно. Рабочий поток живёт в daemon
-  thread, а дочерний процесс идёт через `ParseChildren`: при остановке сервера
-  (`serve_until_interrupt` -> `shutdown_parse_workers`) живые парсеры останавливаются
-  вместе с дочерними процессами (POSIX `killpg`, Windows `taskkill /T`), затем
-  ожидаются, новые не запускаются, а оставшиеся активные job помечаются
-  терминальной ошибкой. На старте `recover_parse_jobs` переводит вчерашние
-  `queued`/`running` в `status=error` с `PARSE_INTERRUPTED_ERROR`; старый job
-  никогда не переигрывается автоматически, повтор - только новым `POST /api/parse`.
+  рядом как `input.pdf`; `job.json` обновляется атомарно.
 - `llm_shell.py` - оболочка LLM поверх готового scripts-паспорта. `--llm-shell mock`
   (или `X-LLM: mock`) запускает детерминированный `MockBackend` без сети и ключа и пишет
   `llm/sources.json`, `request.json`, `interpretation.json`, `audit.json`, `manifest.json`.
@@ -357,34 +338,8 @@ solar_offline.build(bytes)           таблицы из координат сл
   лимит секунд на один разбор (по умолчанию 1800).
 - Разбор остаётся разбором: `result.json` всегда собран скриптами, LLM-стадии
   пишут только `bundle/llm/*` и не меняют паспорт и официальные CSV.
-- Дополнительный `llm/semantic.json` выдаётся тем же владельческим маршрутом
-  `/api/parse/<id>/file/llm/semantic.json`. Whitelist имён берётся из констант
-  `llm_shell`; произвольные файлы каталога LLM через этот маршрут не доступны.
-- `solar_draft.py` проверяет модельный ответ построчно для диагностического
-  черновика: плохая строка и зависимые от неё строки уходят в карантин,
-  независимые строки сохраняются. Он не вызывает официальный `finalize`,
-  не нормализует значения и не объединяет строки с официальными таблицами.
-- Solar API-промпт оболочки запрашивает семь экспериментальных таблиц и
-  отдельный обязательный `semantic`-блок, в том числе для расчётной статьи.
-  Отсутствие блока у старого ответа отражается как `missing`, а не как успешное
-  извлечение семантики. `llm/response.json` сохраняет ограниченный разобранный
-  ответ модели до проверки; `llm/draft.json` сохраняет построчный разбор отказов.
-  Эти файлы доступны только владельцу job и не являются официальной сдачей.
-- Экран `static/parse.js` читает semantic-артефакт отдельно от строгой
-  интерпретации и показывает собственные цитаты полей. `unknown`, отсутствие
-  файла и частичный отказ различаются; число замечаний не равно числу
-  отклонённых записей. При отказе строгой интерпретации наличие принятых строк
-  диагностического draft показывается отдельно, без обещания официального CSV.
-- Успешная строгая интерпретация на экране означает только прохождение
-  формальных проверок. `interpretation.attribution` и сводка `solar`
-  перечисляют поля для сверки; научные связи и полнота остаются
-  `not_verified`, включая старые jobs без такого инвентаря.
 
 ## Схема БД
-
-Отдельный LLM-артефакт `bundle/llm/semantic.json` не добавляет таблиц или колонок
-БД и не входит в официальные экспериментальные CSV. Доступ к файлу использует
-проверку владельца parse job, как остальные файлы разбора.
 
 Типографика индексов хранится в JSON-метаданных источников (`math_spans`, `display_text`),
 а не в новых SQL-колонках.
@@ -489,27 +444,6 @@ python tools\check_submission.py dev_gold dev --json-report report.json
 
 ## Ловушки данных
 
-- Если результат явно ссылается на прибор и материал, а у прибора указан
-  поглотитель, `results.material_id` должен совпадать с
-  `devices.absorber_material_id`. Строгий `solar_facts` отклоняет несовпадение,
-  диагностический `solar_draft` карантинит строку без исправления исходных
-  значений. Пустая ссылка остаётся неизвестной; этот инвариант сам по себе
-  не доказывает принадлежность технологических условий или размера выборки.
-- `solar_facts.finalize` добавляет `extraction.attribution`: ограниченный
-  список ссылок на строки с условиями обработки и статистическими полями.
-  Значения не меняются. `state=none` означает только пустой список таких
-  полей, а не подтверждение научных связей; `requires_review` остаётся true.
-
-- Semantic-артефакт не является официальной сдачей. Проверка буквальности
-  источника не доказывает научную связь или полноту извлечения. Расчётные
-  значения нельзя переносить из него в экспериментальные таблицы автоматически.
-- Ошибка необязательного semantic-поля не удаляет независимые подтверждённые
-  поля записи: значение опускается с диагностикой конкретного поля. Это отказ
-  проверки, а не утверждение об отсутствии параметра в статье. Обязательные
-  поля остаются строгими; толщина и единица рассматриваются как одна пара.
-- `GET /api/parse/<id>/file/llm/semantic.json` доступен только владельцу job;
-  неизвестные файлы и обход пути не открываются расширением whitelist.
-
 - Геометрическое присоединение индексов консервативно: требует меньшего шрифта и близкого
   базового символа. Сложные дроби, матрицы и индексы без надёжного текстового слоя этим
   правилом не восстанавливаются; для них требуется визуальное распознавание и сверка.
@@ -525,22 +459,6 @@ python tools\check_submission.py dev_gold dev --json-report report.json
   Такие блоки нельзя подавать в канал подтверждённых фактов как независимое доказательство.
 - Docling-источники каталога доступны после успешного завершения фонового job. Результаты
   научного извлечения сохраняют независимые исходные якоря и не подтверждаются текстом модели.
-- Остановка сервера во время разбора: daemon thread умирает вместе с интерпретатором, поэтому
-  без `ParseChildren` дочерний `parse_document` продолжал бы писать в `data/parses/<id>`
-  после выхода, а `job.json` оставался бы `running`. Теперь `shutdown_parse_workers` глушит
-  детей и пишет терминальную ошибку, `recover_parse_jobs` доделывает это на старте. Старый
-  job не переигрывается автоматически: доказать, что прерванный процесс ничего не записал,
-  нельзя, а выдумывать результат запрещено. `running` старше `PARSE_TIMEOUT + 60`
-  (`parse_job_stale`) читается и сохраняется как `error`, поэтому список `?active=1`
-  и одиночный маршрут отвечают одинаково; `queued` по возрасту не проверяется, он может
-  законно ждать слот. `owner_user_id`, `sha256`, `document_id` и `started_at` при
-  восстановлении не меняются.
-- `job.json` читают потоки запросов, пока рабочий поток заменяет файл. На Windows
-  `os.replace` требует delete-доступа к цели, поэтому открытый читателем файл даёт
-  sharing violation, и рабочий процесс записывал бы ложную ошибку разбора. Чтение и
-  запись идут через `PARSE_JOB_LOCK`; `replace_parse_job` повторяет только
-  `PermissionError` (ограниченное число раз), а последняя попытка пробрасывает
-  ошибку, поэтому атомарность не ослаблена и сбой не скрыт.
 
 - Фронтенд не может решить «вошёл ли пользователь» по `localStorage`: истина -
   ответ `GET /api/auth/me`. Поэтому `index.html` сразу ставит `auth-locked`, а
@@ -637,9 +555,9 @@ python tools\check_submission.py dev_gold dev --json-report report.json
   широкозонный буфер в соседней фразе всё ещё может быть принят за поглотитель. Это открытая
   находка ревью, а не проверенное поведение.
 - `Library.ingest` возвращает уже сохранённую запись, если `sha256` совпал
-  (`src/viniti/library.py:71`): файл с тем же содержимым не переразбирается, даже если изменился
+  (`library.py:71`): файл с тем же содержимым не переразбирается, даже если изменился
   экстрактор. Это старое хранилище, новый код его не использует.
-- `analyze_pdfs.py` открывает выходной файл в режиме `"x"` (`src/viniti/analyze_pdfs.py:21`),
+- `analyze_pdfs.py` открывает выходной файл в режиме `"x"` (`analyze_pdfs.py:21`),
   поэтому повторный запуск с тем же `-o` падает, а не перезаписывает результат.
 - `pdfplumber` разрывает предложение на подстрочных индексах (`J` / `SC`) и перемешивает
   колонки, поэтому цитаты проверяются по тексту `pypdf` (`pdf_source.page_texts`),
@@ -660,7 +578,7 @@ python tools\check_submission.py dev_gold dev --json-report report.json
 
 ## Диагностика
 
-`src/viniti/diagnostics.py` - необязательный слой логов для batch, pipeline, серверных
+`viniti/diagnostics.py` - необязательный слой логов для batch, pipeline, серверных
 границ запроса и разборщиков. При импорте он ничего не настраивает: пока точка входа
 (`batch.main`, `pipeline.main`, `server.main`, `parse_document.main`,
 `solar_offline.main`) не вызвала `configure()`, логгер `viniti` держит только
@@ -708,5 +626,5 @@ baseline). Это не документация продукта, но там з
 
 ## Проверка самого файла
 
-Если меняешь `src/viniti/db.py`, `src/viniti/server.py`, `src/viniti/extract.py` или схему БД, обнови разделы
+Если меняешь `db.py`, `server.py`, `extract.py` или схему БД, обнови разделы
 «Как связан код», «Схема БД» и «Ловушки данных»: устаревшая инструкция хуже отсутствующей.

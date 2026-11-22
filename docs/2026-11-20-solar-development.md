@@ -11,7 +11,7 @@
 ```bash
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m viniti solar-extract --help
+.venv/bin/python solar_extract.py --help
 ```
 
 Solar добавляет модули в корень репозитория и не добавляет отдельные зависимости сверх `requirements.txt`. Windows-путь к Python: `.\.venv\Scripts\python.exe`.
@@ -34,7 +34,7 @@ CLI не загружает `.env` автоматически. Файл `.env` �
 `--prepare` извлекает локальные источники и записывает `request.json`; API и CSV не используются:
 
 ```bash
-.venv/bin/python -m viniti solar-extract article.pdf -o prepared-request --prepare
+.venv/bin/python solar_extract.py article.pdf -o prepared-request --prepare
 ```
 
 Для этого режима ключ не нужен и сетевого обращения нет. Каталог результата должен быть новым. Запрос содержит текст источников, поэтому обращайтесь с ним как с содержимым документа.
@@ -42,7 +42,7 @@ CLI не загружает `.env` автоматически. Файл `.env` �
 ## Полный запуск
 
 ```bash
-.venv/bin/python -m viniti solar-extract article.pdf -o solar-result
+.venv/bin/python solar_extract.py article.pdf -o solar-result
 ```
 
 `-o`/`--output` должен указывать на новый каталог. При успехе там находятся `result.json` и семь CSV: `publications.csv`, `materials.csv`, `devices.csv`, `layers.csv`, `measurements.csv`, `results.csv`, `issues.csv`. CSV используют заголовки шаблона, UTF-8 и значения полей-строк; неизвестное значение — пустая строка `''`, не `null`.

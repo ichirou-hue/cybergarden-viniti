@@ -1,11 +1,8 @@
 import { getJSON } from "./api.js";
 import { el, fill } from "./dom.js";
-import { docStatus, number, seconds, sharedDemoDocument } from "./ui.js";
+import { docStatus, number, seconds } from "./ui.js";
 
 const PAGE = 50;
-// Разбор по полям - ещё не документ каталога, поэтому в списке показываем
-// только незавершённые задания: у готовых есть своя страница с результатом.
-const ACTIVE_PARSE_STATUSES = new Set(["queued", "running"]);
 
 const STATUS_OPTIONS = [
   ["", "Все статусы"],
@@ -68,30 +65,10 @@ export async function renderCatalog(root, ctx) {
   const statDone = el("strong", {text: "—"});
   const statReview = el("strong", {text: "—"});
 
-  // Активные разборы по полям идут отдельной панелью, а не строкой в таблице:
-  // это задание на сервере, а не обработанная публикация. Панель скрыта, пока
-  // своих разборов нет; ошибка списка показывается в ней же.
-  const jobsCount = el("p", {class: "count", "aria-live": "polite"});
-  const jobsError = el("p", {class: "error-hint", role: "status", hidden: true});
-  const jobsList = el("div", {class: "parse-artifacts"});
-  const jobsPanel = el("section", {class: "panel catalog-panel", hidden: true},
-    el("header", {class: "panel-head"},
-      el("div", {},
-        el("p", {class: "eyebrow", text: "Разбор по полям"}),
-        el("h2", {text: "Активные разборы"}),
-      ),
-    ),
-    jobsCount,
-    jobsError,
-    el("p", {class: "muted", text: "Это ваши собственные разборы. Демо-документ открывается отдельно, "
-      + "а готовый разбор попадёт в каталог после завершения."}),
-    jobsList,
-  );
-
   fill(root,
     el("section", {class: "hero"},
       el("div", {},
-        el("h1", {}, "Каталог", el("br"), "публикаций"),
+        el("h1", {}, "Каталог", el("br"), "публикаций", el("span", {class: "dot", text: "."})),
         el("p", {class: "lede", text: `${descriptor.note || "Публикации предметной области"}. `
           + "Загрузите PDF или откройте демо, чтобы увидеть результаты и доказательства."}),
       ),
@@ -101,7 +78,6 @@ export async function renderCatalog(root, ctx) {
       el("div", {}, el("span", {text: "Обработано"}), statDone),
       el("div", {}, el("span", {text: "Требуют разбора"}), statReview),
     ),
-    jobsPanel,
     el("section", {class: "panel catalog-panel"},
       el("header", {class: "panel-head"},
         el("div", {},
@@ -124,7 +100,6 @@ export async function renderCatalog(root, ctx) {
 
   let timer = 0;
   let request = 0;
-  let jobsRequest = 0;
 
   ctx.signal.addEventListener("abort", () => clearTimeout(timer), {once: true});
 
@@ -169,51 +144,6 @@ export async function renderCatalog(root, ctx) {
       console.warn("Не удалось получить счётчики прогона:", error.message);
     }
   });
-
-  // GET /api/parse отдаёт только собственные задания пользователя, поэтому
-  // чужой разбор и общий демо-документ сюда не попадают.
-  async function loadParseJobs() {
-    const id = ++jobsRequest;
-    let data;
-    try {
-      data = await getJSON("/api/parse", {active: 1, limit: 20}, ctx.signal);
-    } catch (error) {
-      if (error.name === "AbortError" || id !== jobsRequest || ctx.signal.aborted) return;
-      // Каталог публикаций работает и без этого списка, но молчать об ошибке
-      // нельзя: иначе активный разбор снова выглядел бы потерянным.
-      console.warn("Не удалось получить активные разборы:", error.message);
-      jobsPanel.hidden = false;
-      jobsCount.textContent = "";
-      jobsError.textContent = "Не удалось получить список разборов. Обновите страницу.";
-      jobsError.hidden = false;
-      fill(jobsList);
-      return;
-    }
-    if (id !== jobsRequest || ctx.signal.aborted) return;
-    jobsError.hidden = true;
-    jobsError.textContent = "";
-    const items = Array.isArray(data?.items) ? data.items : [];
-    const active = items.filter(item => item && item.id
-      && ACTIVE_PARSE_STATUSES.has(item.status)
-      && !sharedDemoDocument(item.document_id));
-    jobsPanel.hidden = !active.length;
-    if (!active.length) {
-      fill(jobsList);
-      jobsCount.textContent = "";
-      return;
-    }
-    jobsCount.textContent = `Активных разборов: ${active.length}`;
-    fill(jobsList, active.map(job => el("a", {
-      class: "parse-artifact",
-      href: `#/parse/${encodeURIComponent(job.id)}`,
-      title: `${job.filename || "Документ"} · откройте страницу разбора`,
-    },
-      el("span", {}, el("strong", {text: job.filename || "Документ"}), " ", docStatus(job.status)),
-      el("small", {text: "Открыть"}),
-    )));
-  }
-
-  void loadParseJobs();
 
   async function load() {
     if (ctx.signal.aborted) return;
@@ -310,11 +240,7 @@ function drawRows(data, rows, ctx, descriptor) {
     const link = `#/doc/${encodeURIComponent(doc.document_id)}?track=${encodeURIComponent(descriptor.track)}`;
     rows.append(el("tr", {},
       el("td", {}, el("a", {class: "pub", href: link},
-        el("strong", {}, doc.publication_id, " ",
-          sharedDemoDocument(doc.document_id)
-            ? el("span", {class: "badge idle", text: "демо",
-              title: "Демонстрационный документ. Он общий для всех пользователей каталога."})
-            : null),
+        el("strong", {text: doc.publication_id}),
         el("span", {class: "pub-title", text: doc.title}),
       )),
       el("td", {class: "year", text: doc.year || "—"}),

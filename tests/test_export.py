@@ -17,7 +17,8 @@ import sqlite3
 import tempfile
 import unittest
 
-from viniti import db as storage, export_csv
+import db as storage
+import export_csv
 
 RESULTS_COLUMNS = [
     "publication_id",

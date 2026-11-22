@@ -12,11 +12,11 @@ from unittest.mock import Mock
 from urllib.error import HTTPError
 from urllib.request import Request
 
-from viniti.extraction_core import (
+from extraction_core import (
     compile_profile, export_result, load_profile, response_schema, run, script_candidates,
 )
-from viniti.solar_extract import NoRedirect
-from viniti.solar_facts import finalize
+from solar_extract import NoRedirect
+from solar_facts import finalize
 from tests.test_solar import ROOT, fixture, synthetic_pdf
 
 
@@ -282,7 +282,7 @@ class ExtractionCoreTest(unittest.TestCase):
             pdf.write_bytes(synthetic_pdf())
             env = {k: v for k, v in os.environ.items() if not k.startswith("OPENROUTER_")}
             execution = subprocess.run([
-                sys.executable, "-X", "utf8", "-m", "viniti", "extract-document", str(pdf), "--profile", "solar",
+                sys.executable, "-X", "utf8", str(ROOT / "extract_document.py"), str(pdf), "--profile", "solar",
                 "--mode", "scripts", "-o", str(out),
             ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, env=env)
             self.assertEqual(execution.returncode, 0, execution.stderr)

@@ -7,11 +7,10 @@ import csv
 import io
 import json
 import pathlib
-import sqlite3
 import tempfile
 import unittest
 
-from viniti import score
+import score
 
 PASSPORT = score.load_passport()
 
@@ -235,25 +234,7 @@ class ScorerTest(unittest.TestCase):
         self.assertIn("not_measured", payload)
 
 
-def initialized_database():
-    """True only for a results database, not for an auth-only one.
-
-    The app creates ``data/viniti.sqlite3`` on the first anonymous session, so
-    file existence alone no longer means ``db.py --init`` was run.
-    """
-    if not score.DEFAULT_DB.exists():
-        return False
-    try:
-        with sqlite3.connect(score.DEFAULT_DB) as connection:
-            row = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='solar_results'"
-            ).fetchone()
-    except sqlite3.Error:
-        return False
-    return row is not None
-
-
-@unittest.skipUnless(initialized_database(), "data/viniti.sqlite3 не импортирован")
+@unittest.skipUnless(score.DEFAULT_DB.exists(), "data/viniti.sqlite3 не импортирован")
 class GoldAgainstDatabaseTest(unittest.TestCase):
     """The organisers' gold scored against the same rows in the database."""
 

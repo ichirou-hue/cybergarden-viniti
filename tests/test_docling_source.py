@@ -11,8 +11,8 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from viniti.docling_source import make_converter, normalize_document, page_anchor, prepare_pdf, table_grid
-from viniti.extraction_core import export_result, load_profile, run
+from docling_source import make_converter, normalize_document, page_anchor, prepare_pdf, table_grid
+from extraction_core import export_result, load_profile, run
 from tests.test_solar import ROOT, synthetic_pdf
 
 
@@ -348,8 +348,7 @@ class DoclingAdapterTest(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             out = Path(tmp) / "result"
             execution = subprocess.run([
-                sys.executable, "-X", "utf8", "-m", "viniti", "extract-document",
-                "unused.pdf", "--charts", "-o", str(out),
+                sys.executable, "-X", "utf8", str(ROOT / "extract_document.py"), "unused.pdf", "--charts", "-o", str(out),
             ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
             self.assertEqual(execution.returncode, 1)
             self.assertNotIn("Traceback", execution.stderr)
@@ -357,8 +356,7 @@ class DoclingAdapterTest(unittest.TestCase):
 
     def test_optional_dependency_import_not_needed_for_default(self):
         execution = subprocess.run([
-            sys.executable, "-X", "utf8", "-c",
-            "import viniti.extract_document, sys; assert 'docling' not in sys.modules",
+            sys.executable, "-X", "utf8", "-c", "import extract_document, sys; assert 'docling' not in sys.modules",
         ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, cwd=ROOT)
         self.assertEqual(execution.returncode, 0, execution.stderr)
 

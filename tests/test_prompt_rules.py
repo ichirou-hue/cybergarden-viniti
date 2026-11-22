@@ -8,8 +8,12 @@ the script path rejects it.
 import os
 from unittest import TestCase, mock
 
-from viniti import extraction_core, llm_provider, llm_shell, profile_assistant, solar_extract
-from viniti.prompt_rules import DOCUMENT_RULES, DOCUMENT_RULES_RU
+import extraction_core
+import llm_provider
+import llm_shell
+import profile_assistant
+import solar_extract
+from prompt_rules import DOCUMENT_RULES, DOCUMENT_RULES_RU
 
 
 class PromptRulesTest(TestCase):

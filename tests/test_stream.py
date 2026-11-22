@@ -5,12 +5,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
-from unittest import mock
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-from viniti import auth
-from viniti.server import Handler, ThreadingHTTPServer
+import auth
+from server import Handler, ThreadingHTTPServer
 
 
 class FakeStore:
@@ -29,12 +28,6 @@ class UploadProgressTest(unittest.TestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.auth = auth.Auth(root / "auth.sqlite3", iterations=auth.MIN_ITERATIONS)
         self.server.solar_store = FakeStore()
-        self.server.parse_root = root / "parses"
-        # Recognition runs in a background thread; the Docling subprocess is not
-        # part of this test, only the job it would fill.
-        runner = mock.patch.object(Handler, "run_parse", return_value=None)
-        runner.start()
-        self.addCleanup(runner.stop)
         self.thread = Thread(target=self.server.serve_forever)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_port}"
@@ -77,35 +70,6 @@ class UploadProgressTest(unittest.TestCase):
         events = [json.loads(line) for line in body.splitlines()]
         self.assertEqual([event["completed"] for event in events], [0, 1, 2, 3, 4])
         self.assertEqual(events[-1]["result"]["document_id"], "solar:paper")
-
-    def get(self, path):
-        try:
-            with self.client.open(self.base + path, timeout=10) as response:
-                return response.status, json.load(response)
-        except HTTPError as error:
-            with error:
-                return error.code, json.load(error)
-
-    def test_stream_starts_catalog_recognition_after_claim(self):
-        # The non-stream upload already starts recognition; the streamed one
-        # must do the same and report the job id in the final result, otherwise
-        # the wizard never learns that fragments are on the way.
-        status, _, body = self.stream()
-        self.assertEqual(status, 200)
-        result = json.loads(body.splitlines()[-1])["result"]
-        job_id = result.get("recognition_job_id")
-        self.assertTrue(job_id, result)
-        status, job = self.get("/api/parse/" + job_id)
-        self.assertEqual(status, 200, job)
-        self.assertEqual(job["document_id"], "solar:paper")
-        self.assertEqual(job["status"], "queued")
-
-    def test_repeated_stream_reuses_active_recognition_job(self):
-        first = json.loads(self.stream()[2].splitlines()[-1])["result"]["recognition_job_id"]
-        second = json.loads(self.stream()[2].splitlines()[-1])["result"]["recognition_job_id"]
-        self.assertEqual(first, second)
-        folders = [folder for folder in self.server.parse_root.iterdir() if folder.is_dir()]
-        self.assertEqual(len(folders), 1, folders)
 
     def test_stream_requires_session_cookie(self):
         status, _, body = self.stream(client=build_opener())

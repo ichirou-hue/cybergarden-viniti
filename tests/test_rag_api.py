@@ -9,11 +9,11 @@ import unittest
 from unittest import mock
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-from viniti import auth
+import auth
 import rag.pdf as rag_pdf
-from viniti.library import Library
-from viniti.rag_api import RagStore, build_envelope, demo_pdf, export_csv, _anchor
-from viniti.server import Handler, ThreadingHTTPServer
+from library import Library
+from rag_api import RagStore, build_envelope, demo_pdf, export_csv, _anchor
+from server import Handler, ThreadingHTTPServer
 
 
 class AdapterTest(unittest.TestCase):

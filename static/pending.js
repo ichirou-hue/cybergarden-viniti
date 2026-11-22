@@ -1,8 +1,6 @@
 // Передача выбранного PDF из мастера на страницу ручного профиля.
-// Файл нельзя положить в sessionStorage, поэтому используем IndexedDB.
-// Мастер забирает запись один раз, а страница профиля читает её без удаления:
-// так PDF переживает возврат в мастер и повторную загрузку страницы, а место
-// освобождается после успешного разбора или по истечении TTL.
+// Файл нельзя положить в sessionStorage, поэтому используем IndexedDB и
+// забираем запись один раз, чтобы она не занимала место после перехода.
 
 const DB_NAME = "viniti-profile";
 const STORE = "pending";
@@ -46,10 +44,6 @@ function transactionDone(transaction) {
   }));
 }
 
-function fresh(record) {
-  return Boolean(record) && Date.now() - Number(record.savedAt) < TTL_MS;
-}
-
 export async function stashProfilePDF(file) {
   const database = await openDatabase();
   try {
@@ -61,7 +55,7 @@ export async function stashProfilePDF(file) {
   }
 }
 
-async function readProfilePDF(consume) {
+async function readProfilePDF() {
   const database = await openDatabase();
   try {
     const transaction = database.transaction(STORE, "readwrite");
@@ -70,35 +64,17 @@ async function readProfilePDF(consume) {
     let record;
     request.onsuccess = () => {
       record = request.result;
-      // Просроченная запись не нужна ни мастеру, ни странице профиля,
-      // поэтому удаляется при любом чтении.
-      if (record && (consume || !fresh(record))) store.delete(PDF_KEY);
+      if (record) store.delete(PDF_KEY);
     };
     await transactionDone(transaction);
-    return fresh(record) && record.file instanceof Blob ? record.file : undefined;
+    const fresh = record && Date.now() - Number(record.savedAt) < TTL_MS;
+    return fresh && record.file instanceof Blob ? record.file : undefined;
   } finally {
     database.close();
   }
 }
 
-/** Забирает PDF и удаляет запись: так мастер возвращает файл после перехода. */
+/** Забирает PDF и удаляет запись: вызывается мастером при возврате. */
 export function takeProfilePDF() {
-  return readProfilePDF(true);
-}
-
-/** Читает PDF, не удаляя запись: страница профиля освобождает её сама. */
-export function peekProfilePDF() {
-  return readProfilePDF(false);
-}
-
-/** Освобождает запись после успешного разбора. */
-export async function clearProfilePDF() {
-  const database = await openDatabase();
-  try {
-    const transaction = database.transaction(STORE, "readwrite");
-    transaction.objectStore(STORE).delete(PDF_KEY);
-    await transactionDone(transaction);
-  } finally {
-    database.close();
-  }
+  return readProfilePDF();
 }

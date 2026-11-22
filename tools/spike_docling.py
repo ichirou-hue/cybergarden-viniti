@@ -107,7 +107,7 @@ def grid_fill(grid) -> tuple[int, int, int, int]:
 def run_pdfplumber(path: str) -> PdfResult:
     import pdfplumber
 
-    from viniti import pdf_source
+    import pdf_source
 
     result = PdfResult(name=os.path.basename(path), parser="pdfplumber")
     started = time.perf_counter()

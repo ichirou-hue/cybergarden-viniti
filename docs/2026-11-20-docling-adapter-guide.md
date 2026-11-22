@@ -20,13 +20,13 @@ OCR `auto` и `full` требует установленного в систем
 Сначала выполните offline-проход без тяжёлого извлечения графиков:
 
 ```bash
-.venv-docling/bin/python -m viniti extract-document data/solar/dev/D001.pdf --profile solar --mode scripts --parser docling -o data/solar/docling-D001
+.venv-docling/bin/python extract_document.py data/solar/dev/D001.pdf --profile solar --mode scripts --parser docling -o data/solar/docling-D001
 ```
 
 `--parser docling` включает OCR `auto` по умолчанию. Значения `--ocr auto|full|off` доступны только для Docling: `auto` включает обычный OCR-режим, `full` — полно-страничный OCR, `off` отключает OCR. Для отдельной проверки полно-страничного OCR используйте новый каталог результата:
 
 ```bash
-.venv-docling/bin/python -m viniti extract-document data/solar/dev/D001.pdf --profile solar --mode scripts --parser docling --ocr full -o data/solar/docling-D001-full-ocr
+.venv-docling/bin/python extract_document.py data/solar/dev/D001.pdf --profile solar --mode scripts --parser docling --ocr full -o data/solar/docling-D001-full-ocr
 ```
 
 Docling может при первом запуске скачивать веса моделей; требуется сетевой доступ. После подготовки моделей инференс выполняется локально. `--mode scripts` не использует внешний API. При `--mode auto` или `--mode model` текст по-прежнему отправляется в OpenRouter согласно настройкам CLI; изображения и результаты графиков автоматически в API не передаются. Для этих режимов по-прежнему нужны `OPENROUTER_API_KEY` и `OPENROUTER_MODEL` либо `--model`.
@@ -36,7 +36,7 @@ Docling может при первом запуске скачивать вес�
 Флаг `--charts` включает локальный chart2csv VLM и требует дополнительного скачивания весов:
 
 ```bash
-.venv-docling/bin/python -m viniti extract-document data/solar/dev/D001.pdf --profile solar --mode scripts --parser docling --charts -o data/solar/docling-D001-charts
+.venv-docling/bin/python extract_document.py data/solar/dev/D001.pdf --profile solar --mode scripts --parser docling --charts -o data/solar/docling-D001-charts
 ```
 
 Это тяжёлый режим: настроенная по умолчанию модель — Granite Vision 4.1 4B, ей нужны существенные загрузка и память. Не запускайте его без необходимости. Конфигурация выключает chart2code и chart2summary, `trust_remote_code=False`, а удалённые сервисы Docling отключены. Если модель требует исполнения кода из репозитория, режим завершится ошибкой, а не отключит защиту. Модельные веса имеют собственные лицензионные условия; лицензия модели не тождественна лицензии Docling.

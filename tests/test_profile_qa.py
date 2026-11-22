@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from viniti.extraction_core import compile_profile, export_result, load_profile, run
+from extraction_core import compile_profile, export_result, load_profile, run
 from tests.test_extraction_core import custom_fixture
 from tests.test_solar import ROOT, synthetic_pdf
 
@@ -55,7 +55,7 @@ class ProfileIndependentQA(unittest.TestCase):
             environment = {key: value for key, value in os.environ.items()
                            if not key.startswith("OPENROUTER_")}
             execution = subprocess.run(
-                [sys.executable, "-m", "viniti.extract_document", str(pdf),
+                [sys.executable, str(ROOT / "extract_document.py"), str(pdf),
                  "--profile", str(profile_path), "--mode", "scripts", "-o", str(output)],
                 env=environment, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
@@ -156,7 +156,7 @@ class ProfileIndependentQA(unittest.TestCase):
         profile, document, candidate = custom_fixture()
         result = run(document, profile, mode="model", model_client=lambda _: candidate)
         with TemporaryDirectory() as temporary:
-            with patch("viniti.extraction_core.Path.write_text", side_effect=OSError("disk full")):
+            with patch("extraction_core.Path.write_text", side_effect=OSError("disk full")):
                 with self.assertRaises(OSError):
                     export_result(result, Path(temporary) / "output")
             self.assertEqual(list(Path(temporary).iterdir()), [])

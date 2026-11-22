@@ -13,9 +13,9 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from viniti.solar_extract import complete, main
-from viniti.solar_facts import export_bundle, finalize, prepare_pdf
-from viniti.solar_schema import TABLES
+from solar_extract import complete, main
+from solar_facts import export_bundle, finalize, prepare_pdf
+from solar_schema import TABLES
 from tests.test_solar import ROOT, fixture, synthetic_pdf
 
 
@@ -119,20 +119,18 @@ class SolarIndependentQA(unittest.TestCase):
                          opener=lambda *a, **k: BytesIO(raw))
 
     def test_response_size_limit(self):
-        with patch("viniti.solar_extract.MAX_RESPONSE_BYTES", 4), self.assertRaisesRegex(ValueError, "размер"):
+        with patch("solar_extract.MAX_RESPONSE_BYTES", 4), self.assertRaisesRegex(ValueError, "размер"):
             complete([], api_key="fake", model="fake", opener=lambda *a, **k: BytesIO(b"12345"))
 
     def test_missing_key_never_calls_transport(self):
-        with self.assertRaises(ValueError), patch("viniti.solar_extract.urlopen") as network:
+        with self.assertRaises(ValueError), patch("solar_extract.urlopen") as network:
             complete([], api_key="", model="fake", opener=network)
         network.assert_not_called()
 
     def run_cli(self, pdf, output, *options):
         environment = {k: v for k, v in os.environ.items()
                        if k not in {"OPENROUTER_API_KEY", "OPENROUTER_MODEL"}}
-        environment["OPENROUTER_API_KEY"] = ""
-        environment["OPENROUTER_MODEL"] = ""
-        return subprocess.run([sys.executable, "-X", "utf8", "-m", "viniti", "solar-extract", str(pdf),
+        return subprocess.run([sys.executable, "-X", "utf8", str(ROOT / "solar_extract.py"), str(pdf),
                                "-o", str(output), *options], env=environment,
                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
 
@@ -172,8 +170,8 @@ class SolarIndependentQA(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             pdf, output = Path(tmp) / "D001.pdf", Path(tmp) / "out"
             pdf.write_bytes(synthetic_pdf())
-            with patch.object(sys, "argv", ["solar-extract", str(pdf), "-o", str(output), "--prepare"]), \
-                    patch("viniti.solar_extract.Path.write_text", side_effect=OSError("disk full")):
+            with patch.object(sys, "argv", ["solar_extract.py", str(pdf), "-o", str(output), "--prepare"]), \
+                    patch("solar_extract.Path.write_text", side_effect=OSError("disk full")):
                 self.assertEqual(main(), 1)
             self.assertFalse(output.exists(), "failed prepare must not block retry with an empty output directory")
 

@@ -1,4 +1,4 @@
-import { clearProfilePDF, peekProfilePDF, stashProfilePDF } from "./pending.js";
+import { stashProfilePDF, takeProfilePDF } from "./pending.js";
 import { apiFetch, loadSession } from "./api.js";
 
 const byId = id => document.getElementById(id);
@@ -8,54 +8,12 @@ const entities = byId("profileEntities");
 const matches = byId("profileMatches");
 const status = byId("profileStatus");
 const errorLine = byId("profileError");
-const state = {
-  document: undefined,
-  selection: undefined,
-  matchesStale: false,
-  proposals: [],
-  assistantHistory: [],
-  loading: false,
-};
-
+let documentData;
+let selection;
 const presets = {
-  solar: {
-    title: "Солнечные элементы",
-    types: [
-      {
-        name: "Устройство",
-        aliases: "device, cell, ячейка",
-        fields: ["Структура", "Материал", "Площадь"],
-      },
-      {
-        name: "Измерение",
-        aliases: "efficiency, PCE, Voc, Jsc, FF, КПД",
-        fields: ["Показатель", "Значение", "Единица", "Условия измерения"],
-      },
-    ],
-  },
-  rag: {
-    title: "RAG-система",
-    types: [
-      {
-        name: "Система",
-        aliases: "RAG, retrieval, model, модель",
-        fields: ["Название", "Модель", "Метод поиска"],
-      },
-      {
-        name: "Результат",
-        aliases: "accuracy, recall, precision, F1, benchmark, dataset",
-        fields: ["Набор данных", "Метрика", "Значение", "Конфигурация"],
-      },
-    ],
-  },
-  basic: {
-    title: "Результаты статьи",
-    types: [{
-      name: "Результат",
-      aliases: "result, results, experiment, результат, эксперимент",
-      fields: ["Объект", "Показатель", "Значение", "Условия"],
-    }],
-  },
+  solar: {title: "Солнечные элементы", types: [{name: "Устройство", aliases: "device, cell, ячейка", fields: ["Структура", "Материал", "Площадь"]}, {name: "Измерение", aliases: "efficiency, PCE, Voc, Jsc, FF, КПД", fields: ["Показатель", "Значение", "Единица", "Условия измерения"]}]},
+  rag: {title: "RAG-система", types: [{name: "Система", aliases: "RAG, retrieval, model, модель", fields: ["Название", "Модель", "Метод поиска"]}, {name: "Результат", aliases: "accuracy, recall, precision, F1, benchmark, dataset", fields: ["Набор данных", "Метрика", "Значение", "Конфигурация"]}]},
+  basic: {title: "Результаты статьи", types: [{name: "Результат", aliases: "result, results, experiment, результат, эксперимент", fields: ["Объект", "Показатель", "Значение", "Условия"]}]},
 };
 
 const value = (row, name) => row.querySelector('[name="' + name + '"]').value.trim();
@@ -70,15 +28,16 @@ export function matchingSources(sources, names) {
   });
 }
 
+let matchesStale = false;
 function clearMatches() {
-  state.selection = undefined;
+  selection = undefined;
   matches.replaceChildren();
-  state.matchesStale = false;
+  matchesStale = false;
 }
 
 function staleMatches() {
-  if (!matches.children.length || state.matchesStale) return;
-  state.matchesStale = true;
+  if (!matches.children.length || matchesStale) return;
+  matchesStale = true;
   matches.querySelectorAll('input[type="checkbox"]').forEach(input => {
     input.checked = false;
     input.disabled = true;
@@ -174,11 +133,11 @@ function addField(container, name = "", kind = "text", example = "") {
   field.innerHTML = fieldMarkup();
   const type = field.querySelector('[name="type"]');
   type.addEventListener("change", () => updateExtra(field));
-  field.querySelector(".pf-remove").addEventListener("click", () => {
+  field.querySelector(".pf-remove").onclick = () => {
     field.remove();
     staleMatches();
     markEdited();
-  });
+  };
   container.append(field);
   field.querySelector('[name="fieldName"]').value = name;
   type.value = kind;
@@ -199,16 +158,16 @@ function addEntity(preset) {
     <div class="profile-fields"></div>
     <div class="entity-actions"><button type="button" class="button">Добавить поле</button></div>`;
   const fields = entity.querySelector(".profile-fields");
-  entity.querySelector(".entity-actions button").addEventListener("click", () => {
+  entity.querySelector(".entity-actions button").onclick = () => {
     addField(fields);
     markEdited();
-  });
-  entity.querySelector(".pf-remove").addEventListener("click", () => {
+  };
+  entity.querySelector(".pf-remove").onclick = () => {
     entity.remove();
     refreshTypes();
     staleMatches();
     markEdited();
-  });
+  };
   entities.append(entity);
   if (preset) {
     entity.querySelector('[name="entityName"]').value = preset.name;
@@ -237,14 +196,10 @@ function applyPreset(key) {
   form.elements.title.value = preset.title;
   preset.types.forEach(addEntity);
   refreshTypes();
-  document.querySelectorAll("[data-preset]").forEach(button => {
-    button.setAttribute("aria-pressed", String(button.dataset.preset === key));
-  });
+  document.querySelectorAll('[data-preset]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.preset === key)));
   status.textContent = "Готовый набор добавлен. Можно изменить названия и поля под статью.";
 }
-document.querySelectorAll("[data-preset]").forEach(button => {
-  button.addEventListener("click", () => applyPreset(button.dataset.preset));
-});
+document.querySelectorAll('[data-preset]').forEach(button => button.onclick = () => applyPreset(button.dataset.preset));
 
 function readProfile() {
   const types = [...entities.children].map(entity => ({
@@ -263,11 +218,6 @@ function readProfile() {
       };
     }),
   }));
-  validateTypes(types);
-  return {title: value(form, "title"), types};
-}
-
-function validateTypes(types) {
   const unique = names => new Set(names.map(normalize)).size === names.length;
   if (!types.length) throw new Error("Добавьте хотя бы один тип сущности.");
   if (!types.every(type => type.name) || !unique(types.map(type => type.name))) {
@@ -288,15 +238,16 @@ function validateTypes(types) {
       }
     }
   }
+  return {title: value(form, "title"), types};
 }
 
 function showMatches(profile, browseAll) {
   clearError();
   clearMatches();
-  state.selection = [];
+  selection = [];
   for (const type of profile.types.filter(type => type.selected)) {
     const panel = document.createElement("details");
-    const candidates = browseAll ? state.document.sources : matchingSources(state.document.sources, [type.name, ...type.aliases,
+    const candidates = browseAll ? documentData.sources : matchingSources(documentData.sources, [type.name, ...type.aliases,
       ...type.fields.filter(field => field.selected).map(field => field.name)]);
     const title = document.createElement("summary");
     title.textContent = type.name + " · подсказок: " + candidates.length;
@@ -307,7 +258,7 @@ function showMatches(profile, browseAll) {
       input.type = "checkbox";
       label.append(input, " Стр. " + source.page + " · " + (source.display_text || source.quote));
       panel.append(label);
-      state.selection.push({type: type.name, source, input});
+      selection.push({type: type.name, source, input});
     }
     if (!candidates.length) panel.append("Проверьте названия и добавьте сокращения из статьи. Тип можно оставить выбранным.");
     matches.append(panel);
@@ -316,11 +267,11 @@ function showMatches(profile, browseAll) {
     : "Отметьте подходящие фрагменты. Подсказки основаны на совпадении слов.";
 }
 
-byId("addEntity").addEventListener("click", () => {
+byId("addEntity").onclick = () => {
   addEntity();
   staleMatches();
   markEdited();
-});
+};
 form.addEventListener("input", event => {
   if (matches.contains(event.target)) return;
   refreshTypes();
@@ -328,15 +279,15 @@ form.addEventListener("input", event => {
   markEdited();
 });
 function scan(browseAll) {
-  if (!state.document || !form.reportValidity()) return;
+  if (!documentData || !form.reportValidity()) return;
   try {
     showMatches(readProfile(), browseAll);
   } catch (error) {
     showError(error.message);
   }
 }
-byId("scanProfile").addEventListener("click", () => scan(false));
-byId("browseProfile").addEventListener("click", () => scan(true));
+byId("scanProfile").onclick = () => scan(false);
+byId("browseProfile").onclick = () => scan(true);
 
 async function parseResponse(response) {
   const data = await response.json();
@@ -344,114 +295,27 @@ async function parseResponse(response) {
   return data;
 }
 
-// Разбор по полям идёт на сервере, поэтому номер задания запоминается на
-// время вкладки: после перехода на другую страницу и возврата прогресс и
-// результат возвращаются, а не пропадают вместе со страницей.
-const JOB_KEY = "viniti.profile.job";
-// Сервер держит разбор до 30 минут, поэтому запись живёт чуть дольше:
-// иначе возврат на страницу потерял бы ещё идущее задание.
-const JOB_TTL_MS = 45 * 60 * 1000;
-const HANDOFF_KEY = "viniti.profile.handoff";
-
-function rememberJob(job) {
-  try {
-    sessionStorage.setItem(JOB_KEY, JSON.stringify({
-      id: job.id, filename: job.filename || "", savedAt: Date.now(),
-    }));
-  } catch {
-    // Приватный режим: разбор просто не возобновится после перехода.
-  }
-}
-
-function forgetJob() {
-  try { sessionStorage.removeItem(JOB_KEY); } catch { /* см. rememberJob */ }
-}
-
-function rememberedJob() {
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(JOB_KEY) || "null");
-    if (!saved || typeof saved.id !== "string" || !saved.id) return null;
-    if (Date.now() - Number(saved.savedAt) > JOB_TTL_MS) return null;
-    return saved;
-  } catch {
-    return null;
-  }
-}
-
-function jobPath(jobId) {
-  return "/api/parse/" + encodeURIComponent(jobId);
-}
-
-// null значит, что задание уже удалено на сервере: возобновлять нечего.
-async function readJob(jobId) {
-  const response = await authorized(await apiFetch(jobPath(jobId), {cache: "no-store"}));
-  if (response.status === 404) return null;
-  return parseResponse(response);
-}
-
-function missingJob() {
-  const error = new Error("Разбор больше не доступен. Выберите PDF снова.");
-  error.missing = true;
-  return error;
-}
-
-async function awaitJob(job) {
-  const deadline = Date.now() + 35 * 60 * 1000;
-  let current = job;
-  while (current.status === "queued" || current.status === "running") {
-    status.textContent = current.status === "queued" ? "PDF ожидает своей очереди…"
-      : "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    if (Date.now() >= deadline) throw new Error("Разбор PDF превысил лимит ожидания. Проверьте статус задачи и журнал сервера.");
-    const next = await readJob(current.id);
-    if (!next) throw missingJob();
-    current = next;
-  }
-  if (current.status !== "ok") {
-    forgetJob();
-    throw new Error(current.error || "Разбор PDF завершился с ошибкой.");
-  }
-  const result = await parseResponse(await authorized(
-    await apiFetch(jobPath(current.id) + "/result", {cache: "no-store"})));
-  return {job: current, data: {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []}};
-}
-
-async function startJob(file) {
-  const job = await parseResponse(await authorized(await apiFetch("/api/parse", {
+async function readPdf(file) {
+  let job = await parseResponse(await authorized(await apiFetch("/api/parse", {
     method: "POST",
     headers: {"Content-Type": "application/pdf", "X-Parser": "pdfplumber", "X-Profile": "solar",
       "X-Filename": encodeURIComponent(file.name)},
     body: file,
   })));
-  rememberJob(job);
-  return job;
+  const path = "/api/parse/" + encodeURIComponent(job.id);
+  while (job.status === "queued" || job.status === "running") {
+    status.textContent = job.status === "queued" ? "PDF ожидает своей очереди…"
+      : "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    job = await parseResponse(await fetch(path, {cache: "no-store"}));
+  }
+  if (job.status !== "ok") throw new Error(job.error || "Разбор PDF завершился с ошибкой.");
+  const result = await parseResponse(await fetch(path + "/result", {cache: "no-store"}));
+  return {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []};
 }
 
-function showParsed(data, filename) {
-  state.document = {...data, filename};
-  clearHandoff();
-  const sourceLine = byId("profileSource");
-  if (sourceLine) {
-    sourceLine.textContent = filename + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
-      + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
-  }
-  form.hidden = false;
-  byId("assistantEntry").hidden = true;
-  if (!entities.children.length) applyPreset("basic");
-  if (!byId("assistantMessages").children.length) {
-    chatMessage("PDF прочитан. Спросите, какие поля искать в статье, или отметьте фрагменты слева.");
-  }
-  status.textContent = "PDF прочитан. Выберите готовый набор или опишите поля вручную.";
-}
-
-async function releasePending() {
-  try {
-    await clearProfilePDF();
-  } catch (error) {
-    console.warn("Не удалось освободить переданный PDF:", error.message);
-  }
-}
-
+let proposals = [];
+const assistantHistory = [];
 function chatMessage(text, side = "assistant") {
   const bubble = document.createElement("p");
   bubble.className = `chat-bubble ${side === "user" ? "user-bubble" : "assistant-bubble"}`;
@@ -460,10 +324,10 @@ function chatMessage(text, side = "assistant") {
   messages.append(bubble);
   messages.scrollTop = messages.scrollHeight;
 }
-byId("assistantAsk").addEventListener("click", async () => {
+byId("assistantAsk").onclick = async () => {
   const question = byId("assistantQuestion").value.trim();
   const assistantStatus = byId("assistantStatus");
-  if (!question || !state.document) { chatMessage("Сначала загрузите PDF и напишите вопрос по статье."); return; }
+  if (!question || !documentData) { chatMessage("Сначала загрузите PDF и напишите вопрос по статье."); return; }
   const profile = {types: [...entities.children].map(entity => ({
     name: value(entity, "entityName"),
     fields: [...entity.querySelectorAll(".profile-field")].map(field => ({name: value(field, "fieldName")})),
@@ -479,20 +343,20 @@ byId("assistantAsk").addEventListener("click", async () => {
   try {
     const response = await authorized(await apiFetch("/api/profile/assist", {method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({question, profile, sources: state.document.sources.slice(0, 24),
-        history: state.assistantHistory.slice(-4)}),
+      body: JSON.stringify({question, profile, sources: documentData.sources.slice(0, 24),
+        history: assistantHistory.slice(-4)}),
     }));
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Помощник не ответил.");
-    state.proposals = data.suggestions || [];
-    state.assistantHistory.push({role: "user", content: question},
-      {role: "assistant", content: JSON.stringify({suggestions: state.proposals})});
-    assistantStatus.textContent = state.proposals.length ? `Предложено полей: ${state.proposals.length}. Отметьте нужные.`
+    proposals = data.suggestions || [];
+    assistantHistory.push({role: "user", content: question},
+      {role: "assistant", content: JSON.stringify({suggestions: proposals})});
+    assistantStatus.textContent = proposals.length ? `Предложено полей: ${proposals.length}. Отметьте нужные.`
       : "По этим фрагментам нет подтверждённых предложений. Уточните вопрос.";
-    chatMessage(state.proposals.length ? `Нашёл ${state.proposals.length} полей. Отметьте подходящие карточки ниже.`
+    chatMessage(proposals.length ? `Нашёл ${proposals.length} полей. Отметьте подходящие карточки ниже.`
       : "В доступных фрагментах нет подтверждённых полей. Уточните вопрос или проверьте PDF.");
     const list = byId("assistantSuggestions");
-    state.proposals.forEach((item, index) => {
+    proposals.forEach((item, index) => {
       const label = document.createElement("label");
       label.className = "assistant-suggestion";
       const checkbox = document.createElement("input");
@@ -503,16 +367,16 @@ byId("assistantAsk").addEventListener("click", async () => {
       if (item.quote) label.append(Object.assign(document.createElement("small"), {textContent: `Стр. ${item.page}: ${item.quote}`}));
       list.append(label);
     });
-    byId("assistantApply").hidden = !state.proposals.length;
+    byId("assistantApply").hidden = !proposals.length;
   } catch (error) {
     assistantStatus.textContent = error.message;
     chatMessage(error.message);
   } finally { button.disabled = false; }
-});
+};
 
-byId("assistantApply").addEventListener("click", () => {
+byId("assistantApply").onclick = () => {
   const selected = [...byId("assistantSuggestions").querySelectorAll('input:checked')]
-    .map(input => state.proposals[Number(input.value)]);
+    .map(input => proposals[Number(input.value)]);
   let added = 0;
   for (const item of selected) {
     let entity = [...entities.children].find(row => normalize(value(row, "entityName")) === normalize(item.entity));
@@ -529,139 +393,50 @@ byId("assistantApply").addEventListener("click", () => {
   chatMessage(byId("assistantStatus").textContent);
   byId("assistantApply").hidden = true;
   byId("assistantSuggestions").replaceChildren();
-  state.proposals = [];
-});
+  proposals = [];
+};
 
+let loading = false;
 let currentFile = null;
-let handoffStored = false;
 async function loadFile(file) {
-  if (!file || state.loading) return;
+  if (!file || loading) return;
   if (!(await sessionReady)) return;
   currentFile = file;
-  handoffStored = false;
-  clearHandoff();
-  state.assistantHistory.length = 0;
+  assistantHistory.length = 0;
   byId("assistantMessages").replaceChildren();
   byId("assistantSuggestions").replaceChildren();
   byId("assistantApply").hidden = true;
   byId("assistantStatus").hidden = true;
-  state.loading = true;
+  loading = true;
   upload.disabled = true;
   form.hidden = true;
-  state.document = undefined;
+  documentData = undefined;
   clearError();
   clearMatches();
   byId("profilePanel").hidden = false;
   status.textContent = "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
   try {
-    const {data, job} = await awaitJob(await startJob(file));
-    showParsed(data, job.filename || file.name);
-    await releasePending();
+    const data = await readPdf(file);
+    documentData = {...data, filename: file.name};
+    const sourceLine = byId("profileSource");
+    if (sourceLine) {
+      sourceLine.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
+        + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
+    }
+    form.hidden = false;
+    byId("assistantEntry").hidden = true;
+    if (!entities.children.length) applyPreset("basic");
+    if (!byId("assistantMessages").children.length) {
+      chatMessage("PDF прочитан. Спросите, какие поля искать в статье, или отметьте фрагменты слева.");
+    }
+    status.textContent = "PDF прочитан. Выберите готовый набор или опишите поля вручную.";
   } catch (error) {
-    // Файл, который сервер не принял, не возвращаем в мастер: иначе каждый
-    // вход на страницу повторял бы тот же отказ. Выбрать другой PDF можно
-    // кнопкой «Загрузить PDF» в шапке.
-    currentFile = null;
-    await releasePending();
     showError(error.message);
   } finally {
     upload.value = "";
     upload.disabled = false;
-    state.loading = false;
+    loading = false;
   }
-}
-
-// Возврат на страницу профиля: активный разбор и его результат показываются
-// снова, вместо пустого экрана с просьбой выбрать PDF.
-async function resumeJob(saved, file = null) {
-  // Файл уже выбран вручную: возобновление не должно перебивать его разбор.
-  if (state.loading) return false;
-  state.loading = true;
-  upload.disabled = true;
-  form.hidden = true;
-  currentFile = file || currentFile;
-  if (file) handoffStored = false;
-  clearError();
-  clearMatches();
-  byId("profilePanel").hidden = false;
-  byId("assistantEntry").hidden = true;
-  status.textContent = "Возвращаемся к разбору PDF. Это может занять несколько минут…";
-  try {
-    const current = await readJob(saved.id);
-    if (!current) throw missingJob();
-    const wasActive = current.status === "queued" || current.status === "running";
-    const {data, job} = await awaitJob(current);
-    showParsed(data, job.filename || saved.filename || "Документ");
-    if (!wasActive) {
-      // Поля профиля живут только в форме, поэтому после возврата их
-      // приходится заполнять заново: об этом честно сообщаем.
-      status.textContent = "Разбор восстановлен. Поля профиля нужно проверить заново.";
-    }
-    await releasePending();
-    return true;
-  } catch (error) {
-    forgetJob();
-    if (error.missing) {
-      // Задание исчезло на сервере: возвращаем экран к выбору PDF.
-      byId("profilePanel").hidden = true;
-      byId("assistantEntry").hidden = false;
-      status.textContent = "";
-      return false;
-    }
-    showError(error.message);
-    return true;
-  } finally {
-    upload.disabled = false;
-    state.loading = false;
-  }
-}
-
-function handoffFailed() {
-  try {
-    if (sessionStorage.getItem(HANDOFF_KEY) !== "failed") return false;
-    sessionStorage.removeItem(HANDOFF_KEY);
-  } catch {
-    return false;
-  }
-  byId("assistantEntry").textContent = "PDF из мастера не передался. Выберите файл снова: "
-    + "поля, фрагменты и помощник появятся после чтения.";
-  return true;
-}
-
-function clearHandoff() {
-  try { sessionStorage.removeItem(HANDOFF_KEY); } catch { /* хранилище недоступно */ }
-}
-
-// Что показать при входе: переданный из мастера PDF, продолжение активного
-// разбора или просьбу выбрать файл.
-async function restoreEntry() {
-  // Без сессии страница уже уходит на вход: переданный PDF трогать нельзя.
-  if (!(await sessionReady)) return;
-  let file;
-  if ("indexedDB" in globalThis) {
-    try {
-      file = await peekProfilePDF();
-    } catch (error) {
-      console.warn("Не удалось прочитать переданный PDF:", error.message);
-    }
-  }
-  const saved = rememberedJob();
-  if (file) {
-    if (saved && saved.filename && saved.filename === file.name) {
-      // Этот файл уже разбирается: продолжаем задание, а не запускаем второе.
-      if (await resumeJob(saved, file)) return;
-    }
-    await loadFile(file);
-    return;
-  }
-  if (saved) {
-    const restored = await resumeJob(saved);
-    // Задание истекло на сервере: если PDF из мастера тоже не передался,
-    // об этом надо сказать, а не оставлять общую подсказку.
-    if (!restored) handoffFailed();
-    return;
-  }
-  handoffFailed();
 }
 
 upload.onchange = () => {
@@ -669,18 +444,15 @@ upload.onchange = () => {
   if (file) loadFile(file);
 };
 
-// Страница сама решает, что показать при входе; без IndexedDB (jsdom, старый
-// браузер) остаётся обычный выбор PDF.
-void restoreEntry();
-
-// Браузерная кнопка «назад» не проходит через ссылку, поэтому PDF, который
-// ещё разбирается, сохраняется и на уходе со страницы. Если файл уже отдан
-// стрелкой «назад», второй записи не нужно.
-window.addEventListener("pagehide", () => {
-  if (!currentFile || handoffStored) return;
-  stashProfilePDF(currentFile)
-    .catch(error => console.warn("Не удалось вернуть PDF в мастер:", error.message));
-});
+// Без IndexedDB (jsdom, старый браузер) страница работает как обычно:
+// PDF выбирается вручную.
+if ("indexedDB" in globalThis) {
+  takeProfilePDF().then(file => {
+    if (file) loadFile(file);
+  }).catch(error => {
+    console.warn("Не удалось забрать PDF из мастер-потока:", error.message);
+  });
+}
 
 // Стрелка «назад» возвращает в мастер выбранный PDF: без этого файл
 // пришлось бы выбирать заново, а мастер терял бы шаг с профилем.
@@ -691,7 +463,6 @@ if (backLink) {
     event.preventDefault();
     try {
       await stashProfilePDF(currentFile);
-      handoffStored = true;
     } catch (error) {
       console.warn("Не удалось вернуть PDF в мастер:", error.message);
     }
@@ -699,15 +470,15 @@ if (backLink) {
   });
 }
 
-form.addEventListener("submit", event => {
+form.onsubmit = event => {
   event.preventDefault();
-  if (!state.document) return;
+  if (!documentData) return;
   try {
     const profile = readProfile();
-    const evidence = (state.selection ?? []).filter(item => item.input.checked)
+    const evidence = (selection ?? []).filter(item => item.input.checked)
       .map(({type, source}) => ({type, source}));
-    const payload = {schema_version: 1, document: {filename: state.document.filename,
-      pages: state.document.pages, warnings: state.document.warnings}, profile, evidence};
+    const payload = {schema_version: 1, document: {filename: documentData.filename,
+      pages: documentData.pages, warnings: documentData.warnings}, profile, evidence};
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"}));
     const link = document.createElement("a");
     link.href = url;
@@ -719,6 +490,6 @@ form.addEventListener("submit", event => {
   } catch (error) {
     showError(error.message);
   }
-});
+};
 
 document.body.dataset.profile = "ready";

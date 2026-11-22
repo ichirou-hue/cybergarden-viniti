@@ -11,9 +11,9 @@ from unittest.mock import Mock, patch
 
 from PIL import Image
 
-from viniti.atomic_output import publish_directory
-from viniti.docling_source import make_converter, normalize_document, page_anchor, prepare_pdf, table_grid
-from viniti.extraction_core import export_result, load_profile, run
+from atomic_output import publish_directory
+from docling_source import make_converter, normalize_document, page_anchor, prepare_pdf, table_grid
+from extraction_core import export_result, load_profile, run
 from tests.test_docling_source import fixture, table_data
 from tests.test_solar import ROOT, synthetic_pdf
 
@@ -147,7 +147,7 @@ class DoclingOfflineQATest(unittest.TestCase):
                 Path(target).mkdir()
                 return publish_directory(source, target)
 
-            with patch("viniti.extraction_core.publish_directory", race), self.assertRaises((ValueError, OSError)):
+            with patch("extraction_core.publish_directory", race), self.assertRaises((ValueError, OSError)):
                 export_result(result, out, assets=assets)
             self.assertEqual(list(out.iterdir()), [])
 
@@ -156,8 +156,7 @@ class DoclingOfflineQATest(unittest.TestCase):
             with self.subTest(flags=flags), TemporaryDirectory() as tmp:
                 out = Path(tmp) / "result"
                 execution = subprocess.run(
-                    [sys.executable, "-X", "utf8", "-m", "viniti", "extract-document",
-                     "unused.pdf", "-o", str(out), *flags],
+                    [sys.executable, str(ROOT / "extract_document.py"), "unused.pdf", "-o", str(out), *flags],
                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 self.assertNotEqual(execution.returncode, 0)
@@ -245,7 +244,7 @@ class DoclingOfflineQATest(unittest.TestCase):
                     self.assertFalse(any(name.startswith("assets/charts/") for name in assets))
 
     def test_native_publication_preserves_existing_targets_including_dangling_symlink(self):
-        from viniti.atomic_output import publish_directory
+        from atomic_output import publish_directory
 
         for kind in ("empty-directory", "nonempty-directory", "file", "dangling-symlink"):
             with self.subTest(kind=kind), TemporaryDirectory() as tmp:
@@ -271,7 +270,7 @@ class DoclingOfflineQATest(unittest.TestCase):
                     self.assertFalse((target / "new.txt").exists())
 
     def test_native_publication_success_moves_whole_directory(self):
-        from viniti.atomic_output import publish_directory
+        from atomic_output import publish_directory
 
         with TemporaryDirectory() as tmp:
             source, target = Path(tmp) / "source", Path(tmp) / "target"

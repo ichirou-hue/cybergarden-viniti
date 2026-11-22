@@ -22,10 +22,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from viniti import extract  # noqa: E402
-from viniti import norm  # noqa: E402
-from viniti import pdf_source  # noqa: E402
-from viniti import verify  # noqa: E402
+import extract  # noqa: E402
+import norm  # noqa: E402
+import pdf_source  # noqa: E402
+import verify  # noqa: E402
 
 DEFAULT_DEV = ROOT / "_corpus" / "area1" / "dev"
 DEFAULT_GOLD = ROOT / "_corpus" / "area1" / "dev_gold" / "results.csv"

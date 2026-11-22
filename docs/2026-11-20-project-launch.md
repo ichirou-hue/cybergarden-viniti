@@ -13,7 +13,7 @@ git clone https://github.com/ichirou-hue/cybergarden-viniti.git
 cd cybergarden-viniti
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m viniti server
+.venv/bin/python server.py
 ```
 
 Откройте http://127.0.0.1:8765. Сервер привязывается к localhost. Остановить его можно сочетанием Ctrl+C.
@@ -31,7 +31,7 @@ python3.12 -m venv .venv
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m viniti server
+.\.venv\Scripts\python.exe server.py
 ```
 
 Откройте http://127.0.0.1:8765. Для тестов выполните:

@@ -103,19 +103,6 @@ export async function loadSession(signal) {
   return data || {user: null};
 }
 
-async function waitForRecognition(summary, signal) {
-  if (!summary || !summary.recognition_job_id) return summary;
-  const path = "/api/parse/" + encodeURIComponent(summary.recognition_job_id);
-  let job;
-  do {
-    if (signal?.aborted) throw new DOMException("Загрузка отменена", "AbortError");
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    job = await getJSON(path, {}, signal);
-  } while (job.status === "queued" || job.status === "running");
-  if (job.status !== "ok") throw new Error("Docling: " + (job.error || "разбор не завершён"));
-  return summary;
-}
-
 export async function uploadPDF(file, track, signal) {
   const summary = await request("/api/documents", {
     method: "POST",
@@ -127,7 +114,17 @@ export async function uploadPDF(file, track, signal) {
       "X-Filename": encodeURIComponent(file.name),
     },
   }, signal).then(unwrap);
-  return waitForRecognition(summary, signal);
+  if (summary.recognition_job_id) {
+    const path = "/api/parse/" + encodeURIComponent(summary.recognition_job_id);
+    let job;
+    do {
+      if (signal?.aborted) throw new DOMException("Загрузка отменена", "AbortError");
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      job = await getJSON(path, {}, signal);
+    } while (job.status === "queued" || job.status === "running");
+    if (job.status !== "ok") throw new Error("Docling: " + (job.error || "разбор не завершён"));
+  }
+  return summary;
 }
 
 export async function uploadPDFWithProgress(file, track, onProgress, signal) {
@@ -157,7 +154,7 @@ export async function uploadPDFWithProgress(file, track, onProgress, signal) {
     if (done) break;
   }
   if (!result) throw new Error("Сервер завершил ответ без результата обработки.");
-  return waitForRecognition(result, signal);
+  return result;
 }
 
 export function getProfiles(signal) {

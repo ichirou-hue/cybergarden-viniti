@@ -23,9 +23,11 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-# Source directories the audits read. tools/ci_parity.py keeps the same list;
-# ScannerCoverageTest fails when the audited roots drift apart.
-SOURCE_DIRS = ("tools", "tests", "src")
+# Packages beside the root modules, plus the source directories the audits read.
+# tools/ci_parity.py and tools/coverage_report.py keep their own copies of this
+# list; the guard in ScannerCoverageTest fails when the three drift apart.
+PACKAGE_DIRS = ("rag", "viniti")
+SOURCE_DIRS = ("tools", "tests") + PACKAGE_DIRS
 
 # The same rule as tools/ci_parity.py: a whole string that is a Windows path.
 # Kept local so this test does not depend on the auditor.
@@ -42,7 +44,7 @@ def load_module(relative_path, name):
 
 
 def audit_sources():
-    """Every .py the static audits must read: main.py, tools/, tests/, and src/."""
+    """Every .py the static audits must read: root modules, tools/, tests/, packages."""
     paths = sorted(ROOT.glob("*.py"))
     for name in SOURCE_DIRS:
         directory = ROOT / name
@@ -83,14 +85,14 @@ class PathConstructionTest(unittest.TestCase):
                          "%s.as_posix() carries a backslash: %s" % (label, path.as_posix()))
 
     def test_import_gold_gold_directories(self):
-        from viniti import import_gold
+        import_gold = load_module("import_gold.py", "portability_import_gold")
         self.assertEqual(sorted(import_gold.GOLD), ["rag", "solar"])
         for area, path in import_gold.GOLD.items():
             self.assert_posix_clean(path, "import_gold.GOLD[%r]" % area)
             self.assertEqual(path.name, "dev_gold")
 
     def test_passport_kit_directories(self):
-        from viniti import passport
+        passport = load_module("passport.py", "portability_passport")
         for label, path in (("PASSPORT", passport.PASSPORT),
                             ("SOLAR_KIT", passport.SOLAR_KIT),
                             ("RAG_KIT", passport.RAG_KIT)):
@@ -108,7 +110,7 @@ class PathConstructionTest(unittest.TestCase):
             self.assertNotEqual(gold.as_posix(), mine.as_posix())
 
     def test_export_csv_writes_where_the_path_says(self):
-        from viniti import export_csv
+        export_csv = load_module("export_csv.py", "portability_export_csv")
         with tempfile.TemporaryDirectory(prefix="viniti-portability-") as name:
             target = pathlib.Path(name) / "вложенный" / "results.csv"
             self.assert_posix_clean(target, "export_csv target")
@@ -120,8 +122,7 @@ class PathConstructionTest(unittest.TestCase):
             self.assertEqual(siblings, ["results.csv"])
 
     def test_no_backslash_path_literal_in_the_four_modules(self):
-        for relative in ("src/viniti/import_gold.py", "src/viniti/export_csv.py",
-                         "src/viniti/passport.py",
+        for relative in ("import_gold.py", "export_csv.py", "passport.py",
                          "tools/diff_gold.py"):
             with self.subTest(module=relative):
                 found = backslash_path_literals(ROOT / relative)
@@ -135,7 +136,7 @@ class CsvBytesTest(unittest.TestCase):
     COLUMNS = ["publication_id", "metric_value", "source_fragment"]
 
     def write(self, rows, bom):
-        from viniti import export_csv
+        export_csv = load_module("export_csv.py", "portability_export_csv_bytes")
         target = pathlib.Path(self.tmp.name) / "results.csv"
         export_csv.write_table(target, self.COLUMNS, rows, bom, "\r\n")
         return target.read_bytes()
@@ -190,7 +191,8 @@ class CsvBytesTest(unittest.TestCase):
     def test_import_gold_read_csv_keeps_bom_crlf_and_newline(self):
         # The organisers' rag/results.csv really does hold bare LF inside quoted
         # fields while records end with CRLF (349 such fields in dev_gold).
-        from viniti import export_csv, import_gold
+        import_gold = load_module("import_gold.py", "portability_import_gold_csv")
+        export_csv = load_module("export_csv.py", "portability_export_csv_gold")
         value = "первая строка\nвторая строка"
         original = (codecs.BOM_UTF8
                     + b"publication_id,metric_value,source_fragment\r\n"
@@ -246,35 +248,30 @@ class UnicodePathTest(unittest.TestCase):
 class ConsoleEncodingTest(unittest.TestCase):
     """sys.stdout is errors='strict': one unprintable character kills the run."""
 
-    # (module command or script path, accepted exit codes, must print non-ASCII)
+    # (script, accepted exit codes, must print non-ASCII to stdout)
     SCRIPTS = (
-        (("-m", "viniti", "import-gold"), (0,), False),
-        (("-m", "viniti", "export-csv"), (0,), False),
-        (("-m", "viniti", "db"), (0,), False),
-        (("tools/diff_gold.py",), (0, 2), True),
+        ("import_gold.py", (0,), False),
+        ("export_csv.py", (0,), False),
+        ("db.py", (0,), False),
+        ("tools/diff_gold.py", (0, 2), True),
     )
 
     def test_cli_help_survives_a_narrow_console(self):
-        for invocation, accepted, expect_non_ascii in self.SCRIPTS:
-            with self.subTest(invocation=invocation):
+        for script, accepted, expect_non_ascii in self.SCRIPTS:
+            with self.subTest(script=script):
                 env = dict(os.environ, PYTHONIOENCODING="cp1251")
-                command = [sys.executable, "-X", "utf8"]
-                if invocation[0] == "-m":
-                    command.extend(invocation)
-                else:
-                    command.append(str(ROOT / invocation[0]))
                 run = subprocess.run(
-                    [*command, "--help"],
+                    [sys.executable, "-X", "utf8", str(ROOT / script), "--help"],
                     capture_output=True, timeout=120, env=env, cwd=str(ROOT))
                 self.assertNotIn(b"UnicodeEncodeError", run.stderr,
                                  "%s prints a character outside the console code page"
-                                 % (invocation,))
+                                 % script)
                 self.assertIn(run.returncode, accepted,
                               "%s --help exited %d: %r"
-                              % (invocation, run.returncode, run.stderr[-400:]))
+                              % (script, run.returncode, run.stderr[-400:]))
                 if expect_non_ascii:
                     self.assertTrue(any(byte > 127 for byte in run.stdout),
-                                    "%s did not reach a Cyrillic print" % (invocation,))
+                                    "%s did not reach a Cyrillic print" % script)
 
 
 class SyntaxTest(unittest.TestCase):
@@ -297,7 +294,7 @@ class OrderingTest(unittest.TestCase):
     """NTFS and ext4 return directory entries in different order."""
 
     def test_batch_discover_is_sorted_not_filesystem_order(self):
-        from viniti import batch
+        import batch
         with tempfile.TemporaryDirectory(prefix="viniti-order-") as name:
             saved = batch.CORPUS_ROOTS["solar"]
             self.addCleanup(batch.CORPUS_ROOTS.__setitem__, "solar", saved)
@@ -347,7 +344,7 @@ class ScannerCoverageTest(unittest.TestCase):
         self.assertEqual(found, [],
                          "new package(s) %s are not scanned: add the name to "
                          "SOURCE_DIRS here, to load_sources() in tools/ci_parity.py "
-                         "and to SOURCE_DIRS in tools/coverage_report.py" % found)
+                         "and to PACKAGE_DIRS in tools/coverage_report.py" % found)
 
     def test_ci_parity_reads_every_audited_source(self):
         ci_parity = load_module("tools/ci_parity.py", "guard_ci_parity")
@@ -365,8 +362,8 @@ class ScannerCoverageTest(unittest.TestCase):
         expected = []
         for path in audit_sources():
             relative = path.relative_to(ROOT)
-            if relative.parts[0] != "src":
-                continue
+            if relative.parts[0] in ("tools", "tests"):
+                continue                    # the suite and the tools themselves
             if path.name == "__init__.py" or path.name.startswith("test_"):
                 continue
             if path.name in report.EXCLUDE_FILES:

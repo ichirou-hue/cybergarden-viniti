@@ -22,13 +22,13 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from viniti import batch
-from viniti import db as storage
-from viniti import pipeline
+import batch
+import db as storage
+import pipeline
 
 PATCH_TARGETS = (
-    "viniti.batch.run", "viniti.issues.generate", "viniti.issues.write",
-    "viniti.export_csv.export_official", "gate.check",
+    "batch.run", "issues.generate", "issues.write",
+    "export_csv.export_official", "gate.check",
 )
 
 
@@ -142,10 +142,10 @@ class ExitCodeTest(unittest.TestCase):
 
     def run_with(self, batch_fake, gate_fake, area="all"):
         with quiet():
-            with patch("viniti.batch.run", side_effect=batch_fake), \
-                 patch("viniti.issues.generate", side_effect=lambda area, conn: []), \
-                 patch("viniti.issues.write", side_effect=lambda area, conn, rows: 0), \
-                 patch("viniti.export_csv.export_official",
+            with patch("batch.run", side_effect=batch_fake), \
+                 patch("issues.generate", side_effect=lambda area, conn: []), \
+                 patch("issues.write", side_effect=lambda area, conn, rows: 0), \
+                 patch("export_csv.export_official",
                        side_effect=lambda conn, area, spec, outdir: {}), \
                  patch("gate.check", side_effect=gate_fake):
                 return pipeline.main(["--area", area, "--db", str(self.db),
@@ -200,11 +200,11 @@ class ExitCodeTest(unittest.TestCase):
     def test_parse_errors_skip_gate_exit_two(self):
         """Гейт пропущен, но разбор падал: тоже 2."""
         with quiet():
-            with patch("viniti.batch.run",
+            with patch("batch.run",
                        side_effect=lambda area, split, **kw: summary(error=1)), \
-                 patch("viniti.issues.generate", side_effect=lambda area, conn: []), \
-                 patch("viniti.issues.write", side_effect=lambda area, conn, rows: 0), \
-                 patch("viniti.export_csv.export_official",
+                 patch("issues.generate", side_effect=lambda area, conn: []), \
+                 patch("issues.write", side_effect=lambda area, conn, rows: 0), \
+                 patch("export_csv.export_official",
                        side_effect=lambda conn, area, spec, outdir: {}):
                 code = pipeline.main(["--area", "solar", "--db", str(self.db),
                                       "--out", str(self.out), "--skip-gate"])
@@ -247,10 +247,10 @@ class StageOrderTest(unittest.TestCase):
                 status=pipeline.gate.CLEAN, errors=0)
 
         with quiet():
-            with patch("viniti.batch.run", side_effect=fake_batch), \
-                 patch("viniti.issues.generate", side_effect=fake_generate), \
-                 patch("viniti.issues.write", side_effect=fake_write), \
-                 patch("viniti.export_csv.export_official", side_effect=fake_export), \
+            with patch("batch.run", side_effect=fake_batch), \
+                 patch("issues.generate", side_effect=fake_generate), \
+                 patch("issues.write", side_effect=fake_write), \
+                 patch("export_csv.export_official", side_effect=fake_export), \
                  patch("gate.check", side_effect=fake_gate):
                 code = pipeline.main(["--area", "all", "--db", str(self.db),
                                       "--out", str(self.out)])
@@ -276,10 +276,10 @@ class DryRunTest(unittest.TestCase):
             raise AssertionError("стадия не должна вызываться при --dry-run")
 
         with quiet():
-            with patch("viniti.batch.run", side_effect=boom), \
-                 patch("viniti.issues.generate", side_effect=boom), \
-                 patch("viniti.issues.write", side_effect=boom), \
-                 patch("viniti.export_csv.export_official", side_effect=boom), \
+            with patch("batch.run", side_effect=boom), \
+                 patch("issues.generate", side_effect=boom), \
+                 patch("issues.write", side_effect=boom), \
+                 patch("export_csv.export_official", side_effect=boom), \
                  patch("gate.check", side_effect=boom):
                 code = pipeline.main(["--area", "all", "--db", str(missing),
                                       "--out", str(self.dir / "out"),
@@ -585,7 +585,7 @@ class FlowFailureTest(FlowCase):
         calls = []
         out, err = io.StringIO(), io.StringIO()
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch("viniti.export_csv.export_official",
+            stack.enter_context(patch("export_csv.export_official",
                                       side_effect=OSError("нет места на диске")))
             stack.enter_context(patch("gate.check",
                                       side_effect=lambda *a, **kw: calls.append(a)))
@@ -615,9 +615,9 @@ class FlowFailureTest(FlowCase):
         gate_calls = []
         out, err = io.StringIO(), io.StringIO()
         with contextlib.ExitStack() as stack:
-            stack.enter_context(patch("viniti.issues.generate",
+            stack.enter_context(patch("issues.generate",
                                       side_effect=RuntimeError("сломанный запрос")))
-            stack.enter_context(patch("viniti.export_csv.export_official",
+            stack.enter_context(patch("export_csv.export_official",
                                       side_effect=lambda *a, **kw: export_calls.append(a)))
             stack.enter_context(patch("gate.check",
                                       side_effect=lambda *a, **kw: gate_calls.append(a)))

@@ -1,6 +1,6 @@
 import { getJSON } from "./api.js";
 import { el, fill } from "./dom.js";
-import { docStatus, extractStatus, fieldLabel, issueLabel, number, plural, seconds, sharedDemoDocument, unitLabel } from "./ui.js";
+import { docStatus, extractStatus, fieldLabel, issueLabel, number, plural, seconds, unitLabel } from "./ui.js";
 import { openEvidence } from "./evidence.js";
 
 const PAGE = 50;
@@ -65,7 +65,6 @@ export async function renderDocument(root, ctx) {
     el("div", {class: "doc-actions"},
       el("a", {class: "button primary", href: "#/", text: "Добавить PDF"}),
       docStatus(summary.status),
-      demoBadge(docId),
       scopeBadge(publication),
       exportLink(summary, base, "pdf", "PDF", summary.status),
       exportLink(summary, base, "json", "JSON", summary.status),
@@ -74,14 +73,6 @@ export async function renderDocument(root, ctx) {
   );
 
   const notices = noticeBlock(summary);
-  // Демо-документ общий: его видят все вошедшие, и это должно быть видно
-  // на карточке, а не только в каталоге.
-  if (sharedDemoDocument(docId)) {
-    notices.unshift(el("div", {class: "notice warn"},
-      el("strong", {text: "Демонстрационный документ"}),
-      el("p", {text: "Это общий пример для всех пользователей каталога. Загруженные вами PDF остаются личными."}),
-    ));
-  }
   const stats = el("section", {class: "stats", "aria-label": "Сводка документа"},
     el("div", {}, el("span", {text: "Результатов"}), el("strong", {text: number(counts.results ?? 0)})),
     el("div", {}, el("span", {text: "Замечаний"}), el("strong", {text: number(counts.issues ?? 0)})),
@@ -173,41 +164,15 @@ function metaLine(summary, publication) {
   return line;
 }
 
-function demoBadge(documentId) {
-  if (!sharedDemoDocument(documentId)) return null;
-  return el("span", {
-    class: "badge idle", text: "демо",
-    title: "Демонстрационный документ. Он общий для всех пользователей каталога.",
-  });
-}
-
-// The envelope stores the decision as the template writes it: "true"/"false".
-// Boolean("false") is true, so the string has to be read explicitly. Only those
-// two literals decide the scope; an unknown, malformed or empty value is
-// unknownness, not "in scope", and must not be shown as either decision.
-function scopeFlag(value) {
-  if (typeof value !== "string") return "";
-  const flag = value.trim().toLowerCase();
-  return flag === "true" || flag === "false" ? flag : "";
-}
-
 function scopeBadge(publication) {
-  const flag = scopeFlag(publication?.in_scope);
-  const reason = String(publication?.exclusion_reason ?? "").trim();
-  if (flag === "false") {
-    return el("span", {
-      class: "badge warn",
-      title: reason,
-      text: `вне области${reason ? `: ${reason}` : ""}`,
-    });
-  }
-  if (flag === "true") {
-    return el("span", {class: "badge idle", text: "в области"});
-  }
+  if (publication.in_scope === undefined || publication.in_scope === null) return null;
+  // The envelope stores the decision as the template writes it: "true"/"false".
+  // Boolean("false") is true, so the string has to be read explicitly.
+  const inScope = !["false", "0", ""].includes(String(publication.in_scope).trim().toLowerCase());
   return el("span", {
-    class: "badge idle",
-    text: "Область не определена",
-    title: 'В данных нет явного in_scope="true" или "false".',
+    class: `badge ${inScope ? "idle" : "warn"}`,
+    title: publication.exclusion_reason || "",
+    text: inScope ? "в области" : `вне области${publication.exclusion_reason ? `: ${publication.exclusion_reason}` : ""}`,
   });
 }
 
@@ -230,7 +195,7 @@ function exportLink(summary, base, kind, label, status) {
 
 function noticeBlock(summary) {
   const blocks = [];
-  const excluded = scopeFlag(summary.publication?.in_scope) === "false";
+  const excluded = String(summary.publication?.in_scope ?? "").toLowerCase() === "false";
   if (summary.status === "failed" && summary.error) {
     blocks.push(el("div", {class: "notice bad"},
       el("strong", {text: "Обработка не удалась"}),
