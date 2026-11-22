@@ -61,17 +61,10 @@
 
         <div id="panelReg" role="tabpanel" aria-labelledby="tabReg">
           <form id="registerForm" novalidate>
-            <div class="auth-row">
-              <div class="auth-field">
-                <label for="regName">Имя и фамилия</label>
-                <input type="text" id="regName" name="name" autocomplete="name" placeholder="Илья Сафонов" aria-describedby="regName-error">
-                <p class="auth-error" id="regName-error" hidden></p>
-              </div>
-              <div class="auth-field">
-                <label for="regOrg">Организация</label>
-                <input type="text" id="regOrg" name="organization" autocomplete="organization" placeholder="ЮФУ, ИКТ" aria-describedby="regOrg-error">
-                <p class="auth-error" id="regOrg-error" hidden></p>
-              </div>
+            <div class="auth-field">
+              <label for="regName">Имя и фамилия</label>
+              <input type="text" id="regName" name="name" autocomplete="name" placeholder="Илья Сафонов" aria-describedby="regName-error">
+              <p class="auth-error" id="regName-error" hidden></p>
             </div>
             <div class="auth-field">
               <label for="regEmail">Рабочий email</label>
@@ -117,7 +110,6 @@
         </div>
 
         <p class="auth-note is-warn" id="authStorageNote" hidden><strong>Хранение недоступно.</strong> Браузер запрещает localStorage: сессия на сервере работает, но имя и организация не сохранятся до перезагрузки.</p>
-        <p class="auth-note"><strong>Прототип.</strong> Пароль проверяется на сервере, сессия живёт в HttpOnly-cookie, профиль (имя, организация) остаётся в этом браузере.</p>
       </div>
     </div>
   </div>

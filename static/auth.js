@@ -377,16 +377,12 @@ export function mountAuthScreen(root, {onEnter}) {
   const tabsRoot = root.querySelector("[data-tabs]");
   const tabButtons = tabsRoot ? [...tabsRoot.querySelectorAll("[role=tab]")] : [];
 
-  const FIELDS = ["regName", "regOrg", "regEmail", "regPassword", "loginEmail", "loginPassword"];
+  const FIELDS = ["regName", "regEmail", "regPassword", "loginEmail", "loginPassword"];
 
   const validators = {
     regName: () => {
       const value = byId("regName").value.trim();
       return value.length >= 2 ? "" : "Укажите имя и фамилию.";
-    },
-    regOrg: () => {
-      const value = byId("regOrg").value.trim();
-      return value.length >= 2 ? "" : "Укажите организацию.";
     },
     regEmail: () => {
       const value = byId("regEmail").value.trim();
@@ -517,7 +513,7 @@ export function mountAuthScreen(root, {onEnter}) {
   byId("registerForm")?.addEventListener("submit", event => {
     event.preventDefault();
     let errors = 0;
-    for (const id of ["regName", "regOrg", "regEmail", "regPassword"]) {
+    for (const id of ["regName", "regEmail", "regPassword"]) {
       if (checkField(id, validators[id]())) errors += 1;
     }
     const consent = byId("regConsent");
@@ -542,7 +538,6 @@ export function mountAuthScreen(root, {onEnter}) {
       const account = await registerAccount({
         name: byId("regName").value.trim(),
         email: byId("regEmail").value.trim(),
-        org: byId("regOrg").value.trim(),
         password: byId("regPassword").value,
       });
       hide();

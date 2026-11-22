@@ -29,7 +29,6 @@ async function fresh(viewport = {width: 1440, height: 950}, setup) {
 
 async function register(page, name = "Илья Сафонов", email = "i.safonov@viniti.ru") {
   await page.fill("#regName", name);
-  await page.fill("#regOrg", "ЮФУ, ИКТ");
   await page.fill("#regEmail", email);
   await page.fill("#regPassword", "password123");
   await page.check("#regConsent");
