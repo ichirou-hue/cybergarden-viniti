@@ -233,7 +233,7 @@ function render(container, job, manifest, manifestError, interpretation, interpr
       el("p", {text: "Фрагменты документа отправлены в настроенную API-модель. Ниже отображается только интерпретация, прошедшая проверку."})) :
     job.llm === "api" && active ? el("div", {class: "notice", role: "status"},
       el("strong", {text: "Модель включена · обработка продолжается"}),
-      el("p", {text: "Запрос к API ещё не подтверждён."})) : null,
+      el("p", {text: "Разбор идёт на сервере. Эта страница обновится сама, когда появится проверенный результат."})) : null,
     job.llm === "mock" ? el("div", {class: "notice good", role: "status"},
       el("strong", {text: "Модель в режиме mock · офлайн"}),
       el("p", {text: "Стадии выполнены поверх готового результата. Реальная модель не вызывалась, официальные CSV и результат не менялись."})) : null,

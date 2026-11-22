@@ -66,3 +66,9 @@ export function unitLabel(descriptor, unit) {
   if (!unit) return "";
   return (descriptor.units && descriptor.units[unit]) || unit;
 }
+
+// Общий демо-документ (`rag:demo`) виден всем вошедшим, поэтому его надо
+// отличать от личных загрузок прямо в интерфейсе.
+export function sharedDemoDocument(documentId) {
+  return /(^|:)demo$/i.test(String(documentId || "").trim());
+}

@@ -1,6 +1,6 @@
 import { getJSON } from "./api.js";
 import { el, fill } from "./dom.js";
-import { docStatus, extractStatus, fieldLabel, issueLabel, number, plural, seconds, unitLabel } from "./ui.js";
+import { docStatus, extractStatus, fieldLabel, issueLabel, number, plural, seconds, sharedDemoDocument, unitLabel } from "./ui.js";
 import { openEvidence } from "./evidence.js";
 
 const PAGE = 50;
@@ -65,6 +65,7 @@ export async function renderDocument(root, ctx) {
     el("div", {class: "doc-actions"},
       el("a", {class: "button primary", href: "#/", text: "Добавить PDF"}),
       docStatus(summary.status),
+      demoBadge(docId),
       scopeBadge(publication),
       exportLink(summary, base, "pdf", "PDF", summary.status),
       exportLink(summary, base, "json", "JSON", summary.status),
@@ -73,6 +74,14 @@ export async function renderDocument(root, ctx) {
   );
 
   const notices = noticeBlock(summary);
+  // Демо-документ общий: его видят все вошедшие, и это должно быть видно
+  // на карточке, а не только в каталоге.
+  if (sharedDemoDocument(docId)) {
+    notices.unshift(el("div", {class: "notice warn"},
+      el("strong", {text: "Демонстрационный документ"}),
+      el("p", {text: "Это общий пример для всех пользователей каталога. Загруженные вами PDF остаются личными."}),
+    ));
+  }
   const stats = el("section", {class: "stats", "aria-label": "Сводка документа"},
     el("div", {}, el("span", {text: "Результатов"}), el("strong", {text: number(counts.results ?? 0)})),
     el("div", {}, el("span", {text: "Замечаний"}), el("strong", {text: number(counts.issues ?? 0)})),
@@ -162,6 +171,14 @@ function metaLine(summary, publication) {
     }));
   }
   return line;
+}
+
+function demoBadge(documentId) {
+  if (!sharedDemoDocument(documentId)) return null;
+  return el("span", {
+    class: "badge idle", text: "демо",
+    title: "Демонстрационный документ. Он общий для всех пользователей каталога.",
+  });
 }
 
 function scopeBadge(publication) {

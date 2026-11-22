@@ -420,7 +420,7 @@ export function renderPassport(root, ctx) {
     el("section", {class: "hero passport-hero"},
       el("div", {},
         el("p", {class: "eyebrow", text: "Результат разбора"}),
-        el("h1", {}, "Паспорт", el("br"), "публикации", el("span", {class: "dot", text: "."})),
+        el("h1", {}, "Паспорт", el("br"), "публикации"),
         el("p", {class: "lede", text: source.title}),
         el("p", {class: "passport-note", text: "Таблицы, значения и цитаты одной статьи. Файл JSON с этим результатом скачивает разбор PDF."}),
       ),

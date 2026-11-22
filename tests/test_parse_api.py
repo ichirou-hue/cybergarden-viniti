@@ -212,6 +212,40 @@ class ParseApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"PCE", body)
 
+    def test_parse_job_list_is_safe_and_single_job_contract_is_unchanged(self):
+        headers = {
+            "Content-Type": "application/pdf", "X-Profile": "solar",
+            "X-Parser": "pdfplumber", "X-Filename": "D001.pdf",
+        }
+        with patch.object(Handler, "run_parse", return_value=None):
+            status, body = self.send_auth(self.base + "/api/parse", tiny_pdf(), headers)
+        self.assertEqual(status, 202, body)
+        job = json.loads(body)
+
+        status, body = self.get_auth(self.base + "/api/parse?active=1")
+        self.assertEqual(status, 200, body)
+        listing = json.loads(body)
+        self.assertEqual(listing["total"], 1, listing)
+        item = listing["items"][0]
+        self.assertEqual(item["id"], job["id"])
+        self.assertEqual(item["status"], "queued")
+        self.assertIs(item["active"], True)
+        for forbidden in ("sha256", "owner_user_id", "bytes"):
+            self.assertNotIn(forbidden, item)
+
+        # Old clients still receive the full stored job from the single route.
+        status, body = self.get_auth(f"{self.base}/api/parse/{job['id']}")
+        self.assertEqual(status, 200, body)
+        stored = json.loads(body)
+        self.assertIn("sha256", stored)
+        self.assertEqual(stored["owner_user_id"], job["owner_user_id"])
+        self.assertEqual(stored["status"], "queued")
+
+        # The job survives a fresh read, so returning to the page restores it.
+        status, body = self.get_auth(f"{self.base}/api/parse/{job['id']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["created_at"], job["created_at"])
+
     def test_parse_rejects_unknown_profile(self):
         status, _ = self.send_auth(self.base + "/api/parse", tiny_pdf(), {
             "Content-Type": "application/pdf", "X-Profile": "nosuch"})

@@ -75,6 +75,15 @@ except ValueError:
 PARSE_FILE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}")
 PARSE_KINDS = {"tables", "figures", "charts"}
 PARSE_LLM_MODES = {"off", "mock", "api"}
+PARSE_ACTIVE_STATUSES = frozenset({"queued", "running"})
+# A catalog slice must not expose the stored PDF, its hash or the server-side
+# folder.  Only the fields a catalog card needs are copied into the list.
+PARSE_LIST_FIELDS = (
+    "id", "status", "filename", "profile", "profile_source", "parser", "ocr",
+    "charts", "llm", "document_id", "created_at", "updated_at", "started_at",
+    "elapsed_seconds", "error",
+)
+PARSE_LIST_SUMMARY_FIELDS = ("pages", "sources", "candidates", "warnings")
 # Network LLM mode is a deployment decision, not a per-request one: the
 # operator must set this flag explicitly, and the key stays in the environment.
 PARSE_LLM_NETWORK = os.environ.get("VINITI_PARSE_LLM", "").strip().lower() in {
@@ -245,10 +254,35 @@ class Handler(BaseHTTPRequestHandler):
     # uploads stay private, but the demo is a fixed card that two accounts can
     # open without the content-addressed ingest answering 409 to the second one.
     SHARED_DOCUMENTS = frozenset({"rag:demo"})
+    DEMO_DOCUMENTS = frozenset({"rag:demo"})
 
     @classmethod
     def shared_document(cls, document_id):
         return document_id in cls.SHARED_DOCUMENTS
+
+    @classmethod
+    def document_scope(cls, document_id):
+        """Explicit ownership marker for catalog cards and document envelopes.
+
+        The demo card is readable by every signed-in account, but it is not a
+        run of that account.  Keeping the distinction in the payload stops a
+        new account from showing the shared demo as its own upload while the
+        old fields stay untouched.
+        """
+        if document_id in cls.SHARED_DOCUMENTS:
+            return {
+                "shared": True,
+                "demo": document_id in cls.DEMO_DOCUMENTS,
+                "ownership": "shared",
+            }
+        return {"shared": False, "demo": False, "ownership": "owner"}
+
+    @classmethod
+    def annotate_document(cls, item):
+        if not isinstance(item, dict):
+            return item
+        document_id = item.get("document_id") or item.get("id") or ""
+        return {**item, **cls.document_scope(document_id)}
 
     def owns_document(self, area, document_id):
         session = self.current_session()
@@ -574,7 +608,6 @@ class Handler(BaseHTTPRequestHandler):
             log.exception("Не удалось создать каталог разбора")
             self.error("Не удалось сохранить PDF для разбора.", 500)
             return
-        session = self.current_session()
         job = {
             "id": run_id, "status": "queued", "profile": name, "profile_source": source,
             "parser": parser, "ocr": ocr if parser == "docling" else "off", "charts": charts,
@@ -717,14 +750,45 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             log.warning("Не удалось записать parse.log")
 
+    def find_catalog_parse(self, document_id, owner_user_id=None):
+        """Id of an unfinished recognition job for this document and owner.
+
+        A repeated upload returns the stored card, so starting a second Docling
+        run for the same bytes would queue duplicate work and hand the client a
+        job id that hides the first one.  Only active jobs are reused: a
+        finished run keeps its result, and a failed one may be retried by the
+        next upload.
+        """
+        root = self.parses_root()
+        if not root.is_dir():
+            return None
+        for folder in root.iterdir():
+            if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
+                continue
+            job = self.read_job(folder)
+            if job.get("document_id") != document_id:
+                continue
+            if job.get("owner_user_id") != owner_user_id:
+                continue
+            if job.get("status") not in PARSE_ACTIVE_STATUSES:
+                continue
+            return folder.name
+        return None
+
     def start_catalog_parse(self, document_id, filename, data, owner_user_id=None):
         """Run recognition independently of scientific result extraction.
 
         ``owner_user_id`` is the authenticated uploader: ``parse_get`` answers
         404 unless the caller's session matches it, so the returned
         ``recognition_job_id`` is only readable by the user who uploaded the
-        document.
+        document.  An active job for the same document and owner is reused
+        instead of queued twice.
         """
+        existing = self.find_catalog_parse(document_id, owner_user_id)
+        if existing is not None:
+            diagnostics.event(log, "parse.reused", job_id=existing,
+                              document_id=document_id)
+            return existing
         run_id = uuid.uuid4().hex[:16]
         folder = self.parses_root() / run_id
         folder.mkdir(parents=True, exist_ok=False)
@@ -737,9 +801,93 @@ class Handler(BaseHTTPRequestHandler):
                "owner_user_id": owner_user_id}
         self.write_job(folder, job)
         threading.Thread(target=self.run_parse,
-                         args=(folder, ROOT / "profiles" / "solar.json", "docling", "auto", False),
+                         args=(folder, paths.PROFILES_DIR / "solar.json", "docling", "auto", False),
                          daemon=True).start()
         return run_id
+
+    def start_solar_recognition(self, track, summary, name, data, session):
+        """Attach a catalog recognition job id to a claimed Solar upload.
+
+        Recognition starts only after the document is claimed: a conflicting
+        upload must not attach its own job (or sources) to another user's card.
+        The job carries the uploader as owner so ``/api/parse/<id>`` stays
+        private.  Both the plain and the streamed upload call this, so they
+        cannot drift apart.
+        """
+        if track != "solar" or not isinstance(summary, dict):
+            return
+        if not summary.get("document_id"):
+            return
+        recognition = summary.get("recognition") or {}
+        if (recognition.get("status") == "done"
+                and recognition.get("revision") == RECOGNITION_REVISION):
+            return
+        try:
+            summary["recognition_job_id"] = self.start_catalog_parse(
+                summary["document_id"], name, data,
+                owner_user_id=session["user"]["id"])
+        except OSError:
+            diagnostics.error(log, "document.recognition.failed", area=track)
+
+    @staticmethod
+    def parse_job_view(job):
+        """Safe catalog view of one parse job.
+
+        ``job.json`` also holds the input hash, the byte count and the owner id.
+        Those stay in the single-job endpoint for compatibility, but the list
+        endpoint copies only display fields and a bounded summary.
+        """
+        item = {name: job[name] for name in PARSE_LIST_FIELDS if name in job}
+        summary = job.get("summary")
+        if isinstance(summary, dict):
+            item["summary"] = {
+                name: summary[name] for name in PARSE_LIST_SUMMARY_FIELDS
+                if name in summary
+            }
+        item["active"] = job.get("status") in PARSE_ACTIVE_STATUSES
+        return item
+
+    def parse_jobs(self, query, session):
+        """List parse jobs owned by the caller; other accounts get none.
+
+        The job lives in ``data/parses/<id>/job.json`` and is read on every
+        request, so leaving the page does not delete it and returning to
+        ``/api/parse/<id>`` restores the same state.  Navigation never cancels
+        the worker: there is deliberately no cancellation route here.
+        """
+        if session is None:
+            self.error("Требуется вход.", 401)
+            return
+        try:
+            limit, offset = self._page(query, default=50, maximum=200)
+        except ValueError as error:
+            self.error(str(error), 400)
+            return
+        active = (query.get("active") or [""])[0].strip().lower() in {
+            "1", "true", "yes", "on"}
+        status = (query.get("status") or [""])[0].strip()
+        if status == "active":
+            active, status = True, ""
+        document_id = (query.get("document_id") or [""])[0].strip()
+        owner = session["user"]["id"]
+        items = []
+        root = self.parses_root()
+        if root.is_dir():
+            for folder in root.iterdir():
+                if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
+                    continue
+                job = self.read_job(folder)
+                if not job or job.get("owner_user_id") != owner:
+                    continue
+                if active and job.get("status") not in PARSE_ACTIVE_STATUSES:
+                    continue
+                if status and job.get("status") != status:
+                    continue
+                if document_id and job.get("document_id") != document_id:
+                    continue
+                items.append(self.parse_job_view(job))
+        items.sort(key=lambda item: item.get("created_at") or 0, reverse=True)
+        self.send_json({"total": len(items), "items": items[offset:offset + limit]})
 
     def parse_get(self, path, session=None):
         if session is None:
@@ -1031,6 +1179,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(llm_api_status())
             return
 
+        if path == "/api/parse":
+            self.parse_jobs(query, self.current_session())
+            return
+
         if path.startswith("/api/parse/"):
             self.parse_get(path, self.current_session())
             return
@@ -1049,7 +1201,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             store = self.auth_store()
             allowed = store.owned_documents("rag", session["user"]["id"])
-            items = [item for item in self.server.library.list()
+            items = [self.annotate_document(item) for item in self.server.library.list()
                      if item.get("id") in allowed or self.shared_document(item.get("id"))]
             self.send_json(items)
             return
@@ -1094,6 +1246,7 @@ class Handler(BaseHTTPRequestHandler):
                 "results": lambda doc: -int(doc.get("results_count", 0)),
             }.get(sort, lambda doc: doc.get("publication_id", ""))
             items.sort(key=key)
+            items = [self.annotate_document(doc) for doc in items]
             self.send_json({"total": len(items), "items": items[offset: offset + limit]})
             return
 
@@ -1120,7 +1273,8 @@ class Handler(BaseHTTPRequestHandler):
         key = segments[4] if len(segments) > 4 else ""
 
         if not resource:
-            self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
+            self.send_json(self.annotate_document(
+                {name: value for name, value in envelope.items() if name not in HEAVY_FIELDS}))
             return
 
         if resource == "facets":
@@ -1234,7 +1388,8 @@ class Handler(BaseHTTPRequestHandler):
         resource = resources[0] if resources else ""
         key = resources[1] if len(resources) > 1 else ""
         if not resource:
-            self.send_json({name: value for name, value in envelope.items() if name not in HEAVY_FIELDS})
+            self.send_json(self.annotate_document(
+                {name: value for name, value in envelope.items() if name not in HEAVY_FIELDS}))
         elif resource == "facets":
             self.send_json({"metrics": [], "ks": [], "datasets": [], "configs": [], "statuses": []})
         elif resource == "results":
@@ -1333,11 +1488,11 @@ class Handler(BaseHTTPRequestHandler):
             "partial": partial,
             "failed": failed,
             "items": [
-                {
+                self.annotate_document({
                     "document_id": doc.get("document_id"),
                     "status": doc.get("status"),
                     "error": doc.get("error", ""),
-                }
+                })
                 for doc in docs
             ],
         })
@@ -1517,13 +1672,15 @@ class Handler(BaseHTTPRequestHandler):
                 emit(0, "Документ уже загружен другим пользователем.",
                      error="Документ с таким содержимым уже загружен другим пользователем.")
             else:
+                if track == "solar":
+                    self.start_solar_recognition(track, result, name, data, session)
                 counts = (result or {}).get("counts") or {}
                 diagnostics.event(log, "document.ingest.done", area=track,
                                   duration_ms=int((time() - started) * 1000),
                                   document_id=document_id or "", stream=True,
                                   results=counts.get("results", 0),
                                   issues=counts.get("issues", 0))
-                emit(4, "Обработка завершена", result=result)
+                emit(4, "Обработка завершена", result=self.annotate_document(result))
         except ValueError as error:
             diagnostics.error(log, "document.ingest.rejected",
                               area=track, kind="ValueError")
@@ -1581,19 +1738,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
                 return
             if track == "solar":
-                # Start recognition only after the document is claimed: a
-                # conflicting upload must not attach its own job (or sources) to
-                # another user's card. The job carries the uploader as owner so
-                # /api/parse/<id> stays private.
-                recognition = summary.get("recognition", {})
-                if recognition.get("status") != "done" or recognition.get("revision") != RECOGNITION_REVISION:
-                    try:
-                        summary["recognition_job_id"] = self.start_catalog_parse(
-                            summary["document_id"], name, data,
-                            owner_user_id=session["user"]["id"])
-                    except OSError:
-                        diagnostics.error(log, "document.recognition.failed",
-                                          area=track)
+                self.start_solar_recognition(track, summary, name, data, session)
             counts = summary.get("counts") or {}
             diagnostics.event(log, "document.ingest.done", area=track,
                               duration_ms=int((time() - started) * 1000),
@@ -1602,7 +1747,7 @@ class Handler(BaseHTTPRequestHandler):
                               pages=summary.get("pages", 0),
                               results=counts.get("results", 0),
                               issues=counts.get("issues", 0))
-            self.send_json(summary, 201)
+            self.send_json(self.annotate_document(summary), 201)
             return
 
         # Демо-статья: генерируем PDF с настоящей таблицей и прогоняем экстрактор.
@@ -1620,7 +1765,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.claim_uploaded_document("rag", summary.get("document_id"), session):
             self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
             return
-        self.send_json(summary, 201)
+        self.send_json(self.annotate_document(summary), 201)
 
     def legacy_upload(self):
         if self.headers.get_content_type() != "application/pdf":

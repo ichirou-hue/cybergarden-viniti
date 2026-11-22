@@ -126,6 +126,10 @@ CI (`.github/workflows/smoke.yml`) гоняет `python -m unittest -v` на ubu
 под Python 3.12. Локально может быть 3.14 - расхождение версий допустимо, но CI главный.
 Тесты не требуют ни `_corpus/`, ни `_refs/`: они строят синтетические PDF через `reportlab`
 и временные базы. Всё, что ходит в настоящий корпус, лежит в `tools/` и в `.slim/`.
+Корневые `test_*.py` и пакет `tests/` (включая `tests/unit/`) подхватываются одним
+discovery; узкие модульные тесты кладём в `tests/unit/`, чтобы корень не разрастался.
+`tests/test_layout.py` держит инвариант раскладки: `REPO_ROOT`, листовой `viniti/paths.py`,
+`PARSE_SCRIPT`, `static/` и `profiles/`.
 
 Аудиты обходят не только корень и `tools/`: `tools/ci_parity.py` читает ещё `tests/`,
 `viniti/` и `rag/`, `tests/test_portability.py` проверяет их разбор под Python 3.12, а
@@ -184,8 +188,9 @@ PDF; научные результаты хранятся отдельно.
 
 Корневые пути собраны в `viniti/paths.py`: `db.py`, `batch.py`, `import_gold.py`,
 `passport.py`, `pipeline.py`, `profiles_store.py`, `score.py`, `server.py`, `serve_data.py`,
-`filler_rag.py` и `extraction_core.py` берут `REPO_ROOT`/`DATA_DIR`/`PROFILES_DIR`/`PASSPORT`/
-`VOCAB`/`CORPUS_ROOTS`/`PARSE_SCRIPT` оттуда. Публичные имена модулей при этом не менялись:
+`llm_provider.py`, `filler_rag.py` и `extraction_core.py` берут
+`REPO_ROOT`/`DATA_DIR`/`PROFILES_DIR`/`PASSPORT`/`VOCAB`/`CORPUS_ROOTS`/`PARSE_SCRIPT`
+оттуда. Публичные имена модулей при этом не менялись:
 `db.PASSPORT`, `batch.CORPUS_ROOTS`, `import_gold.GOLD`, `score.DEFAULT_DB` остаются на месте,
 поэтому команды, тесты и подпроцессы работают как раньше. `batch.CORPUS_ROOTS` - копия
 словаря из `paths`, её можно подменять в тестах, не задевая общий источник.

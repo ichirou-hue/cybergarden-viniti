@@ -37,7 +37,10 @@ const accountMenu = mountAccountMenu({
 const app = {descriptors: [], track: "rag", llm: "off", controller: null, started: false};
 let booted = false;
 let lastPath = "";
-let pendingChecked = false;
+
+// Признак того, что PDF из мастера не удалось передать в ручной профиль:
+// страница профиля прочитает его и предложит выбрать файл снова.
+const HANDOFF_KEY = "viniti.profile.handoff";
 
 function parse() {
   const raw = location.hash.replace(/^#/, "") || "/";
@@ -89,7 +92,10 @@ function renderTracks(active = app.track) {
 }
 
 function setUploadEnabled(enabled) {
-  form.querySelectorAll("button, input").forEach(node => { node.disabled = !enabled; });
+  // Активный разбор держит кнопки выключенными: возврат в мастер не должен
+  // разрешать второй запуск поверх идущего.
+  const busyNow = form.classList.contains("busy");
+  form.querySelectorAll("button, input").forEach(node => { node.disabled = !enabled || busyNow; });
   form.classList.toggle("disabled", !enabled);
 }
 
@@ -147,10 +153,9 @@ async function route() {
     document.body.dataset.view = "";
     document.title = "ВИНИТИ · Каталог результатов";
     renderWizard();
-    if (!pendingChecked) {
-      pendingChecked = true;
-      void restorePendingPDF();
-    }
+    // Файл, переданный из ручного профиля, забираем при каждом входе в мастер:
+    // takeProfilePDF() удаляет запись, поэтому повторный вызов ничего не стоит.
+    void restorePendingPDF();
     booted = true;
     document.getElementById("bootError").hidden = true;
     return;
@@ -474,12 +479,26 @@ async function restorePendingPDF() {
   if (!("indexedDB" in globalThis)) return;
   try {
     const file = await takeProfilePDF();
-    if (file) selectPDF(file);
+    if (!file) return;
+    if (parse().path !== "/") {
+      // Пользователь уже ушёл с мастера: файл ждёт следующего возврата,
+      // а не открывает мастер поверх каталога.
+      await stashProfilePDF(file);
+      return;
+    }
+    selectPDF(file);
   } catch (error) {
     // IndexedDB может быть недоступен: тогда мастер просто ждёт новый выбор.
     console.warn("Не удалось вернуть PDF из ручного профиля:", error.message);
   }
 }
+
+// Кнопка «назад» браузера возвращает мастер из кеша страницы, и тогда route()
+// не выполняется. Повторная проверка на pageshow возвращает файл и в этом случае.
+window.addEventListener("pageshow", () => {
+  if (!isSignedIn() || parse().path !== "/") return;
+  void restorePendingPDF();
+});
 
 dropZone.addEventListener("click", () => fileInput.click());
 dropZone.addEventListener("keydown", event => {
@@ -515,10 +534,12 @@ document.getElementById("createProfile").addEventListener("click", async event =
   link.setAttribute("aria-busy", "true");
   try {
     await stashProfilePDF(selectedPDF);
+    try { sessionStorage.removeItem(HANDOFF_KEY); } catch { /* хранилище недоступно */ }
   } catch (error) {
-    // Переход не должен зависеть от хранилища: на странице профиля PDF
-    // можно выбрать повторно.
+    // Переход не должен зависеть от хранилища: страница профиля сообщит,
+    // что файл не передался, и предложит выбрать его заново.
     console.warn("Не удалось передать PDF в ручной профиль:", error.message);
+    try { sessionStorage.setItem(HANDOFF_KEY, "failed"); } catch { /* хранилище недоступно */ }
   }
   location.assign(link.href);
 });
@@ -620,6 +641,7 @@ demoButton.addEventListener("click", async () => {
   if (!result) return;
   say("");
   openDocument(result, "demo");
+  toast("Открыт демо-документ. Он общий для всех пользователей каталога.");
 });
 
 async function startApp() {
