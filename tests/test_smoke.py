@@ -16,7 +16,7 @@ from library import Library
 from server import Handler, ThreadingHTTPServer
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class SmokeTest(unittest.TestCase):

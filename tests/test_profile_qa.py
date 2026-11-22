@@ -12,8 +12,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from extraction_core import compile_profile, export_result, load_profile, run
-from test_extraction_core import custom_fixture
-from test_solar import ROOT, synthetic_pdf
+from tests.test_extraction_core import custom_fixture
+from tests.test_solar import ROOT, synthetic_pdf
 
 
 class ProfileIndependentQA(unittest.TestCase):

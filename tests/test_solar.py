@@ -18,7 +18,7 @@ from solar_facts import export_bundle, finalize, prepare_pdf
 from solar_schema import KEYS, TABLES, UNITS
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def fixture():

@@ -18,7 +18,7 @@ import db as storage
 from library import Library
 from server import Handler, ThreadingHTTPServer, serve_until_interrupt
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def get(url):

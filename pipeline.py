@@ -27,14 +27,18 @@ import argparse
 import collections
 import pathlib
 import sys
+import time
 import traceback
 
 import batch
 import db as storage
 import export_csv
 import issues
+from viniti import diagnostics, paths
 
-ROOT = pathlib.Path(__file__).resolve().parent
+logger = diagnostics.get_logger("pipeline")
+
+ROOT = paths.REPO_ROOT
 
 # tools/ не пакет (нет __init__.py), поэтому корень tools кладём в sys.path и
 # импортируем gate модулем - так же поступают norm_report.py и spike_docling.py.
@@ -54,8 +58,15 @@ def run_area(area, args):
         "gate_skipped": args.skip_gate,
         "pipeline_error": "",
     }
+    diagnostics.event(logger, "pipeline.area.start", area=area, split=args.split,
+                      db=str(args.db), out=str(args.out),
+                      skip_extract=bool(args.skip_extract),
+                      skip_issues=bool(args.skip_issues),
+                      skip_export=bool(args.skip_export),
+                      skip_gate=bool(args.skip_gate))
 
     if not args.skip_extract:
+        started = time.perf_counter()
         summary = batch.run(
             area, args.split, db_path=args.db, resume=args.resume, limit=args.limit,
         )
@@ -64,6 +75,10 @@ def run_area(area, args):
         print(f"[разбор] {area}/{args.split}: discovered {summary['discovered']}, "
               f"ok {summary['ok']}, error {summary['error']}, "
               f"skipped {summary['skipped']}")
+        diagnostics.event(logger, "pipeline.stage", stage="extract", area=area,
+                          duration_ms=int((time.perf_counter() - started) * 1000),
+                          discovered=summary["discovered"], ok=summary["ok"],
+                          error=summary["error"], skipped=summary["skipped"])
     else:
         print(f"[разбор] {area}: пропущено (--skip-extract)")
 
@@ -72,6 +87,7 @@ def run_area(area, args):
     try:
         connection = storage.connect(args.db)
         if not args.skip_issues:
+            started = time.perf_counter()
             with connection:
                 rows = issues.generate(area, connection)
                 written = issues.write(area, connection, rows)
@@ -80,15 +96,24 @@ def run_area(area, args):
                                 for name, count in sorted(by_check.items()))
             print(f"[находки] {area}: {written} находок"
                   + (f" ({details})" if details else ""))
+            diagnostics.event(logger, "pipeline.stage", stage="issues", area=area,
+                              duration_ms=int((time.perf_counter() - started) * 1000),
+                              generated=len(rows), written=written,
+                              by_check=dict(by_check))
         else:
             print(f"[находки] {area}: пропущено (--skip-issues)")
 
         if not args.skip_export:
+            started = time.perf_counter()
             spec = export_csv.area_spec(storage.load_passport(), area)
             counts = export_csv.export_official(connection, area, spec, outdir)
             print(f"[выгрузка] {area}: "
                   + ", ".join(f"{table}={count}" for table, count in counts.items())
                   + f" -> {outdir}")
+            diagnostics.event(logger, "pipeline.stage", stage="export", area=area,
+                              duration_ms=int((time.perf_counter() - started) * 1000),
+                              tables=len(counts), rows=sum(counts.values()),
+                              out=str(outdir))
         else:
             print(f"[выгрузка] {area}: пропущено (--skip-export)")
     finally:
@@ -96,14 +121,22 @@ def run_area(area, args):
             connection.close()
 
     if not args.skip_gate:
+        started = time.perf_counter()
         result = gate.check(area, outdir, split=args.split)
         outcome["gate"] = result
         if result.failure:
             print(f"[гейт] {area}: валидатор не отработал: {result.failure}")
+            diagnostics.error(logger, "pipeline.gate", area=area,
+                              status=result.status)
         else:
             print(f"[гейт] {area}: {result.status} (таблиц {result.tables}, "
                   f"результатов {result.results}, ошибок {result.errors}, "
                   f"ревью {result.review})")
+            diagnostics.event(logger, "pipeline.gate", area=area,
+                              duration_ms=int((time.perf_counter() - started) * 1000),
+                              status=result.status, tables=result.tables,
+                              results=result.results, errors=result.errors,
+                              review=result.review)
     else:
         print(f"[гейт] {area}: пропущено (--skip-gate)")
     return outcome
@@ -169,6 +202,7 @@ def plan(args, areas):
 
 
 def main(argv):
+    diagnostics.configure()
     parser = argparse.ArgumentParser(
         description="Весь цикл одной командой: PDF -> база -> находки -> CSV -> гейт")
     parser.add_argument("--area", choices=("solar", "rag", "all"), default="all",
@@ -215,12 +249,15 @@ def main(argv):
     for area in areas:
         print(f"[область] {area}")
         try:
-            outcomes.append(run_area(area, args))
+            with diagnostics.context(area=area):
+                outcomes.append(run_area(area, args))
         except KeyboardInterrupt:
             raise
         except SystemExit as exc:
             message = str(exc) or f"код {exc.code}"
             print(f"pipeline: {area}: {message}", file=sys.stderr)
+            diagnostics.error(logger, "pipeline.area.failed", area=area,
+                              kind="SystemExit")
             outcomes.append({"area": area, "summary": None, "batch_error": False,
                              "gate": None, "gate_skipped": args.skip_gate,
                              "pipeline_error": message})
@@ -228,6 +265,8 @@ def main(argv):
             message = f"{type(exc).__name__}: {exc}"
             print(f"pipeline: {area}: {message}", file=sys.stderr)
             traceback.print_exc()
+            diagnostics.exception(logger, "pipeline.area.failed", area=area,
+                                  kind=type(exc).__name__)
             outcomes.append({"area": area, "summary": None, "batch_error": False,
                              "gate": None, "gate_skipped": args.skip_gate,
                              "pipeline_error": message})

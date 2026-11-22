@@ -200,23 +200,14 @@ class ParseApiTest(unittest.TestCase):
         self.assertEqual(status, 404)
 
     def test_parse_rejects_charts_without_docling(self):
-<<<<<<< HEAD
-        status, _ = send(self.base + "/api/parse", tiny_pdf(), {
-            "Content-Type": "application/pdf", "X-Profile": "solar", "X-Parser": "pdfplumber", "X-Charts": "1"})
-        self.assertEqual(status, 400)
-
-    def test_parse_file_route_refuses_traversal(self):
-        status, body = send(self.base + "/api/parse", tiny_pdf(), {
-            "Content-Type": "application/pdf", "X-Profile": "solar", "X-Parser": "pdfplumber"})
-=======
         status, _ = self.send_auth(self.base + "/api/parse", tiny_pdf(), {
-            "Content-Type": "application/pdf", "X-Profile": "solar", "X-Charts": "1"})
+            "Content-Type": "application/pdf", "X-Profile": "solar",
+            "X-Parser": "pdfplumber", "X-Charts": "1"})
         self.assertEqual(status, 400)
 
     def test_parse_file_route_refuses_traversal(self):
         status, body = self.send_auth(self.base + "/api/parse", tiny_pdf(), {
-            "Content-Type": "application/pdf", "X-Profile": "solar"})
->>>>>>> b028d54dd8580e4c6016e8eeee73899909e1821f
+            "Content-Type": "application/pdf", "X-Profile": "solar", "X-Parser": "pdfplumber"})
         job = json.loads(body)
         self.wait(job["id"])
         status, _ = self.get_auth(f"{self.base}/api/parse/{job['id']}/file/assets/../../job.json")
@@ -224,7 +215,7 @@ class ParseApiTest(unittest.TestCase):
 
     def test_default_parse_selects_local_docling_without_api_credentials(self):
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "", "OPENROUTER_VISION_MODEL": ""}), patch.object(Handler, "run_parse"):
-            status, body = send(self.base + "/api/parse", tiny_pdf(), {
+            status, body = self.send_auth(self.base + "/api/parse", tiny_pdf(), {
                 "Content-Type": "application/pdf", "X-Profile": "solar"})
         self.assertEqual(status, 202)
         self.assertEqual(json.loads(body)["parser"], "docling")

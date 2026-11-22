@@ -359,9 +359,8 @@ class SolarStore:
             # The checked pipeline: literal citations, normalized units and the
             # deterministic consistency issues. A ValueError means the paper did
             # not pass verification, not that the upload is malformed.
-<<<<<<< HEAD
             try:
-                result = solar_offline.extract_pdf(path, publication_id)
+                result = solar_offline.extract_pdf(path, publication_id, progress=progress)
             except ValueError as error:
                 if str(error) != "Нет текстового слоя. OCR в solar-1 пока не реализован.":
                     raise
@@ -378,9 +377,6 @@ class SolarStore:
                     "warnings": ["Исходный текстовый слой пуст; требуется OCR Docling. "
                                  "Научные результаты без буквального источника не извлекались."],
                 }
-=======
-            result = solar_offline.extract_pdf(path, publication_id, progress=progress)
->>>>>>> b028d54dd8580e4c6016e8eeee73899909e1821f
         envelope = self._envelope(document_id, name, result, started)
         if progress: progress(3, "Карточка собрана")
         summary_keys = {k: v for k, v in envelope.items() if k not in {"entities", "results", "issues", "anchors", "text_sources", "publication", "counts", "run", "export", "warnings"}}

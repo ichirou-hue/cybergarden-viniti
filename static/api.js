@@ -103,13 +103,8 @@ export async function loadSession(signal) {
   return data || {user: null};
 }
 
-<<<<<<< HEAD
 export async function uploadPDF(file, track, signal) {
-  const summary = await fetch("/api/documents", {
-=======
-export function uploadPDF(file, track, signal) {
-  return request("/api/documents", {
->>>>>>> b028d54dd8580e4c6016e8eeee73899909e1821f
+  const summary = await request("/api/documents", {
     method: "POST",
     body: file,
     signal,
@@ -118,8 +113,7 @@ export function uploadPDF(file, track, signal) {
       "X-Track": track,
       "X-Filename": encodeURIComponent(file.name),
     },
-<<<<<<< HEAD
-  }).catch(networkError).then(unwrap);
+  }, signal).then(unwrap);
   if (summary.recognition_job_id) {
     const path = "/api/parse/" + encodeURIComponent(summary.recognition_job_id);
     let job;
@@ -131,8 +125,6 @@ export function uploadPDF(file, track, signal) {
     if (job.status !== "ok") throw new Error("Docling: " + (job.error || "разбор не завершён"));
   }
   return summary;
-=======
-  }, signal).then(unwrap);
 }
 
 export async function uploadPDFWithProgress(file, track, onProgress, signal) {
@@ -163,7 +155,6 @@ export async function uploadPDFWithProgress(file, track, onProgress, signal) {
   }
   if (!result) throw new Error("Сервер завершил ответ без результата обработки.");
   return result;
->>>>>>> b028d54dd8580e4c6016e8eeee73899909e1821f
 }
 
 export function openDemo(track, signal) {

@@ -28,8 +28,10 @@ import json
 import pathlib
 import re
 
-ROOT = pathlib.Path(__file__).resolve().parent
-DEFAULT_VOCAB = ROOT / "rag_metric_vocab.json"
+from viniti import paths
+
+ROOT = paths.REPO_ROOT
+DEFAULT_VOCAB = paths.VOCAB
 
 PARENS = re.compile(r"\([^)]*\)")
 NORMALIZE = re.compile(r"\s+|-")

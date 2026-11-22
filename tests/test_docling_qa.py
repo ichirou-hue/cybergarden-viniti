@@ -14,8 +14,8 @@ from PIL import Image
 from atomic_output import publish_directory
 from docling_source import make_converter, normalize_document, page_anchor, prepare_pdf, table_grid
 from extraction_core import export_result, load_profile, run
-from test_docling_source import fixture, table_data
-from test_solar import ROOT, synthetic_pdf
+from tests.test_docling_source import fixture, table_data
+from tests.test_solar import ROOT, synthetic_pdf
 
 
 def converter(raw, image=None):

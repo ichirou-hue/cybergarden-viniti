@@ -1,9 +1,8 @@
 """Structured, reviewable LLM suggestions for the manual profile form."""
 
 import json
-import os
 
-from solar_extract import complete
+from llm_provider import complete, resolve_config
 
 FIELD_TYPES = {"text", "number", "boolean", "reference"}
 MAX_SOURCES = 24
@@ -42,8 +41,7 @@ def suggest(payload, *, complete_fn=complete):
             current.append({"name": str(entity.get("name", ""))[:100],
                             "fields": [str(field.get("name", ""))[:100]
                                        for field in fields[:50] if isinstance(field, dict)]})
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    model = os.environ.get("OPENROUTER_MODEL", "")
+    key, model = resolve_config()
     if not key or not model:
         raise RuntimeError("Помощник не настроен. Нужны OPENROUTER_API_KEY и OPENROUTER_MODEL на сервере.")
     messages = [{"role": "system", "content": (

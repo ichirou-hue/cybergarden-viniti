@@ -6,9 +6,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
+from unittest import mock
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 import auth
+import rag.pdf as rag_pdf
 from library import Library
 from rag_api import RagStore, build_envelope, demo_pdf, export_csv, _anchor
 from server import Handler, ThreadingHTTPServer
@@ -44,6 +46,70 @@ class AdapterTest(unittest.TestCase):
         self.assertIn(str(first["source"]["source_id"]), envelope["anchors"])
         self.assertIn("publication_id", export_csv(envelope).decode("utf-8-sig"))
 
+    def test_pdfplumber_fallback_builds_lines(self):
+        """pdfplumber обязан отдавать Page с lines: иначе таблиц не найти."""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.pdf"
+            path.write_bytes(demo_pdf())
+            document = rag_pdf.load_document(path, parser="pdfplumber")
+        self.assertEqual(document.parser, "pdfplumber")
+        self.assertEqual(len(document.pages), 1)
+        lines = document.pages[0].lines
+        self.assertGreater(len(lines), 5)
+        for line in lines:
+            self.assertTrue(line.text.strip())
+            self.assertTrue(line.words)
+            self.assertLessEqual(line.x0, line.x1)
+            self.assertLessEqual(line.y0, line.y1)
+            self.assertGreater(line.y1, 0.0)
+            for word in line.words:
+                self.assertTrue(word.text.strip())
+                self.assertLessEqual(word.x0, word.x1)
+                self.assertLessEqual(word.y0, word.y1)
+
+    def test_pdfplumber_fallback_keeps_results_and_anchors(self):
+        """Без PyMuPDF таблица из demo_pdf всё равно даёт строки, а не ноль."""
+        reference = build_envelope(
+            document_id="rag:demo",
+            name="demo.pdf",
+            pdf=demo_pdf(),
+            publication_id="DEMO",
+            duration_ms=1,
+        )
+        with mock.patch.object(
+            rag_pdf, "_load_pymupdf", side_effect=ImportError("pymupdf is not installed")
+        ):
+            fallback = build_envelope(
+                document_id="rag:demo",
+                name="demo.pdf",
+                pdf=demo_pdf(),
+                publication_id="DEMO",
+                duration_ms=1,
+            )
+
+        self.assertEqual(fallback["status"], "done")
+        self.assertGreater(fallback["results_count"], 0)
+        self.assertEqual(fallback["results_count"], len(fallback["results"]))
+        self.assertEqual(fallback["results_count"], reference["results_count"])
+        self.assertEqual(fallback["counts"], reference["counts"])
+        self.assertTrue(fallback["anchors"])
+        self.assertEqual(len(fallback["anchors"]), len(reference["anchors"]))
+        self.assertEqual(
+            [
+                (row["metric_name"], row["metric_k"], row["metric_value"],
+                 row["config_id"], row["dataset_id"])
+                for row in fallback["results"]
+            ],
+            [
+                (row["metric_name"], row["metric_k"], row["metric_value"],
+                 row["config_id"], row["dataset_id"])
+                for row in reference["results"]
+            ],
+        )
+        for row in fallback["results"]:
+            self.assertIn(str(row["source"]["source_id"]), fallback["anchors"])
+            self.assertIsNotNone(row["source"]["bbox"])
+
     def test_store_roundtrip_is_idempotent_by_hash(self):
         with TemporaryDirectory() as tmp:
             store = RagStore(Path(tmp) / "rag.sqlite3")
@@ -59,10 +125,10 @@ class HttpTest(unittest.TestCase):
     def setUp(self):
         self.tmp = TemporaryDirectory()
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.library = Library(Path(self.tmp.name) / "papers.sqlite3")
-        self.server.rag_store = RagStore(Path(self.tmp.name) / "papers.sqlite3")
         self.server.auth = auth.Auth(Path(self.tmp.name) / "auth.sqlite3",
                                      iterations=auth.MIN_ITERATIONS)
+        self.server.library = Library(Path(self.tmp.name) / "papers.sqlite3")
+        self.server.rag_store = RagStore(Path(self.tmp.name) / "papers.sqlite3")
         self.thread = Thread(target=self.server.serve_forever)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_port}"
@@ -83,6 +149,15 @@ class HttpTest(unittest.TestCase):
     def get_json(self, path):
         with self.client.open(self.base + path, timeout=10) as response:
             return json.load(response)
+
+    def register(self):
+        request = Request(
+            self.base + "/api/auth/register",
+            data=json.dumps({"username": "rag_demo", "password": "correct horse"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.client.open(request, timeout=10) as response:
+            return json.load(response)["csrf_token"]
 
     def test_demo_catalog_results_and_evidence(self):
         request = Request(self.base + "/api/demo", data=b"",

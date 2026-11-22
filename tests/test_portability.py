@@ -21,7 +21,13 @@ import sys
 import tempfile
 import unittest
 
-ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+# Packages beside the root modules, plus the source directories the audits read.
+# tools/ci_parity.py and tools/coverage_report.py keep their own copies of this
+# list; the guard in ScannerCoverageTest fails when the three drift apart.
+PACKAGE_DIRS = ("rag", "viniti")
+SOURCE_DIRS = ("tools", "tests") + PACKAGE_DIRS
 
 # The same rule as tools/ci_parity.py: a whole string that is a Windows path.
 # Kept local so this test does not depend on the auditor.
@@ -35,6 +41,16 @@ def load_module(relative_path, name):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def audit_sources():
+    """Every .py the static audits must read: root modules, tools/, tests/, packages."""
+    paths = sorted(ROOT.glob("*.py"))
+    for name in SOURCE_DIRS:
+        directory = ROOT / name
+        if directory.is_dir():
+            paths += sorted(directory.rglob("*.py"))
+    return paths
 
 
 def backslash_path_literals(path):
@@ -262,7 +278,7 @@ class SyntaxTest(unittest.TestCase):
     """CI pins Python 3.12: anything 3.13+ only is a red build on both runners."""
 
     def test_every_module_parses_as_python_312(self):
-        paths = sorted(ROOT.glob("*.py")) + sorted((ROOT / "tools").glob("*.py"))
+        paths = audit_sources()
         self.assertGreater(len(paths), 10)
         for path in paths:
             with self.subTest(module=path.relative_to(ROOT).as_posix()):
@@ -316,6 +332,46 @@ class SqliteFeatureTest(unittest.TestCase):
                           "ON CONFLICT(area, publication_id) DO UPDATE SET status='done'")
         self.assertEqual(self.conn.execute("SELECT status FROM jobs").fetchone()[0], "done")
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 1)
+
+
+class ScannerCoverageTest(unittest.TestCase):
+    """A new package must not silently drop out of the static audits."""
+
+    def test_every_package_is_listed_for_the_audits(self):
+        found = sorted(path.name for path in ROOT.iterdir()
+                       if path.is_dir() and (path / "__init__.py").is_file()
+                       and path.name not in SOURCE_DIRS)
+        self.assertEqual(found, [],
+                         "new package(s) %s are not scanned: add the name to "
+                         "SOURCE_DIRS here, to load_sources() in tools/ci_parity.py "
+                         "and to PACKAGE_DIRS in tools/coverage_report.py" % found)
+
+    def test_ci_parity_reads_every_audited_source(self):
+        ci_parity = load_module("tools/ci_parity.py", "guard_ci_parity")
+        scanned = {source.rel for source in ci_parity.load_sources(ROOT)
+                   if isinstance(source, ci_parity.Sources)}
+        missing = [path.relative_to(ROOT).as_posix() for path in audit_sources()
+                   if path.relative_to(ROOT).as_posix() not in scanned]
+        self.assertEqual(missing, [],
+                         "tools/ci_parity.py does not scan: %s" % missing)
+
+    def test_coverage_report_measures_every_production_module(self):
+        report = load_module("tools/coverage_report.py", "guard_coverage_report")
+        measured = {path.relative_to(ROOT).as_posix()
+                    for path in report.discover_modules()}
+        expected = []
+        for path in audit_sources():
+            relative = path.relative_to(ROOT)
+            if relative.parts[0] in ("tools", "tests"):
+                continue                    # the suite and the tools themselves
+            if path.name == "__init__.py" or path.name.startswith("test_"):
+                continue
+            if path.name in report.EXCLUDE_FILES:
+                continue
+            expected.append(relative.as_posix())
+        missing = sorted(set(expected) - measured)
+        self.assertEqual(missing, [],
+                         "tools/coverage_report.py does not measure: %s" % missing)
 
 
 if __name__ == "__main__":

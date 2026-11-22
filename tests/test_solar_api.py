@@ -6,6 +6,7 @@ tests build the mapping from a crafted parser result, and run one real ingest
 over a synthetic PDF, so they need no corpus on disk.
 """
 
+from contextlib import closing
 from io import BytesIO
 import json
 import sqlite3
@@ -150,7 +151,7 @@ class EnvelopeTest(unittest.TestCase):
 
 class IngestTest(unittest.TestCase):
     def setUp(self):
-        from test_solar_offline import TABLE_PAGE, make_pdf
+        from tests.test_solar_offline import TABLE_PAGE, make_pdf
 
         self.pdf = make_pdf(TABLE_PAGE, table=True)
         self.directory = TemporaryDirectory()
@@ -175,14 +176,14 @@ class IngestTest(unittest.TestCase):
         first = store.ingest("S1.pdf", self.pdf)
         second = store.ingest("S1-copy.pdf", self.pdf)
         self.assertEqual(first["document_id"], second["document_id"])
-        with store._connect() as connection:
+        with closing(store._connect()) as connection:
             rows = connection.execute("SELECT COUNT(*) FROM solar_documents").fetchone()[0]
         self.assertEqual(rows, 1)
 
     def test_cache_from_an_older_revision_is_reparsed(self):
         store = self.store()
         summary = store.ingest("S1.pdf", self.pdf)
-        with store._connect() as connection, connection:
+        with closing(store._connect()) as connection, connection:
             stale = dict(summary, handler_revision=solar_version.PARSER_VERSION - 1)
             connection.execute("UPDATE solar_documents SET summary = ?",
                                (json.dumps(stale, ensure_ascii=False),))
@@ -195,14 +196,14 @@ class IngestTest(unittest.TestCase):
     def test_stale_cache_with_another_name_reuses_the_card(self):
         store = self.store()
         summary = store.ingest("S1.pdf", self.pdf)
-        with store._connect() as connection, connection:
+        with closing(store._connect()) as connection, connection:
             stale = dict(summary, handler_revision=solar_version.PARSER_VERSION - 1)
             connection.execute("UPDATE solar_documents SET summary = ?",
                                (json.dumps(stale, ensure_ascii=False),))
         again = store.ingest("S1-renamed.pdf", self.pdf)
         # Same bytes, new name, old revision: still one card, refreshed in place.
         self.assertEqual(again["document_id"], summary["document_id"])
-        with store._connect() as connection:
+        with closing(store._connect()) as connection:
             rows = connection.execute("SELECT COUNT(*) FROM solar_documents").fetchone()[0]
         self.assertEqual(rows, 1)
 
@@ -228,7 +229,7 @@ class DocumentApiTest(unittest.TestCase):
         self.addCleanup(catalog_parse.stop)
         from library import Library
         from server import Handler, ThreadingHTTPServer
-        from test_solar_offline import TABLE_PAGE, make_pdf
+        from tests.test_solar_offline import TABLE_PAGE, make_pdf
 
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -253,7 +254,7 @@ class DocumentApiTest(unittest.TestCase):
         return f"{self.base}/api/documents/{self.document_id}/{resource}"
 
     def store_envelope(self, envelope):
-        with self.store._connect() as connection, connection:
+        with closing(self.store._connect()) as connection, connection:
             connection.execute(
                 "INSERT OR REPLACE INTO solar_documents VALUES (?, ?, ?, ?, ?, ?)",
                 (envelope["document_id"], envelope["document_id"], "{}",
@@ -321,7 +322,7 @@ class DocumentApiTest(unittest.TestCase):
     def test_catalog_search_matches_solar_authors_string(self):
         envelope = self.store.get(self.document_id)
         summary = {**self.summary, "authors": "Vajjiravel Balamurugan"}
-        with self.store._connect() as connection, connection:
+        with closing(self.store._connect()) as connection, connection:
             connection.execute("UPDATE solar_documents SET summary = ? WHERE document_id = ?",
                                (json.dumps(summary, ensure_ascii=False), self.document_id))
         status, body = get(self.base + "/api/documents?track=solar&q=Vajjiravel")

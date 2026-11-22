@@ -12,7 +12,7 @@ from evaluate_extraction import evaluate, write_report
 from solar_schema import TABLES
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def fixture(prefix=""):

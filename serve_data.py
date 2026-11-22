@@ -25,8 +25,10 @@ import shlex
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent
-DB = ROOT / "data" / "viniti.sqlite3"
+from viniti import paths
+
+ROOT = paths.REPO_ROOT
+DB = paths.DATA_DIR / "viniti.sqlite3"
 INSTALL_CMD = "python -m pip install -r requirements-data.txt"
 
 

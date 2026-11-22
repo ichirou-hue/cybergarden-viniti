@@ -289,7 +289,6 @@ function scan(browseAll) {
 byId("scanProfile").onclick = () => scan(false);
 byId("browseProfile").onclick = () => scan(true);
 
-<<<<<<< HEAD
 async function parseResponse(response) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Не удалось прочитать PDF.");
@@ -297,12 +296,12 @@ async function parseResponse(response) {
 }
 
 async function readPdf(file) {
-  let job = await parseResponse(await fetch("/api/parse", {
+  let job = await parseResponse(await authorized(await apiFetch("/api/parse", {
     method: "POST",
     headers: {"Content-Type": "application/pdf", "X-Parser": "auto", "X-Profile": "solar",
       "X-Filename": encodeURIComponent(file.name)},
     body: file,
-  }));
+  })));
   const path = "/api/parse/" + encodeURIComponent(job.id);
   while (job.status === "queued" || job.status === "running") {
     status.textContent = job.status === "queued" ? "PDF ожидает своей очереди…"
@@ -315,10 +314,6 @@ async function readPdf(file) {
   return {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []};
 }
 
-upload.onchange = async () => {
-  const file = upload.files[0];
-  if (!file) return;
-=======
 let proposals = [];
 const assistantHistory = [];
 function chatMessage(text, side = "assistant") {
@@ -411,7 +406,6 @@ async function loadFile(file) {
   byId("assistantApply").hidden = true;
   byId("assistantStatus").hidden = true;
   loading = true;
->>>>>>> b028d54dd8580e4c6016e8eeee73899909e1821f
   upload.disabled = true;
   form.hidden = true;
   documentData = undefined;
@@ -420,19 +414,7 @@ async function loadFile(file) {
   byId("profilePanel").hidden = false;
   status.textContent = "Docling распознаёт структуру, текст и формулы. Это может занять несколько минут…";
   try {
-<<<<<<< HEAD
     const data = await readPdf(file);
-    documentData = {...data, filename: file.name};
-    if (!entities.children.length) applyPreset("basic");
-    status.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
-      + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
-    form.hidden = false;
-=======
-    const response = await authorized(await apiFetch("/api/profile/source", {
-      method: "POST", headers: {"Content-Type": "application/pdf"}, body: file,
-    }));
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
     documentData = {...data, filename: file.name};
     const sourceLine = byId("profileSource");
     if (sourceLine) {
@@ -446,7 +428,6 @@ async function loadFile(file) {
       chatMessage("PDF прочитан. Спросите, какие поля искать в статье, или отметьте фрагменты слева.");
     }
     status.textContent = "PDF прочитан. Выберите готовый набор или опишите поля вручную.";
->>>>>>> b028d54dd8580e4c6016e8eeee73899909e1821f
   } catch (error) {
     showError(error.message);
   } finally {
