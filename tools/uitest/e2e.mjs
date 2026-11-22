@@ -124,10 +124,12 @@ check("result=: сообщение о ненайденной записи",
 // Загрузка PDF
 const response = await context.request.get(`${base}/api/documents/rag%3Ad020/pdf`);
 writeFileSync("/tmp/viniti-uitest-upload.pdf", await response.body());
-// Загрузка идёт из тулбара каталога: корень "/" открывает мастер.
+// Загрузка из тулбара открывает мастер: профиль выбирается там.
 await page.goto(`${base}/#/catalog?track=rag`, {waitUntil: "networkidle"});
+await page.waitForSelector("#upload", {state: "visible"});
 await page.setInputFiles("#file", "/tmp/viniti-uitest-upload.pdf");
-await page.click('#upload button[type="submit"]');
+await page.waitForSelector("#profileStep:not([hidden])");
+await page.click("#wizardSubmit");
 await page.waitForTimeout(800);
 check("загрузка: карточка открылась", page.url().includes("#/doc/rag%3A"), page.url());
 check("загрузка: статус частично", (await page.locator("#view").textContent()).includes("Обработано частично"));

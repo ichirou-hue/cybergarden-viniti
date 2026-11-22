@@ -717,7 +717,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True}, headers={
                 "Set-Cookie": f"{MOCK_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"})
             return
-        if path in ("/api/documents", "/api/demo", "/api/profile/source", "/api/parse"):
+        if path in ("/api/documents", "/api/documents/stream", "/api/demo", "/api/profile/source", "/api/parse"):
             if not self.require_session() or not self.require_csrf():
                 return
         if path == "/api/parse":
@@ -741,6 +741,32 @@ class Handler(BaseHTTPRequestHandler):
                 self.error("Демо для области Solar ещё не подключено.", 404)
                 return
             self.send_json(BY_ID["rag:d020"], 201)
+            return
+        if path == "/api/documents/stream":
+            track = self.headers.get("X-Track", "rag")
+            if track not in TRACKS:
+                self.error("Неизвестная область.", 400)
+                return
+            name = unquote(self.headers.get("X-Filename", "article.pdf"))
+            stem = Path(name).stem
+            slug = "".join(ch for ch in stem if ch.isalnum() or ch in "-_")[:40] or "article"
+            new_id = f"{track}:{slug.lower()}"
+            if new_id not in BY_ID:
+                template = dict(BY_ID["rag:d005"])
+                template.update(document_id=new_id, track=track, publication_id=slug.upper(),
+                                title=name, status="partial", results_count=0, issues_count=0,
+                                pages=1, mock_upload=True, authors=["A. Author", "B. Author"])
+                BY_ID[new_id] = template
+                DOCS.append(template)
+            events = [
+                {"completed": 0, "total": 4, "label": "PDF загружен"},
+                {"completed": 1, "total": 4, "label": "Страницы PDF прочитаны"},
+                {"completed": 2, "total": 4, "label": "Извлечение"},
+                {"completed": 3, "total": 4, "label": "Сборка карточки"},
+                {"completed": 4, "total": 4, "label": "Готово", "result": BY_ID[new_id]},
+            ]
+            payload = ("\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n").encode()
+            self.send_data(payload, "application/x-ndjson")
             return
         if path == "/api/profile/source":
             self.send_json({
