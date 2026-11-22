@@ -449,6 +449,7 @@ async function releasePending() {
     await clearProfilePDF();
   } catch (error) {
     console.warn("Не удалось освободить переданный PDF:", error.message);
+  }
 }
 
 function chatMessage(text, side = "assistant") {
