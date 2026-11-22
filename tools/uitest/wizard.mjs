@@ -28,8 +28,8 @@ assert.equal(document.body.classList.contains("wizard-active"), true);
 assert.equal(document.querySelectorAll(".track-switch .track").length, 3);
 assert.equal(document.querySelector(".track-switch .track").textContent.trim(), "Паспорт");
 assert.equal(document.querySelectorAll("#tracks").length, 0);
-assert.equal($("wizardLLM").checked, false);
-assert.equal($("wizardLLMState").textContent, "Без модели");
+assert.equal($("wizardLLM"), null);
+assert.equal(document.querySelectorAll(".llm-option").length, 0);
 
 $("file").dispatchEvent(new dom.window.Event("change"));
 const invalid = new File(["text"], "notes.txt", {type: "text/plain"});

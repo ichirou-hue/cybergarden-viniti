@@ -397,54 +397,21 @@ fileInput.addEventListener("change", () => {
   if (file) selectPDF(file);
 });
 
-// Модель - необязательная надстройка над детерминированным разбором, поэтому
-// переключатель живёт внутри мастера, рядом с выбором области, а не в шапке.
-const llmStatus = {checked: false, available: false, configured: false};
-
-function syncLLMNote() {
-  const state = document.getElementById("wizardLLMState");
-  const note = document.getElementById("wizardLLMNote");
-  const input = document.getElementById("wizardLLM");
-  if (!state || !note || !input) return;
-  const on = app.llm === "api";
-  state.textContent = on ? "С моделью" : "Без модели";
-  input.checked = on;
-  if (llmStatus.checked && !llmStatus.available) {
-    note.textContent = llmStatus.configured
-      ? "Модель отключена на сервере. Разбор пройдёт без неё."
-      : "Модель не настроена на сервере. Разбор пройдёт без неё.";
-    return;
-  }
-  note.textContent = on
-    ? "Сервер дополнительно разберёт фрагменты моделью и покажет проверенную интерпретацию. Доступно для области Solar."
-    : "Текст, таблицы и цитаты извлекаются без модели. Так результат воспроизводим.";
-}
-
-function setLLMMode(mode) {
-  app.llm = mode === "api" ? "api" : "off";
-  syncLLMNote();
-}
-
-document.getElementById("wizardLLM")?.addEventListener("change", event => {
-  setLLMMode(event.target.checked ? "api" : "off");
-  if (app.llm === "api" && wizardTrack === "rag") wizardTrack = "solar";
-  renderWizard();
-});
+// Модель - надстройка над детерминированным разбором солнечных статей.
+// Переключателя в мастере нет: для области Solar она включена по умолчанию,
+// если сервер её настроил, а RAG всегда разбирается без модели.
+const llmStatus = {checked: false, available: false};
 
 async function loadLLMStatus() {
-  const input = document.getElementById("wizardLLM");
-  if (!input) return;
   try {
     const status = await getLLM();
     llmStatus.checked = true;
     llmStatus.available = Boolean(status?.available);
-    llmStatus.configured = Boolean(status?.configured);
-    input.disabled = !llmStatus.available;
-    if (!llmStatus.available && app.llm === "api") app.llm = "off";
-    syncLLMNote();
+    app.llm = llmStatus.available ? "api" : "off";
   } catch {
-    // Сервер остаётся последней инстанцией: разовый сбой проверки статуса
-    // не должен отключать управление.
+    // Без ответа сервера включать модель нельзя: разбор упал бы на отказе,
+    // поэтому остаётся детерминированный путь без модели.
+    app.llm = "off";
   }
 }
 
@@ -456,29 +423,24 @@ function openWizard() {
 
 function renderWizard() {
   const ready = !!selectedPDF;
-  const llmOn = app.llm === "api";
   dropZone.hidden = ready;
   profileStep.hidden = !ready;
   wizard.dataset.step = ready ? "2" : "1";
   document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Область" : "Шаг 1 из 2 · Документ";
   document.getElementById("wizardTitle").textContent = ready ? "Как разобрать статью?" : "Начните с PDF";
   document.getElementById("wizardHint").textContent = ready
-    ? "Область задаёт поля и шаблон CSV. Модель можно включить ниже."
+    ? "Область задаёт поля и шаблон CSV. Solar разбирается с моделью, RAG без неё."
     : "RAG: до 20 МиБ, Solar: до 32 МиБ.";
   document.getElementById("selectedFile").textContent = ready ? selectedPDF.name : "";
-  syncLLMNote();
-  let preferred = wizardTrack === "rag" || wizardTrack === "solar" ? wizardTrack : app.track;
-  if (llmOn) preferred = "solar";
+  const preferred = wizardTrack === "rag" || wizardTrack === "solar" ? wizardTrack : app.track;
   fill(document.getElementById("profileChoices"), ...["solar", "rag"].map(track => {
     const available = app.descriptors.some(item => item.track === track);
-    const blockedByLLM = llmOn && track !== "solar";
     return el("label", {class: "profile-choice"},
       el("input", {type: "radio", name: "wizardProfile", value: track,
-        disabled: !available || blockedByLLM,
-        checked: available && !blockedByLLM && track === preferred}),
+        disabled: !available,
+        checked: available && track === preferred}),
       el("span", {},
-        el("strong", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`}),
-        blockedByLLM ? el("small", {text: "Только без модели"}) : null));
+        el("strong", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`})));
   }));
   const checked = document.querySelector('input[name="wizardProfile"]:checked');
   if (checked) wizardTrack = checked.value;
@@ -580,14 +542,11 @@ document.getElementById("createProfile").addEventListener("click", async event =
 });
 document.getElementById("wizardSubmit").addEventListener("click", async () => {
   const track = wizardTrack;
-  const llm = app.llm;
+  // Модель включена по умолчанию, но область Solar - единственная, которую
+  // она поддерживает; RAG всегда идёт детерминированным разбором.
+  const llm = track === "solar" && app.llm === "api" ? "api" : "off";
   if (!selectedPDF || !track) return;
   const error = document.getElementById("wizardError");
-  if (llm === "api" && track !== "solar") {
-    error.textContent = "С моделью разбирается только область Solar. Выберите Solar или выключите модель.";
-    error.hidden = false;
-    return;
-  }
   if (track === "rag" && selectedPDF.size > 20 * 1024 * 1024) {
     error.textContent = "Для RAG нужен PDF размером до 20 МиБ. Выберите Solar или другой PDF.";
     error.hidden = false;
