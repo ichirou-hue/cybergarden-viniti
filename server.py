@@ -89,6 +89,40 @@ def llm_api_status(environ=None):
     return status
 
 
+PARSE_FAILURE_DEFAULT = "Разбор завершился с ошибкой; подробности в логе сервера."
+
+
+def parse_failure_error(completed):
+    """Stable user-facing message for a failed parse subprocess.
+
+    Raw stderr/stdout can quote the PDF, provider responses and local paths.
+    They stay in parse.log and diagnostics; ``job.error`` receives only a
+    category so an authenticated reader cannot pull those details from the API.
+    """
+    text = f"{completed.stderr or ''}\n{completed.stdout or ''}".lower()
+    if "modulenotfounderror" in text or "importerror" in text:
+        return "Разбор недоступен: не установлены зависимости парсера."
+    if any(marker in text for marker in (
+            "openai", "openrouter", "provider", "api key", "unauthorized")):
+        return "Ошибка внешнего провайдера LLM; подробности в логе сервера."
+    if "permissionerror" in text or "permission denied" in text:
+        return "Разбор не смог получить доступ к файлам; подробности в логе сервера."
+    if "filenotfounderror" in text or "no such file" in text:
+        return "Разбор не нашёл нужный файл; подробности в логе сервера."
+    if "memoryerror" in text:
+        return "Разбор остановлен: не хватило памяти."
+    return PARSE_FAILURE_DEFAULT
+
+
+def parse_spawn_error(error):
+    """Stable message for an OSError raised while starting the parse process."""
+    if isinstance(error, FileNotFoundError):
+        return "Не удалось запустить разбор: не найден интерпретатор или скрипт."
+    if isinstance(error, PermissionError):
+        return "Не удалось запустить разбор: нет доступа к интерпретатору или скрипту."
+    return "Не удалось запустить разбор; подробности в логе сервера."
+
+
 def static_file(path):
     if path in ("/manual-profile", "/solar", "/solar.html"):
         path = "/manual-profile.html"
@@ -350,15 +384,14 @@ class Handler(BaseHTTPRequestHandler):
         return self.profile_root_for(session)
 
     def profile_roots(self, name):
-        """Read roots in order: the user's folder, then the pre-auth flat one."""
+        """Read roots for one profile: builtins, or the current user's folder.
+
+        The old flat ``data/profiles`` directory has no owner information, so
+        exposing it here would let any authenticated user read another person's
+        saved profile. Only builtins and per-user folders are visible now.
+        """
         root = self.profile_scope(name)
-        if root is None:
-            return []
-        roots = [Path(root)]
-        legacy = self.profiles_root()
-        if legacy is not None and Path(legacy) not in roots:
-            roots.append(Path(legacy))
-        return roots
+        return [] if root is None else [Path(root)]
 
     def load_profile(self, name):
         last = None
@@ -399,11 +432,6 @@ class Handler(BaseHTTPRequestHandler):
                     root=self.profiles_root(), include_users=False)})
                 return
             items = profiles_store.list_profiles(root=self.profile_root_for(session))
-            known = {item["id"] for item in items}
-            # Profiles saved before per-user folders stay readable and listed.
-            for item in profiles_store.list_profiles(root=self.profiles_root()):
-                if item.get("source") != "builtin" and item["id"] not in known:
-                    items.append(item)
             self.send_json({"profiles": items})
             return
         if len(segments) != 3:
@@ -628,11 +656,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_log(folder, completed)
                 job = self.read_job(folder)
                 if completed.returncode:
-                    lines = (completed.stderr or completed.stdout or "").strip().splitlines()
-                    message = lines[-1] if lines else "Разбор завершился с ошибкой."
-                    job.update(status="error", error=message[:500], returncode=completed.returncode)
+                    job.update(status="error", error=parse_failure_error(completed),
+                               returncode=completed.returncode)
                     # No message text here: the subprocess stderr may quote the
-                    # document, and the same string is already in job.json.
+                    # document, and the same string is already in parse.log.
                     diagnostics.error(log, "parse.error",
                                       returncode=completed.returncode)
                 else:
@@ -665,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
                                   timeout_s=PARSE_TIMEOUT)
             except OSError as error:
                 job = self.read_job(folder)
-                job.update(status="error", error=f"Не удалось запустить разбор: {error}"[:500],
+                job.update(status="error", error=parse_spawn_error(error),
                            updated_at=round(time(), 3))
                 self.write_job(folder, job)
                 diagnostics.exception(log, "parse.spawn_failed",
@@ -690,8 +717,14 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             log.warning("Не удалось записать parse.log")
 
-    def start_catalog_parse(self, document_id, filename, data):
-        """Run recognition independently of scientific result extraction."""
+    def start_catalog_parse(self, document_id, filename, data, owner_user_id=None):
+        """Run recognition independently of scientific result extraction.
+
+        ``owner_user_id`` is the authenticated uploader: ``parse_get`` answers
+        404 unless the caller's session matches it, so the returned
+        ``recognition_job_id`` is only readable by the user who uploaded the
+        document.
+        """
         run_id = uuid.uuid4().hex[:16]
         folder = self.parses_root() / run_id
         folder.mkdir(parents=True, exist_ok=False)
@@ -700,7 +733,8 @@ class Handler(BaseHTTPRequestHandler):
                "document_id": document_id, "parser": "docling", "ocr": "auto", "charts": False,
                "filename": Path(filename.replace("\\", "/")).name,
                "sha256": sha256(data).hexdigest(), "bytes": len(data),
-               "created_at": round(time(), 3), "updated_at": round(time(), 3)}
+               "created_at": round(time(), 3), "updated_at": round(time(), 3),
+               "owner_user_id": owner_user_id}
         self.write_job(folder, job)
         threading.Thread(target=self.run_parse,
                          args=(folder, ROOT / "profiles" / "solar.json", "docling", "auto", False),
@@ -1525,9 +1559,6 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if track == "solar":
                     summary = self.solar_store().ingest(name, data)
-                    recognition = summary.get("recognition", {})
-                    if recognition.get("status") != "done" or recognition.get("revision") != RECOGNITION_REVISION:
-                        summary["recognition_job_id"] = self.start_catalog_parse(summary["document_id"], name, data)
                 elif track == "rag":
                     summary = self.rag_store().ingest(name, data, track=track)
                 else:
@@ -1549,6 +1580,20 @@ class Handler(BaseHTTPRequestHandler):
                                     document_id=summary.get("document_id", ""))
                 self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
                 return
+            if track == "solar":
+                # Start recognition only after the document is claimed: a
+                # conflicting upload must not attach its own job (or sources) to
+                # another user's card. The job carries the uploader as owner so
+                # /api/parse/<id> stays private.
+                recognition = summary.get("recognition", {})
+                if recognition.get("status") != "done" or recognition.get("revision") != RECOGNITION_REVISION:
+                    try:
+                        summary["recognition_job_id"] = self.start_catalog_parse(
+                            summary["document_id"], name, data,
+                            owner_user_id=session["user"]["id"])
+                    except OSError:
+                        diagnostics.error(log, "document.recognition.failed",
+                                          area=track)
             counts = summary.get("counts") or {}
             diagnostics.event(log, "document.ingest.done", area=track,
                               duration_ms=int((time() - started) * 1000),

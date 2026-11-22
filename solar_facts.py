@@ -23,7 +23,7 @@ from solar_schema import KEYS, TABLES, UNITS, VOCAB
 
 
 MAX_BYTES = 40 * 1024 * 1024
-REVISION = "solar-1"
+REVISION = "solar-2"
 NUMBER = re.compile(r"[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+-]?\d+)?")
 
 
@@ -147,6 +147,12 @@ def verify_entities(tables, evidence):
                 raise ValueError(f"{table}.{field}: единица не подтверждена источником.")
 
 
+# Raised text for a PDF without a native text layer. ``solar_api`` uses the
+# constant, not a copy of the sentence, so bumping REVISION cannot silently
+# break the catalogue fallback for image-only uploads.
+NO_TEXT_LAYER = "Нет текстового слоя. OCR в solar-2 пока не реализован."
+
+
 def prepare_pdf(name, data):
     if len(data) > MAX_BYTES:
         raise ValueError("Нужен PDF размером до 40 МиБ.")
@@ -160,7 +166,7 @@ def prepare_pdf(name, data):
     except PdfminerException:
         raise ValueError("PDF повреждён, зашифрован или не может быть разобран.") from None
     if not document["sources"]:
-        raise ValueError("Нет текстового слоя. OCR в solar-1 пока не реализован.")
+        raise ValueError(NO_TEXT_LAYER)
     return {
         **document, "publication_id": publication_id, "sha256": sha256(data).hexdigest(),
         "track": "solar", "schema_version": REVISION,

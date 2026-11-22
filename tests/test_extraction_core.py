@@ -47,7 +47,9 @@ class ExtractionCoreTest(unittest.TestCase):
         self.assertEqual(result["records"], [])
         self.assertEqual(result["coverage"]["status"], "partial")
         self.assertEqual(result["candidates"][0]["raw_value"], "20")
-        self.assertEqual(result["candidates"][0]["raw_unit"], "")
+        # The unit is printed in the source and must not be dropped on the way
+        # to the candidate; it is still not verified against the metric.
+        self.assertEqual(result["candidates"][0]["raw_unit"], "°C")
         self.assertEqual(result["candidates"][0]["context_status"], "unresolved")
 
     def test_no_matches_does_not_mean_absent(self):
@@ -171,6 +173,69 @@ class ExtractionCoreTest(unittest.TestCase):
                     self.assertTrue((out / "candidates.csv").exists())
                     self.assertFalse((out / "equipment.csv").exists())
 
+    def test_boolean_requires_explicit_evidence_in_its_own_quote(self):
+        profile, document, candidate = custom_fixture()
+        profile["tables"]["equipment"]["fields"]["enabled"] = {
+            "type": "boolean", "description": "Явно указанное состояние включения.",
+        }
+        document["sources"][0]["quote"] += "; the sample is enabled."
+        row = candidate["equipment"][0]
+        row["enabled"] = "true"
+        row["field_sources"]["enabled"] = {"source_id": 1, "quote": "the sample is enabled"}
+        result = run(document, profile, mode="model", model_client=lambda _: candidate)
+        self.assertEqual(result["tables"]["equipment"][0]["enabled"], "true")
+        self.assertEqual(result["records"][0]["fields"]["enabled"]["status"], "inferred_requires_review")
+        self.assertEqual(result["issues"], [])
+
+    def test_boolean_without_marker_is_unresolved_not_promoted(self):
+        profile, document, candidate = custom_fixture()
+        profile["tables"]["equipment"]["fields"]["enabled"] = {
+            "type": "boolean", "description": "Явно указанное состояние включения.",
+        }
+        row = candidate["equipment"][0]
+        row["enabled"] = "true"
+        # The quote is real and mentions the entity, but prints no boolean marker.
+        row["field_sources"]["enabled"] = {"source_id": 1, "quote": "material aluminum"}
+        result = run(document, profile, mode="model", model_client=lambda _: candidate)
+        self.assertEqual(result["tables"]["equipment"][0]["enabled"], "")
+        observation = result["records"][0]["fields"]["enabled"]
+        self.assertEqual(observation["raw"], "true")
+        self.assertEqual(observation["status"], "requires_review")
+        self.assertEqual([issue["rule"] for issue in result["issues"]], ["boolean_evidence"])
+
+    def test_boolean_marker_is_matched_as_a_word_not_a_substring(self):
+        profile, document, candidate = custom_fixture()
+        profile["tables"]["equipment"]["fields"]["enabled"] = {
+            "type": "boolean", "description": "Явно указанное состояние включения.",
+        }
+        document["sources"][0]["quote"] = "The noble gas atmosphere is used."
+        row = candidate["equipment"][0]
+        row["material"] = ""
+        row["temperature"] = ""
+        row["field_sources"] = {"enabled": {"source_id": 1, "quote": "noble gas atmosphere"}}
+        row["enabled"] = "false"
+        result = run(document, profile, mode="model", model_client=lambda _: candidate)
+        self.assertEqual(result["tables"]["equipment"][0]["enabled"], "")
+        self.assertEqual(result["records"][0]["fields"]["enabled"]["status"], "requires_review")
+
+    def test_boolean_accepts_only_the_two_literals(self):
+        for raw in ("yes", "True", "1", ""):
+            with self.subTest(raw=raw):
+                profile, document, candidate = custom_fixture()
+                profile["tables"]["equipment"]["fields"]["enabled"] = {
+                    "type": "boolean", "description": "Явно указанное состояние включения.",
+                }
+                candidate["equipment"][0]["enabled"] = raw
+                candidate["equipment"][0]["field_sources"]["enabled"] = {
+                    "source_id": 1, "quote": "Equipment material aluminum",
+                }
+                if raw == "":
+                    result = run(document, profile, mode="model", model_client=lambda _: candidate)
+                    self.assertEqual(result["records"][0]["fields"]["enabled"]["status"], "unknown")
+                else:
+                    with self.assertRaises(ValueError):
+                        run(document, profile, mode="model", model_client=lambda _: candidate)
+
     def test_profile_compiles_response_shape(self):
         profile = load_profile("custom-example")
         schema = response_schema(profile)
@@ -217,9 +282,9 @@ class ExtractionCoreTest(unittest.TestCase):
             pdf.write_bytes(synthetic_pdf())
             env = {k: v for k, v in os.environ.items() if not k.startswith("OPENROUTER_")}
             execution = subprocess.run([
-                sys.executable, str(ROOT / "extract_document.py"), str(pdf), "--profile", "solar",
+                sys.executable, "-X", "utf8", str(ROOT / "extract_document.py"), str(pdf), "--profile", "solar",
                 "--mode", "scripts", "-o", str(out),
-            ], capture_output=True, text=True, timeout=30, env=env)
+            ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, env=env)
             self.assertEqual(execution.returncode, 0, execution.stderr)
             self.assertTrue((out / "candidates.csv").exists())
             self.assertFalse((out / "results.csv").exists())
@@ -313,6 +378,108 @@ class ScriptCandidateEnrichmentTest(unittest.TestCase):
                 self.assertNotEqual(header_id, candidate["source_id"])
         self.assertEqual({candidate["source_id"] for candidate in candidates
                           if candidate["field"] == "PCE"}, {1, 3})
+
+
+class SolarProfileD002RegressionTest(unittest.TestCase):
+    """D002 failure modes for the shared profile parser.
+
+    The document prints a delta sentence ("improves Voc of 0.127 V"), a
+    threshold ("efficiency exceeding 9 %") and table headers whose subscripts
+    were split ("V / oc", "J / sc"). None of these may become an absolute
+    metric, and the literal label, unit and evidence must survive export.
+    """
+
+    def document(self, *sources):
+        return {"publication_id": "D002", "sha256": "synthetic", "pages": 5,
+                "warnings": [], "sources": list(sources)}
+
+    def text(self, identifier, quote, page=5):
+        return {"id": identifier, "page": page, "kind": "text", "quote": quote}
+
+    def test_delta_verbs_are_not_absolute_metrics(self):
+        profile = load_profile("solar")
+        # The printed sentence is split over two lines: the change verb is on
+        # the first line and PCE is on the second one.
+        candidates = script_candidates(self.document(
+            self.text(1, "improves Voc of 0.127 V, Jsc of 3.1 mAcm−2, fill factor of"),
+            self.text(2, "25.4%, and PCE of 7.5%. Note those equivalent PCE"),
+        ), profile)
+        self.assertFalse([candidate for candidate in candidates
+                          if candidate["field"] in {"Voc", "Jsc", "FF", "PCE"}])
+        for quote in ("increased PCE of 15.3 %", "reduction in PCE of 1.5 %",
+                      "PCE boosted by 2 %", "enhanced PCE of 18 %"):
+            with self.subTest(quote=quote):
+                found = script_candidates(self.document(self.text(1, quote)), profile)
+                self.assertFalse([candidate for candidate in found if candidate["field"] == "PCE"])
+
+    def test_comparative_absolute_value_is_kept(self):
+        # Gold D002/R008-1 reads this as the absolute PCE of the double layer,
+        # so a comparative adjective must not be treated as a delta verb.
+        profile = load_profile("solar")
+        quote = "better power conversion efficiency of 15.3% compared to single-layer NiO."
+        found = script_candidates(self.document(self.text(1, quote, page=1)), profile)
+        pce = [candidate for candidate in found if candidate["field"] == "PCE"]
+        self.assertEqual([(candidate["raw_value"], candidate["raw_unit"]) for candidate in pce],
+                         [("15.3", "%")])
+
+    def test_thresholds_are_not_absolute_metrics(self):
+        profile = load_profile("solar")
+        for quote in ("PCE up to 20 %", "PCE above 20 %", "PCE exceeding 20 %",
+                      "PCE of more than 20 %", "PCE over 20 %", "PCE at least 20 %"):
+            with self.subTest(quote=quote):
+                found = script_candidates(self.document(self.text(1, quote)), profile)
+                self.assertFalse([candidate for candidate in found if candidate["field"] == "PCE"])
+        header = {"id": 1, "page": 5, "kind": "table", "table": 1, "row": 1,
+                  "quote": "Metric | PCE", "cells": [{"quote": "Metric"}, {"quote": "PCE"}]}
+        for cell in ("above 20", "exceeding 20", "more than 20"):
+            with self.subTest(cell=cell):
+                data = {"id": 2, "page": 5, "kind": "table", "table": 1, "row": 2,
+                        "quote": f"champion | {cell}",
+                        "cells": [{"quote": "champion"}, {"quote": cell}]}
+                found = script_candidates(self.document(header, data), profile)
+                self.assertFalse([candidate for candidate in found if candidate["field"] == "PCE"])
+
+    def split_header_document(self):
+        header = {"id": 1, "page": 5, "kind": "table", "table": 1, "row": 1,
+                  "quote": "HTL | V / oc V | J / sc mA/cm2 | FF / % | PCE / %",
+                  "cells": [{"quote": "HTL"}, {"quote": "V / oc V"},
+                            {"quote": "J / sc mA/cm2"}, {"quote": "FF / %"},
+                            {"quote": "PCE / %"}]}
+        data = {"id": 2, "page": 5, "kind": "table", "table": 1, "row": 2,
+                "quote": "NiO | 0.855 | 14.8 | 61.64 | 7.8",
+                "cells": [{"quote": "NiO"}, {"quote": "0.855"}, {"quote": "14.8"},
+                          {"quote": "61.64"}, {"quote": "7.8"}]}
+        return self.document(header, data)
+
+    def test_split_subscript_headers_are_rejoined(self):
+        candidates = script_candidates(self.split_header_document(), load_profile("solar"))
+        by_field = {candidate["field"]: candidate for candidate in candidates}
+        self.assertEqual({field: by_field[field]["raw_value"] for field in ("Voc", "Jsc", "FF", "PCE")},
+                         {"Voc": "0.855", "Jsc": "14.8", "FF": "61.64", "PCE": "7.8"})
+        self.assertEqual({field: by_field[field]["raw_unit"] for field in ("Voc", "Jsc", "FF", "PCE")},
+                         {"Voc": "V", "Jsc": "mA/cm2", "FF": "%", "PCE": "%"})
+        # The printed header stays literal in the evidence, the row label is
+        # not a device id and is not invented.
+        self.assertEqual(by_field["Voc"]["context"]["header_quote"], "V / oc V")
+        self.assertEqual(by_field["Voc"]["context"]["row_label"], "NiO")
+        self.assertNotIn("device_id", by_field["Voc"])
+
+    def test_candidate_export_keeps_label_unit_and_evidence(self):
+        result = run(self.split_header_document(), load_profile("solar"), mode="scripts")
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "result"
+            export_result(result, out)
+            with (out / "candidates.csv").open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+        row = [candidate for candidate in rows if candidate["field"] == "Voc"][0]
+        self.assertEqual(row["row_label"], "NiO")
+        self.assertEqual(row["raw_unit"], "V")
+        self.assertEqual(row["page"], "5")
+        self.assertIn("0.855", row["quote"])
+        context = json.loads(row["context"])
+        self.assertEqual(context["row_label"], "NiO")
+        self.assertEqual(context["header_quote"], "V / oc V")
+        self.assertEqual(context["header_source_id"], 1)
 
 
 class SolarReviewRegressionTest(unittest.TestCase):

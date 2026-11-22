@@ -28,9 +28,8 @@
   <div class="auth-top">
     <div class="auth-brand">
       <span class="mark" aria-hidden="true">✳</span>
-      <span>ВИНИТИ РАН <em>CyberGarden</em></span>
+      <span>ВИНИТИ РАН <em>ЮФУ</em></span>
     </div>
-    <p class="auth-top-note">Хакатон · ноябрь 2026</p>
   </div>
 
   <div class="auth-shell">
@@ -38,12 +37,7 @@
       <p class="auth-eyebrow">Каталог проверяемых результатов</p>
       <h1 id="authTitle">Научный результат, у которого <span>видно источник</span>.</h1>
       <p class="auth-lede">PDF превращается в связанные CSV: таблицы, значения, цитаты и находки о несогласованности. Один вход, и каталог собран.</p>
-      <ol class="auth-facts">
-        <li><span class="num">01</span><div><strong>111 публикаций</strong><p>solar и RAG в одном каталоге</p></div></li>
-        <li><span class="num">02</span><div><strong>Каждое значение с цитатой</strong><p>Проверка идёт по тексту страницы PDF</p></div></li>
-        <li><span class="num">03</span><div><strong>Семь таблиц шаблона</strong><p>Выгрузка байт в байт как эталон</p></div></li>
-      </ol>
-      <p class="auth-story-foot">ВИНИТИ РАН · ЮФУ · CyberGarden</p>
+      <p class="auth-story-foot">Две области: тонкоплёночные солнечные элементы и системы RAG</p>
     </div>
 
     <div class="auth-side">
@@ -51,7 +45,7 @@
         <div class="auth-card-head">
           <p class="auth-eyebrow">Аккаунт исследователя</p>
           <h2>Начните работу</h2>
-          <p class="muted">Регистрация занимает минуту. Пароль проверяет сервер ВИНИТИ.</p>
+          <p class="muted">Регистрация занимает минуту.</p>
         </div>
 
         <div class="auth-tabs" role="tablist" aria-label="Регистрация или вход" data-tabs>
@@ -63,37 +57,24 @@
 
         <div id="panelReg" role="tabpanel" aria-labelledby="tabReg">
           <form id="registerForm" novalidate>
-            <div class="auth-row">
-              <div class="auth-field">
-                <label for="regName">Имя и фамилия</label>
-                <input type="text" id="regName" name="name" autocomplete="name" placeholder="Илья Сафонов" aria-describedby="regName-error">
-                <p class="auth-error" id="regName-error" hidden></p>
-              </div>
-              <div class="auth-field">
-                <label for="regOrg">Организация</label>
-                <input type="text" id="regOrg" name="organization" autocomplete="organization" placeholder="ЮФУ, ИКТ" aria-describedby="regOrg-error">
-                <p class="auth-error" id="regOrg-error" hidden></p>
-              </div>
+            <div class="auth-field">
+              <label for="regLogin">Логин</label>
+              <input type="text" id="regLogin" name="login" autocomplete="username" placeholder="safonov" aria-describedby="regLogin-error">
+              <p class="auth-error" id="regLogin-error" hidden></p>
             </div>
             <div class="auth-field">
-              <label for="regEmail">Рабочий email</label>
-              <input type="email" id="regEmail" name="email" autocomplete="email" placeholder="name@viniti.ru" aria-describedby="regEmail-error">
+              <label for="regEmail">Email <span class="auth-optional">необязательно</span></label>
+              <input type="email" id="regEmail" name="email" autocomplete="email" placeholder="name@example.com" aria-describedby="regEmail-error">
               <p class="auth-error" id="regEmail-error" hidden></p>
             </div>
             <div class="auth-field auth-password">
               <label for="regPassword">Пароль</label>
               <div class="auth-input-wrap">
-                <input type="password" id="regPassword" name="password" autocomplete="new-password" placeholder="Не короче 8 символов" aria-describedby="regPassword-hint regPassword-error">
+                <input type="password" id="regPassword" name="password" autocomplete="new-password" placeholder="От 8 до 256 символов" aria-describedby="regPassword-error">
                 <button type="button" class="auth-reveal" id="regPassBtn" data-toggle-pass="regPassword" aria-pressed="false" aria-label="Показать пароль">Показать</button>
               </div>
-              <p class="auth-hint" id="regPassword-hint">Минимум 8 символов. На сервере хранится только хэш пароля.</p>
               <p class="auth-error" id="regPassword-error" hidden></p>
             </div>
-            <label class="auth-consent" for="regConsent">
-              <input type="checkbox" id="regConsent" aria-describedby="regConsent-error">
-              <span>Согласен с условиями использования и политикой данных прототипа.</span>
-            </label>
-            <p class="auth-consent-error" id="regConsent-error" hidden></p>
             <button type="submit" class="auth-btn primary block">Создать аккаунт</button>
           </form>
         </div>
@@ -101,9 +82,9 @@
         <div id="panelLogin" role="tabpanel" aria-labelledby="tabLogin" hidden>
           <form id="loginForm" novalidate>
             <div class="auth-field">
-              <label for="loginEmail">Email</label>
-              <input type="email" id="loginEmail" name="email" autocomplete="email" placeholder="name@viniti.ru" aria-describedby="loginEmail-error">
-              <p class="auth-error" id="loginEmail-error" hidden></p>
+              <label for="loginUser">Логин</label>
+              <input type="text" id="loginUser" name="login" autocomplete="username" placeholder="Логин или email" aria-describedby="loginUser-error">
+              <p class="auth-error" id="loginUser-error" hidden></p>
             </div>
             <div class="auth-field auth-password">
               <label for="loginPassword">Пароль</label>
@@ -118,8 +99,7 @@
           </form>
         </div>
 
-        <p class="auth-note is-warn" id="authStorageNote" hidden><strong>Хранение недоступно.</strong> Браузер запрещает localStorage: сессия на сервере работает, но имя и организация не сохранятся до перезагрузки.</p>
-        <p class="auth-note"><strong>Прототип.</strong> Пароль проверяется на сервере, сессия живёт в HttpOnly-cookie, профиль (имя, организация) остаётся в этом браузере.</p>
+        <p class="auth-note is-warn" id="authStorageNote" hidden><strong>Хранение недоступно.</strong> Браузер запрещает localStorage: вход работает, но описание профиля не сохранится до перезагрузки.</p>
       </div>
     </div>
   </div>
@@ -127,7 +107,7 @@
 
 <header class="top">
   <div class="wrap masthead">
-    <a class="brand" href="#/"><span class="mark" aria-hidden="true">✳</span>ВИНИТИ РАН<span>CyberGarden</span></a>
+    <a class="brand" href="#/"><span class="mark" aria-hidden="true">✳</span>ВИНИТИ РАН<span>ЮФУ</span></a>
     <div class="account" id="account" hidden>
       <button type="button" class="account-button" id="accountButton" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" aria-label="Меню профиля">
         <span class="account-avatar" id="accountAvatar" aria-hidden="true">Г</span>
@@ -139,8 +119,7 @@
           <span class="account-avatar" id="accountMenuAvatar" aria-hidden="true">Г</span>
           <div>
             <strong id="accountMenuName">Гость</strong>
-            <span id="accountMenuEmail">Аккаунт без email</span>
-            <span class="account-mode" id="accountMode">гостевой доступ</span>
+            <span id="accountMenuEmail">Email не указан</span>
           </div>
         </div>
         <a role="menuitem" tabindex="-1" href="#/catalog" id="accountCatalog">Каталог</a>
@@ -154,27 +133,13 @@
 </header>
 <div class="wrap toolbar">
   <div class="track-switch" role="group" aria-label="Разделы">
-    <a class="track" id="passportLink" href="#/passport">Паспорт</a>
+    <a class="track" id="passportLink" href="#/passport" title="Открыть паспорт публикации: таблицы, значения и цитаты">Паспорт</a>
   </div>
-  <fieldset id="toolbarLLM" class="llm-switch" aria-label="Использование LLM" title="При включении фрагменты документа отправляются в настроенную API-модель">
-    <legend>LLM:</legend>
-    <label>
-      <input type="radio" name="toolbarLLM" value="off" checked>
-      <span>Выкл</span>
-    </label>
-    <span class="llm-switch-divider" aria-hidden="true">|</span>
-    <label>
-      <input type="radio" name="toolbarLLM" value="api">
-      <span>Вкл</span>
-    </label>
-  </fieldset>
   <form id="upload" class="upload">
-    <label class="file"><span id="fileName">Загрузить PDF</span>
-      <input id="file" type="file" accept=".pdf,application/pdf">
-    </label>
-    <button type="submit">Разобрать PDF</button>
+    <input id="file" type="file" accept=".pdf,application/pdf" hidden>
+    <button type="button" id="startWizard" class="primary">Разобрать PDF</button>
     <button type="button" id="demo" class="secondary">Демо</button>
-    <label class="file">Импорт паспорта JSON
+    <label class="file" title="Открыть готовый паспорт публикации из файла JSON">Открыть паспорт (JSON)
       <input id="passport" type="file" accept=".json,application/json">
     </label>
     <span id="uploadState" class="upload-state" role="status"></span>
@@ -188,27 +153,32 @@
     <p id="wizardHint">RAG: до 20 МиБ, Solar: до 32 МиБ.</p>
     <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Выбрать PDF">
       <span class="drop-icon" aria-hidden="true">↑</span>
-      <strong>Перетащите PDF сюда</strong>
-      <span>или нажмите, чтобы выбрать файл</span>
+      <strong>Выберите PDF</strong>
+      <span class="drop-hint">или перетащите файл в это окно</span>
     </div>
     <div id="profileStep" hidden>
       <p id="selectedFile"></p>
-      <h2>Выберите профиль обработки</h2>
+      <h2>Выберите область</h2>
       <div id="profileChoices" class="profile-choices"></div>
-      <div class="llm-inherited" aria-live="polite">
-        <strong id="wizardLLMState">LLM выключен</strong>
-        <span id="wizardLLMNote">Разбор выполняется без передачи фрагментов документа модели.</span>
-      </div>
+      <label class="llm-option">
+        <input type="checkbox" id="wizardLLM">
+        <span class="llm-option-text">
+          <strong id="wizardLLMState">Без модели</strong>
+          <span id="wizardLLMNote">Текст, таблицы и цитаты извлекаются без модели. Включите, если нужна дополнительная интерпретация.</span>
+        </span>
+      </label>
       <div class="wizard-actions">
-        <a href="/manual-profile" id="createProfile" class="button secondary">Создать профиль</a>
+        <a href="/manual-profile" id="createProfile" class="button secondary" title="Откроется отдельная страница: здесь задаются поля, которые нужно искать в статье">Настроить поля извлечения</a>
         <button id="wizardBack" type="button" class="secondary">Другой PDF</button>
         <button id="wizardCancel" type="button" class="secondary">Закрыть</button>
         <button id="wizardSubmit" type="button" class="primary">Разобрать PDF</button>
       </div>
       <div id="processingProgress" class="processing-progress" hidden role="status" aria-live="polite">
-        <span id="progressLabel">Подготовка PDF…</span>
+        <div class="processing-progress-head">
+          <span id="progressLabel">Подготовка PDF…</span>
+          <span id="progressCount">0 из 4 этапов</span>
+        </div>
         <progress id="progressBar" max="4" value="0"></progress>
-        <span id="progressCount">0 из 4 этапов</span>
       </div>
     </div>
     <p id="wizardError" class="wizard-error" role="alert" hidden></p>
@@ -219,8 +189,8 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <noscript><p class="notice bad wrap">Для работы интерфейса нужен JavaScript.</p></noscript>
 <p id="bootError" class="notice bad wrap" hidden>
-  Не удалось загрузить интерфейс. Обновите страницу; если ошибка повторяется —
-  запустите сервер: <code>.venv/bin/python tools/mock_api.py</code>.
+  Не удалось загрузить интерфейс. Обновите страницу; если ошибка повторяется,
+  проверьте, что сервер запущен.
 </p>
 
 <dialog id="evidence" aria-labelledby="evidenceTitle">
@@ -238,6 +208,13 @@
   setTimeout(function () {
     var view = document.getElementById("view");
     if (document.documentElement.classList.contains("auth-locked")) return;
+    // Маршруты каталога, документа, профиля и разбора сами сообщают об ошибке.
+    // Таймер нужен только для случая, когда приложение вообще не поднялось:
+    // открытый мастер и успешный boot снимают его без вывода сообщения.
+    if (window.__vinitiBooted) return;
+    if (document.body.dataset.view) return;
+    if (document.body.classList.contains("wizard-active")) return;
+    if (!document.getElementById("wizard").hidden) return;
     if (view && !view.children.length) document.getElementById("bootError").hidden = false;
   }, 4000);
 </script>

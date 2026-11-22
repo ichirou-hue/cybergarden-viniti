@@ -5,7 +5,7 @@ import { renderDocument } from "./document.js";
 import { openEvidence, dismissEvidence } from "./evidence.js";
 import { uploadPDF, uploadPDFWithProgress, openDemo, getLLM, startParse } from "./api.js";
 import { renderPassport, setPassport, setImportNotice } from "./passport.js";
-import { stashProfilePDF } from "./pending.js";
+import { stashProfilePDF, takeProfilePDF } from "./pending.js";
 import { mountAuthScreen, currentAccount, isSignedIn, recordActivity, signOutAccount, restoreSession } from "./auth.js";
 import { mountAccountMenu, renderProfile } from "./account.js";
 import { renderParseJob } from "./parse.js";
@@ -14,7 +14,6 @@ const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
 const form = document.getElementById("upload");
 const fileInput = document.getElementById("file");
-const fileName = document.getElementById("fileName");
 const uploadState = document.getElementById("uploadState");
 const demoButton = document.getElementById("demo");
 const passportInput = document.getElementById("passport");
@@ -25,6 +24,7 @@ const wizard = document.getElementById("wizard");
 const dropZone = document.getElementById("dropZone");
 const profileStep = document.getElementById("profileStep");
 let selectedPDF = null;
+let wizardTrack = null;
 
 const authScreen = mountAuthScreen(document.getElementById("authScreen"), {
   onEnter: enterApp,
@@ -37,6 +37,7 @@ const accountMenu = mountAccountMenu({
 const app = {descriptors: [], track: "rag", llm: "off", controller: null, started: false};
 let booted = false;
 let lastPath = "";
+let pendingChecked = false;
 
 function parse() {
   const raw = location.hash.replace(/^#/, "") || "/";
@@ -146,6 +147,10 @@ async function route() {
     document.body.dataset.view = "";
     document.title = "ВИНИТИ · Каталог результатов";
     renderWizard();
+    if (!pendingChecked) {
+      pendingChecked = true;
+      void restorePendingPDF();
+    }
     booted = true;
     document.getElementById("bootError").hidden = true;
     return;
@@ -314,6 +319,14 @@ async function openPassport() {
   else location.hash = "#/passport";
 }
 
+// «Паспорт» работает как переключатель: повторное нажатие возвращает
+// к загрузке PDF, а не оставляет пользователя на том же экране.
+passportLink.addEventListener("click", event => {
+  if (!location.hash.startsWith("#/passport")) return;
+  event.preventDefault();
+  location.hash = "#/";
+});
+
 passportInput.addEventListener("change", async () => {
   const file = passportInput.files[0];
   if (!file) return;
@@ -339,46 +352,59 @@ passportInput.addEventListener("change", async () => {
 
 fileInput.addEventListener("change", () => {
   const file = fileInput.files[0];
-  fileName.textContent = file ? file.name : "Загрузить PDF";
-  fileName.title = file ? file.name : "";
   uploadState.classList.remove("error");
   uploadState.textContent = "";
   if (file) selectPDF(file);
 });
 
-function setLLMMode(mode) {
-  app.llm = mode === "api" ? "api" : "off";
-  document.querySelectorAll('input[name="toolbarLLM"]').forEach(input => {
-    input.checked = input.value === app.llm;
-  });
+// Модель - необязательная надстройка над детерминированным разбором, поэтому
+// переключатель живёт внутри мастера, рядом с выбором области, а не в шапке.
+const llmStatus = {checked: false, available: false, configured: false};
+
+function syncLLMNote() {
   const state = document.getElementById("wizardLLMState");
   const note = document.getElementById("wizardLLMNote");
-  if (state) state.textContent = app.llm === "api" ? "LLM включен" : "LLM выключен";
-  if (note) note.textContent = app.llm === "api"
-    ? "Фрагменты документа будут отправлены в настроенную API-модель. Режим задан единым переключателем вверху страницы."
-    : "Разбор выполняется без передачи фрагментов документа модели. Режим задан единым переключателем вверху страницы.";
+  const input = document.getElementById("wizardLLM");
+  if (!state || !note || !input) return;
+  const on = app.llm === "api";
+  state.textContent = on ? "С моделью" : "Без модели";
+  input.checked = on;
+  if (llmStatus.checked && !llmStatus.available) {
+    note.textContent = llmStatus.configured
+      ? "Модель отключена на сервере. Разбор пройдёт без неё."
+      : "Модель не настроена на сервере. Разбор пройдёт без неё.";
+    return;
+  }
+  note.textContent = on
+    ? "Сервер дополнительно разберёт фрагменты моделью и покажет проверенную интерпретацию. Доступно для области Solar."
+    : "Текст, таблицы и цитаты извлекаются без модели. Так результат воспроизводим.";
 }
 
-document.getElementById("toolbarLLM").addEventListener("change", event => {
-  if (event.target.matches('input[name="toolbarLLM"]')) setLLMMode(event.target.value);
+function setLLMMode(mode) {
+  app.llm = mode === "api" ? "api" : "off";
+  syncLLMNote();
+}
+
+document.getElementById("wizardLLM")?.addEventListener("change", event => {
+  setLLMMode(event.target.checked ? "api" : "off");
+  if (app.llm === "api" && wizardTrack === "rag") wizardTrack = "solar";
+  renderWizard();
 });
 
 async function loadLLMStatus() {
-  const input = document.querySelector('input[name="toolbarLLM"][value="api"]');
+  const input = document.getElementById("wizardLLM");
   if (!input) return;
   try {
     const status = await getLLM();
-    input.disabled = !status?.available;
-    if (!status?.available && app.llm === "api") setLLMMode("off");
-    const note = document.getElementById("wizardLLMNote");
-    if (note && !status?.available) {
-      note.textContent = status?.configured
-        ? "LLM отключён администратором сервера."
-        : "LLM не настроен: нужны OPENAI_API_KEY и OPENAI_MODEL.";
-    }
+    llmStatus.checked = true;
+    llmStatus.available = Boolean(status?.available);
+    llmStatus.configured = Boolean(status?.configured);
+    input.disabled = !llmStatus.available;
+    if (!llmStatus.available && app.llm === "api") app.llm = "off";
+    syncLLMNote();
   } catch {
-    // The server remains the final authority; do not disable the control on
-    // a transient status-probe failure.
+    // Сервер остаётся последней инстанцией: разовый сбой проверки статуса
+    // не должен отключать управление.
   }
 }
 
@@ -390,23 +416,37 @@ function openWizard() {
 
 function renderWizard() {
   const ready = !!selectedPDF;
+  const llmOn = app.llm === "api";
   dropZone.hidden = ready;
   profileStep.hidden = !ready;
-  document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Профиль" : "Шаг 1 из 2 · Документ";
-  document.getElementById("wizardTitle").textContent = ready ? "Как обработать статью?" : "Начните с PDF";
+  wizard.dataset.step = ready ? "2" : "1";
+  document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Область" : "Шаг 1 из 2 · Документ";
+  document.getElementById("wizardTitle").textContent = ready ? "Как разобрать статью?" : "Начните с PDF";
   document.getElementById("wizardHint").textContent = ready
-    ? "Готовый профиль или свой вариант для этой статьи. Настройка LLM наследуется из переключателя вверху страницы."
+    ? "Область задаёт поля и шаблон CSV. Модель можно включить ниже."
     : "RAG: до 20 МиБ, Solar: до 32 МиБ.";
   document.getElementById("selectedFile").textContent = ready ? selectedPDF.name : "";
-  setLLMMode(app.llm);
+  syncLLMNote();
+  let preferred = wizardTrack === "rag" || wizardTrack === "solar" ? wizardTrack : app.track;
+  if (llmOn) preferred = "solar";
   fill(document.getElementById("profileChoices"), ...["solar", "rag"].map(track => {
     const available = app.descriptors.some(item => item.track === track);
+    const blockedByLLM = llmOn && track !== "solar";
     return el("label", {class: "profile-choice"},
       el("input", {type: "radio", name: "wizardProfile", value: track,
-        disabled: !available, checked: available && track === app.track}),
-      el("span", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`}));
+        disabled: !available || blockedByLLM,
+        checked: available && !blockedByLLM && track === preferred}),
+      el("span", {},
+        el("strong", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`}),
+        blockedByLLM ? el("small", {text: "Только без модели"}) : null));
   }));
+  const checked = document.querySelector('input[name="wizardProfile"]:checked');
+  if (checked) wizardTrack = checked.value;
 }
+
+document.getElementById("profileChoices").addEventListener("change", event => {
+  if (event.target.matches('input[name="wizardProfile"]')) wizardTrack = event.target.value;
+});
 
 function selectPDF(file) {
   const error = document.getElementById("wizardError");
@@ -426,6 +466,21 @@ function selectPDF(file) {
   renderWizard();
 }
 
+// Возврат со страницы ручного профиля не должен терять выбранный PDF:
+// мастер сохраняет файл перед переходом и забирает его обратно при загрузке.
+async function restorePendingPDF() {
+  if (selectedPDF) return;
+  // В средах без IndexedDB (jsdom, старый браузер) возврат просто не нужен.
+  if (!("indexedDB" in globalThis)) return;
+  try {
+    const file = await takeProfilePDF();
+    if (file) selectPDF(file);
+  } catch (error) {
+    // IndexedDB может быть недоступен: тогда мастер просто ждёт новый выбор.
+    console.warn("Не удалось вернуть PDF из ручного профиля:", error.message);
+  }
+}
+
 dropZone.addEventListener("click", () => fileInput.click());
 dropZone.addEventListener("keydown", event => {
   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fileInput.click(); }
@@ -438,9 +493,18 @@ for (const name of ["dragleave", "drop"]) dropZone.addEventListener(name, event 
 });
 dropZone.addEventListener("drop", event => selectPDF(event.dataTransfer.files[0]));
 document.getElementById("wizardBack").addEventListener("click", () => {
-  selectedPDF = null; fileInput.value = ""; renderWizard();
+  selectedPDF = null;
+  fileInput.value = "";
+  document.getElementById("processingProgress").hidden = true;
+  document.getElementById("wizardError").hidden = true;
+  renderWizard();
 });
 document.getElementById("wizardCancel").addEventListener("click", () => {
+  selectedPDF = null;
+  fileInput.value = "";
+  document.getElementById("processingProgress").hidden = true;
+  document.getElementById("wizardError").hidden = true;
+  renderWizard();
   location.hash = buildHash("/catalog", {track: app.track});
 });
 document.getElementById("createProfile").addEventListener("click", async event => {
@@ -449,7 +513,6 @@ document.getElementById("createProfile").addEventListener("click", async event =
   event.preventDefault();
   const link = event.currentTarget;
   link.setAttribute("aria-busy", "true");
-  link.textContent = "Готовим профиль…";
   try {
     await stashProfilePDF(selectedPDF);
   } catch (error) {
@@ -460,58 +523,68 @@ document.getElementById("createProfile").addEventListener("click", async event =
   location.assign(link.href);
 });
 document.getElementById("wizardSubmit").addEventListener("click", async () => {
-  const track = document.querySelector('input[name="wizardProfile"]:checked')?.value;
+  const track = wizardTrack;
   const llm = app.llm;
   if (!selectedPDF || !track) return;
+  const error = document.getElementById("wizardError");
+  if (llm === "api" && track !== "solar") {
+    error.textContent = "С моделью разбирается только область Solar. Выберите Solar или выключите модель.";
+    error.hidden = false;
+    return;
+  }
   if (track === "rag" && selectedPDF.size > 20 * 1024 * 1024) {
-    const error = document.getElementById("wizardError");
     error.textContent = "Для RAG нужен PDF размером до 20 МиБ. Выберите Solar или другой PDF.";
     error.hidden = false;
     return;
   }
   const button = document.getElementById("wizardSubmit");
   button.disabled = true;
-  button.textContent = llm === "api" ? "Разбор с LLM…" : "Разбор PDF…";
-  const error = document.getElementById("wizardError"); error.hidden = true;
+  button.textContent = llm === "api" ? "Разбор с моделью…" : "Разбор PDF…";
+  error.hidden = true;
   const progress = document.getElementById("processingProgress");
+  const bar = document.getElementById("progressBar");
+  const progressLabel = document.getElementById("progressLabel");
+  const progressCount = document.getElementById("progressCount");
   progress.hidden = true;
   let result;
   if (llm === "api") {
     // LLM-разбор идёт через /api/parse: ключ остаётся на сервере, а результат
     // открывается на экране задания.
-    if (track !== "solar") {
-      error.textContent = "LLM-разбор доступен только для области Solar.";
-      error.hidden = false;
-      button.disabled = false;
-      button.textContent = "Разобрать PDF";
-      return;
-    }
-    result = await busy("Разбор с LLM…", () => startParse(selectedPDF, {profile: "solar", llm}));
+    progress.hidden = false;
+    bar.removeAttribute("value");
+    progressLabel.textContent = "Запускаем разбор с моделью…";
+    progressCount.textContent = "Обработка идёт на сервере";
+    result = await busy("Разбор с моделью…", () => startParse(selectedPDF, {profile: "solar", llm}));
     if (result && !result.id) {
       error.textContent = "Сервер не вернул идентификатор задания разбора.";
       error.hidden = false;
       result = null;
     }
   } else {
-    const bar = document.getElementById("progressBar");
     progress.hidden = false;
+    bar.max = 4;
     bar.value = 0;
-    document.getElementById("progressLabel").textContent = "Передача PDF…";
-    document.getElementById("progressCount").textContent = "0 из 4 этапов";
+    progressLabel.textContent = "Передача PDF…";
+    progressCount.textContent = "0 из 4 этапов";
     result = await busy("Обработка PDF…", () => uploadPDFWithProgress(selectedPDF, track, event => {
       bar.value = event.completed;
-      document.getElementById("progressLabel").textContent = event.label;
-      document.getElementById("progressCount").textContent = `${event.completed} из ${event.total} этапов`;
+      progressLabel.textContent = event.label;
+      progressCount.textContent = `${event.completed} из ${event.total} этапов`;
     }));
   }
   button.disabled = false;
   button.textContent = "Разобрать PDF";
-  if (!result) { error.textContent = uploadState.textContent; error.hidden = false; return; }
+  if (!result) {
+    progress.hidden = true;
+    bar.max = 4;
+    bar.value = 0;
+    error.textContent = uploadState.textContent;
+    error.hidden = false;
+    return;
+  }
   progress.hidden = true;
   selectedPDF = null;
   fileInput.value = "";
-  fileName.textContent = "Загрузить PDF";
-  fileName.title = "";
   if (llm === "api") {
     location.hash = `#/parse/${encodeURIComponent(result.id)}`;
   } else {
@@ -534,18 +607,12 @@ function openDocument(item, kind = "upload") {
   location.hash = `#/doc/${encodeURIComponent(id)}?track=${encodeURIComponent(track)}`;
 }
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const file = fileInput.files[0];
-  if (!file) {
-    // Кнопка в тулбаре открывает тот же мастер: шаг 1 с областью перетаскивания.
-    openWizard();
-    const error = document.getElementById("wizardError");
-    error.textContent = "Выберите PDF, чтобы продолжить.";
-    error.hidden = false;
-    return;
-  }
-  selectPDF(file);
+// Кнопка в тулбаре открывает мастер: шаг 1 с областью перетаскивания.
+// Отдельного «загрузить» рядом больше нет, чтобы не было двух входов в один флоу.
+document.getElementById("startWizard").addEventListener("click", () => {
+  const error = document.getElementById("wizardError");
+  error.hidden = true;
+  openWizard();
 });
 
 demoButton.addEventListener("click", async () => {
@@ -563,7 +630,7 @@ async function startApp() {
     setUploadEnabled(false);
     message(
       "Не удалось загрузить интерфейс.",
-      "Модули областей недоступны. Запустите сервер: .venv/bin/python tools/mock_api.py",
+      "Модули областей недоступны. Проверьте, что сервер запущен, и обновите страницу.",
     );
     return;
   }
@@ -575,13 +642,23 @@ async function startApp() {
 
 let toastTimer = null;
 
+function hideToast() {
+  const node = document.getElementById("toast");
+  clearTimeout(toastTimer);
+  if (node) node.hidden = true;
+}
+
 function toast(message) {
   const node = document.getElementById("toast");
   if (!node || !message) return;
-  node.textContent = message;
+  node.replaceChildren(
+    el("span", {text: message}),
+    el("button", {type: "button", class: "toast-close", "aria-label": "Скрыть сообщение", text: "×",
+      onclick: hideToast}),
+  );
   node.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { node.hidden = true; }, 4000);
+  toastTimer = setTimeout(hideToast, 6000);
 }
 
 function focusAfterAuth() {
@@ -616,13 +693,9 @@ function leaveAccount() {
   accountMenu.sync(null);
   selectedPDF = null;
   fileInput.value = "";
-  fileName.textContent = "Загрузить PDF";
-  fileName.title = "";
   lastPath = "";
   booted = false;
-  clearTimeout(toastTimer);
-  const toastNode = document.getElementById("toast");
-  if (toastNode) toastNode.hidden = true;
+  hideToast();
   fill(view);
   say("");
   setUploadEnabled(false);
@@ -642,11 +715,13 @@ async function boot() {
   if (!account) {
     document.getElementById("bootError").hidden = true;
     authScreen.show();
+    window.__vinitiBooted = true;
     return;
   }
   authScreen.hide();
   accountMenu.sync(account);
   await startApp();
+  window.__vinitiBooted = true;
 }
 
 // Истёкшая cookie превращает любой запрос в 401: возвращаем экран входа,

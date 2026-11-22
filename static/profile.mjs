@@ -1,4 +1,4 @@
-import { takeProfilePDF } from "./pending.js";
+import { stashProfilePDF, takeProfilePDF } from "./pending.js";
 import { apiFetch, loadSession } from "./api.js";
 
 const byId = id => document.getElementById(id);
@@ -59,7 +59,7 @@ function showError(message) {
   if (errorLine) {
     errorLine.textContent = message;
     errorLine.hidden = false;
-    errorLine.scrollIntoView({block: "nearest"});
+    if (typeof errorLine.scrollIntoView === "function") errorLine.scrollIntoView({block: "nearest"});
     try {
       errorLine.focus({preventScroll: true});
     } catch {
@@ -298,14 +298,14 @@ async function parseResponse(response) {
 async function readPdf(file) {
   let job = await parseResponse(await authorized(await apiFetch("/api/parse", {
     method: "POST",
-    headers: {"Content-Type": "application/pdf", "X-Parser": "auto", "X-Profile": "solar",
+    headers: {"Content-Type": "application/pdf", "X-Parser": "pdfplumber", "X-Profile": "solar",
       "X-Filename": encodeURIComponent(file.name)},
     body: file,
   })));
   const path = "/api/parse/" + encodeURIComponent(job.id);
   while (job.status === "queued" || job.status === "running") {
     status.textContent = job.status === "queued" ? "PDF ожидает своей очереди…"
-      : "Docling распознаёт структуру, текст и формулы. Это может занять несколько минут…";
+      : "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
     await new Promise(resolve => setTimeout(resolve, 1000));
     job = await parseResponse(await fetch(path, {cache: "no-store"}));
   }
@@ -397,9 +397,11 @@ byId("assistantApply").onclick = () => {
 };
 
 let loading = false;
+let currentFile = null;
 async function loadFile(file) {
   if (!file || loading) return;
   if (!(await sessionReady)) return;
+  currentFile = file;
   assistantHistory.length = 0;
   byId("assistantMessages").replaceChildren();
   byId("assistantSuggestions").replaceChildren();
@@ -412,7 +414,7 @@ async function loadFile(file) {
   clearError();
   clearMatches();
   byId("profilePanel").hidden = false;
-  status.textContent = "Docling распознаёт структуру, текст и формулы. Это может занять несколько минут…";
+  status.textContent = "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
   try {
     const data = await readPdf(file);
     documentData = {...data, filename: file.name};
@@ -442,12 +444,31 @@ upload.onchange = () => {
   if (file) loadFile(file);
 };
 
-takeProfilePDF().then(file => {
-  if (file) loadFile(file);
-}).catch(error => {
-  // Без IndexedDB страница работает как обычно: PDF выбирается вручную.
-  console.warn("Не удалось забрать PDF из мастер-потока:", error.message);
-});
+// Без IndexedDB (jsdom, старый браузер) страница работает как обычно:
+// PDF выбирается вручную.
+if ("indexedDB" in globalThis) {
+  takeProfilePDF().then(file => {
+    if (file) loadFile(file);
+  }).catch(error => {
+    console.warn("Не удалось забрать PDF из мастер-потока:", error.message);
+  });
+}
+
+// Стрелка «назад» возвращает в мастер выбранный PDF: без этого файл
+// пришлось бы выбирать заново, а мастер терял бы шаг с профилем.
+const backLink = document.querySelector('a[aria-label="Назад на главную"]');
+if (backLink) {
+  backLink.addEventListener("click", async event => {
+    if (!currentFile) return;
+    event.preventDefault();
+    try {
+      await stashProfilePDF(currentFile);
+    } catch (error) {
+      console.warn("Не удалось вернуть PDF в мастер:", error.message);
+    }
+    location.href = backLink.href;
+  });
+}
 
 form.onsubmit = event => {
   event.preventDefault();

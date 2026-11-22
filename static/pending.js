@@ -55,7 +55,7 @@ export async function stashProfilePDF(file) {
   }
 }
 
-export async function takeProfilePDF() {
+async function readProfilePDF() {
   const database = await openDatabase();
   try {
     const transaction = database.transaction(STORE, "readwrite");
@@ -72,4 +72,9 @@ export async function takeProfilePDF() {
   } finally {
     database.close();
   }
+}
+
+/** Забирает PDF и удаляет запись: вызывается мастером при возврате. */
+export function takeProfilePDF() {
+  return readProfilePDF();
 }

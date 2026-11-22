@@ -44,7 +44,7 @@
 .profile-editor { min-width: 0; }
 .profile-editor h3 { margin: 20px 0 8px; }
 .assistant-panel { position: sticky; top: 18px; min-width: 0; display: flex; flex-direction: column; min-height: 560px; max-height: calc(100vh - 36px); border: 1px solid #405358; border-radius: 14px; background: #101b1f; overflow: hidden; }
-.assistant-entry { display: inline-block; margin: 18px 0; padding: 8px 12px; border: 1px solid #d5ff83; border-radius: 8px; background: #243b27; color: #d5ff83; font-weight: 650; }
+.assistant-entry { display: block; margin: 18px 0; padding: 12px 16px; border: 1px dashed #405358; border-left: 3px solid #7d9a5a; border-radius: 8px; background: #16212680; color: #b6cacc; font-size: .9rem; }
 .assistant-head { display: flex; gap: 12px; align-items: center; padding: 16px; border-bottom: 1px solid #324248; }
 .assistant-head h3 { margin: 0; }
 .assistant-head p { margin: 2px 0 0; color: #b6cacc; font-size: .85rem; }

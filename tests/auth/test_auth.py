@@ -7,6 +7,7 @@ import sqlite3
 from tempfile import TemporaryDirectory
 from threading import Thread
 import unittest
+from unittest import mock
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import HTTPPasswordMgr, Request, build_opener, urlopen
@@ -115,6 +116,33 @@ class AuthApiTest(unittest.TestCase):
         with other.open(request, timeout=20) as response:
             self.assertEqual(response.status, 200)
 
+    def test_legacy_flat_profiles_are_not_shared(self):
+        # A profile saved before per-user folders has no owner. It must stay
+        # invisible and unreadable for every authenticated user, while builtins
+        # and user-specific profiles keep working.
+        profiles = Path(self.tmp.name) / "profiles"
+        profiles.mkdir()
+        self.server.profiles_dir = profiles
+        legacy = {
+            "id": "legacy_shared", "version": "1", "description": "shared",
+            "tables": {"equipment": {"key": "equipment_id", "fields": {
+                "equipment_id": {"type": "id", "description": "id"},
+            }}},
+        }
+        (profiles / "legacy_shared.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+        self.register("legacy_reader_a")
+        other = build_opener(__import__("urllib.request").request.HTTPCookieProcessor(CookieJar()))
+        self.register_client(other, "legacy_reader_b")
+        for client in (self.client, other, build_opener()):
+            status, body = self.get("/api/profiles", client=client)
+            self.assertEqual(status, 200, body)
+            ids = {item["id"] for item in body["profiles"]}
+            self.assertIn("solar", ids)
+            self.assertNotIn("legacy_shared", ids)
+            status, body = self.get("/api/profiles/legacy_shared", client=client)
+            self.assertEqual(status, 404, body)
+
     def test_register_login_logout_and_password_is_hashed(self):
         csrf = self.register("alice")
         status, _, body = self.call("/api/auth/login", {"username": "alice", "password": "wrong"})
@@ -177,10 +205,13 @@ class AuthApiTest(unittest.TestCase):
         self.assertEqual(status, 503, body)
         self.assertIn("db.py --init", body["error"])
 
-    def upload(self, path, data, csrf, client=None):
-        request = Request(self.base + path, data=data, headers={
+    def upload(self, path, data, csrf, client=None, track=None):
+        headers = {
             "Content-Type": "application/pdf", "X-CSRF-Token": csrf,
-            "X-Filename": "duplicate.pdf"})
+            "X-Filename": "duplicate.pdf"}
+        if track:
+            headers["X-Track"] = track
+        request = Request(self.base + path, data=data, headers=headers)
         try:
             with (client or self.client).open(request, timeout=60) as response:
                 return response.status, json.loads(response.read() or b"{}")
@@ -243,6 +274,41 @@ class AuthApiTest(unittest.TestCase):
         conn.close()
         self.assertEqual(owner, alice)
 
+    def test_catalog_recognition_job_belongs_to_uploader(self):
+        from tests.test_solar_offline import TABLE_PAGE, make_pdf
+        import solar_api
+        self.server.solar_store = solar_api.SolarStore(Path(self.tmp.name) / "solar.sqlite3")
+        csrf = self.register("catalog_owner")
+        # Recognition runs in a background thread; the subprocess is not part of
+        # this test, only the ownership of the job it would fill.
+        with mock.patch.object(Handler, "run_parse", return_value=None):
+            status, created = self.upload(
+                "/api/documents", make_pdf(TABLE_PAGE, table=True), csrf, track="solar")
+        self.assertEqual(status, 201, created)
+        job_id = created.get("recognition_job_id")
+        self.assertTrue(job_id, created)
+
+        status, _, me = self.call("/api/auth/me")
+        self.assertEqual(status, 200)
+        status, job = self.get("/api/parse/" + job_id)
+        self.assertEqual(status, 200, job)
+        self.assertEqual(job["owner_user_id"], me["user"]["id"])
+        # The owner reaches the job before it finishes: 409, not 404.
+        status, _ = self.get("/api/parse/" + job_id + "/result")
+        self.assertEqual(status, 409)
+
+        other = build_opener(__import__("urllib.request").request.HTTPCookieProcessor(CookieJar()))
+        self.register_client(other, "catalog_other")
+        for suffix in ("", "/result", "/llm", "/file/bundle/result.json"):
+            status, body = self.get("/api/parse/" + job_id + suffix, client=other)
+            self.assertEqual(status, 404, (suffix, body))
+
+    def test_register_rejects_password_over_256_characters(self):
+        status, _, body = self.call("/api/auth/register",
+                                    {"username": "long_password_user", "password": "x" * 257})
+        self.assertEqual(status, 422, body)
+        self.assertIn("256", body["error"])
+
     def test_legacy_duplicate_upload_belongs_to_first_uploader(self):
         pdf = demo_pdf()
         csrf_a = self.register("legacy_a")
@@ -262,6 +328,55 @@ class AuthApiTest(unittest.TestCase):
         self.assertEqual(status, 404)
         status, _ = self.get("/api/papers/" + paper_id)
         self.assertEqual(status, 200)
+
+
+class EmailRulesTest(unittest.TestCase):
+    """auth.email_problem is the single authority for email-shaped logins."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.store = auth.Auth(Path(self.tmp.name) / "email.sqlite3",
+                               iterations=auth.MIN_ITERATIONS)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_work_emails_pass(self):
+        for value in ("person@viniti.ru", "first.last+tag@sub.example.org", "a@b.io"):
+            self.assertIsNone(auth.email_problem(value), value)
+
+    def test_numeric_only_tld_is_rejected(self):
+        problem = auth.email_problem("tdhbtdnd@tdbbdb.45")
+        self.assertIsNotNone(problem)
+        self.assertIn("верхнего уровня", problem)
+
+    def test_malformed_emails_are_rejected(self):
+        for value in ("", "person", "person@", "@viniti.ru", "person@@viniti.ru",
+                      "person@viniti", "person@-viniti.ru", "person@viniti..ru",
+                      ".person@viniti.ru", "person@viniti.ru.", "person@viniti.r",
+                      "person@viniti.45", "a" * 65 + "@viniti.ru", "person@" + "a" * 250 + ".ru"):
+            self.assertIsNotNone(auth.email_problem(value), value)
+
+    def test_register_applies_email_rules_and_keeps_plain_logins(self):
+        with self.assertRaises(auth.AuthError) as caught:
+            self.store.register("tdhbtdnd@tdbbdb.45", "correct horse")
+        self.assertEqual(caught.exception.status, 422)
+        # Plain logins stay accepted: the browser form registers an email, but
+        # existing accounts and the tests use bare names.
+        self.store.register("plain_login", "correct horse")
+        self.store.register("person@viniti.ru", "correct horse")
+        with self.assertRaises(auth.AuthError) as caught:
+            self.store.register("person@viniti.ru", "correct horse")
+        self.assertEqual(caught.exception.status, 409)
+
+    def test_password_upper_bound(self):
+        self.store.register("boundary_user", "x" * auth.MAX_PASSWORD_LENGTH)
+        with self.assertRaises(auth.AuthError) as caught:
+            self.store.register("too_long_user", "x" * (auth.MAX_PASSWORD_LENGTH + 1))
+        self.assertEqual(caught.exception.status, 422)
+        self.assertIn(str(auth.MAX_PASSWORD_LENGTH), caught.exception.message)
+        with self.assertRaises(ValueError):
+            auth.hash_password("x" * (auth.MAX_PASSWORD_LENGTH + 1), auth.MIN_ITERATIONS)
 
 
 if __name__ == "__main__":

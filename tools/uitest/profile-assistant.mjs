@@ -13,6 +13,11 @@ for (const key of ["window", "document", "location", "HTMLElement", "Node", "Ele
 globalThis.fetch = async input => {
   const url = String(input);
   if (url.includes("/api/auth/me")) return sessionResponse();
+  if (url.endsWith("/api/parse")) return {ok: true, status: 202, json: async () => ({id: "mock-job", status: "ok"})};
+  if (url.endsWith("/api/parse/mock-job")) return {ok: true, status: 200, json: async () => ({status: "ok"})};
+  if (url.endsWith("/api/parse/mock-job/result")) return {ok: true, status: 200, json: async () => ({
+    document: {pages: 1}, warnings: [], sources: [{page: 1, quote: "PCE 21.5%"}],
+  })};
   if (url.endsWith("/api/profile/source")) return {ok: true, status: 200, json: async () => ({
     pages: 1, warnings: [], sources: [{page: 1, quote: "PCE 21.5%"}],
   })};

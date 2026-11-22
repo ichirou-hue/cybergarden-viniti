@@ -107,6 +107,27 @@ class DoclingAdapterTest(unittest.TestCase):
         self.assertEqual(len(source["inline_runs"]), 5)
         self.assertFalse(any(s["quote"] == "2" for s in document["sources"]))
 
+    def test_duplicate_inline_groups_do_not_double_the_parent_text(self):
+        # Docling payloads in the wild list the same inline group twice, or the
+        # same runs in two groups; that must not print "SrCl2SrCl2".
+        raw = fixture()
+        parent = raw["texts"][0]
+        parent.update(text="", children=[{"$ref": "#/groups/0"}, {"$ref": "#/groups/1"}])
+        runs = []
+        for text, script in (("SrCl", "baseline"), ("2", "sub")):
+            item = deepcopy(parent)
+            item.pop("children")
+            item.update(text=text, formatting={"script": script})
+            raw["texts"].append(item)
+            runs.append({"$ref": f"#/texts/{len(raw['texts']) - 1}"})
+        raw["groups"] = [{"label": "inline", "children": runs}, {"label": "inline", "children": runs}]
+        raw["body"] = {"children": [{"$ref": "#/texts/0"}, {"$ref": "#/texts/1"}]}
+        document, _ = normalize_document(raw)
+        source = next(s for s in document["sources"] if s["docling_ref"] == "#/texts/0")
+        self.assertEqual(source["quote"], "SrCl2")
+        self.assertEqual(source["display_text"], "SrCl_{2}")
+        self.assertEqual(len(source["inline_runs"]), 2)
+
     def test_formula_label_keeps_enriched_latex_as_unverified_parser_text(self):
         raw = fixture()
         raw["texts"][0].update(label="formula", text=r"E=\frac{hc}{\lambda}")
@@ -277,20 +298,66 @@ class DoclingAdapterTest(unittest.TestCase):
                 export_result(result, out, assets=assets)
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    def test_malformed_caption_references_are_warnings_not_crashes(self):
+        for captions in (None, {"$ref": "#/texts/1"}, [None], ["#/texts/1"],
+                         [{"$ref": "#/texts/99"}], [{"$ref": "#/tables/0"}]):
+            with self.subTest(captions=captions):
+                raw = fixture()
+                raw["pictures"][0]["captions"] = captions
+                document, _ = normalize_document(raw)
+                self.assertEqual(document["figures"][0]["caption"], "")
+                self.assertTrue(any("Изображение 1" in warning for warning in document["warnings"]))
+
+    def test_valid_caption_reference_still_resolves(self):
+        document, _ = normalize_document(fixture())
+        self.assertEqual(document["figures"][0]["caption"], "Figure 1. Stability curves.")
+
+    def test_missing_or_short_picture_list_is_a_clean_value_error(self):
+        raw = fixture()
+        for pictures in (None, []):
+            with self.subTest(pictures=pictures):
+                document = SimpleNamespace(export_to_dict=lambda: raw)
+                if pictures is not None:
+                    document.pictures = pictures
+                converter = Mock(convert=Mock(return_value=SimpleNamespace(status="success", document=document)))
+                with self.assertRaises(ValueError):
+                    prepare_pdf("D001.pdf", synthetic_pdf(), converter=converter)
+
+    def test_picture_crop_failures_are_sanitized_value_errors(self):
+        for failure in (RuntimeError("secret-url-token"), IndexError("bad index"),
+                        TypeError("bad payload"), KeyError("secret")):
+            with self.subTest(failure=type(failure).__name__):
+                picture = SimpleNamespace(get_image=Mock(side_effect=failure))
+                document = SimpleNamespace(export_to_dict=fixture, pictures=[picture])
+                converter = Mock(convert=Mock(return_value=SimpleNamespace(status="success", document=document)))
+                with self.assertRaises(ValueError) as caught:
+                    prepare_pdf("D001.pdf", synthetic_pdf(), converter=converter)
+                self.assertNotIn("secret", str(caught.exception))
+
+    def test_png_encode_failure_with_unexpected_error_is_sanitized(self):
+        image = Mock()
+        image.save.side_effect = RuntimeError("secret-url-token")
+        picture = SimpleNamespace(get_image=lambda doc: image)
+        document = SimpleNamespace(export_to_dict=fixture, pictures=[picture])
+        converter = Mock(convert=Mock(return_value=SimpleNamespace(status="success", document=document)))
+        with self.assertRaises(ValueError) as caught:
+            prepare_pdf("D001.pdf", synthetic_pdf(), converter=converter)
+        self.assertNotIn("secret", str(caught.exception))
+
     def test_charts_require_docling_parser(self):
         with TemporaryDirectory() as tmp:
             out = Path(tmp) / "result"
             execution = subprocess.run([
-                sys.executable, str(ROOT / "extract_document.py"), "unused.pdf", "--charts", "-o", str(out),
-            ], capture_output=True, text=True, timeout=30)
+                sys.executable, "-X", "utf8", str(ROOT / "extract_document.py"), "unused.pdf", "--charts", "-o", str(out),
+            ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
             self.assertEqual(execution.returncode, 1)
             self.assertNotIn("Traceback", execution.stderr)
             self.assertFalse(out.exists())
 
     def test_optional_dependency_import_not_needed_for_default(self):
         execution = subprocess.run([
-            sys.executable, "-c", "import extract_document, sys; assert 'docling' not in sys.modules",
-        ], capture_output=True, text=True, timeout=30, cwd=ROOT)
+            sys.executable, "-X", "utf8", "-c", "import extract_document, sys; assert 'docling' not in sys.modules",
+        ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, cwd=ROOT)
         self.assertEqual(execution.returncode, 0, execution.stderr)
 
 

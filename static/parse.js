@@ -7,11 +7,35 @@ const STATUS = {
   ok: ["Готово", "ok"], error: ["Ошибка", "bad"],
   rejected: ["Отклонено", "bad"], skipped: ["Пропущено", "idle"],
 };
-const STAGES = {sources: "Источники", interpret: "Интерпретация", passport: "Паспорт", audit: "Аудит", export: "Экспорт"};
+const STAGES = {
+  sources: "Источники", interpret: "Интерпретация моделью",
+  passport: "Сборка результата", audit: "Проверка цитат", export: "Экспорт",
+};
 const LABELS = {
   "result.json": "Результат JSON", "parser.json": "Отчёт парсера", "candidates.csv": "Кандидаты CSV",
   "sources.json": "Источники LLM", "request.json": "Запрос LLM", "interpretation.json": "Интерпретация",
   "audit.json": "Аудит", "manifest.json": "Манифест LLM",
+};
+// Таблицы и поля приходят из шаблона в машинном виде. Пользователю показываем
+// подписи, а неизвестные имена оставляем как есть, чтобы ничего не потерять.
+const TABLE_TITLES = {
+  publications: "Публикации", materials: "Материалы", devices: "Приборы", layers: "Слои",
+  measurements: "Измерения", results: "Результаты", issues: "Замечания",
+};
+const COLUMN_TITLES = {
+  publication_id: "Публикация", result_id: "Запись", device_id: "Прибор",
+  measurement_id: "Измерение", material_id: "Материал", layer_id: "Слой",
+  metric_name: "Показатель", metric_value: "Значение", metric_unit: "Единица",
+  metric_group: "Группа", aggregation: "Агрегация", spread_value: "Разброс",
+  time_point: "Момент", time_unit: "Единица времени", raw_value: "Исходное значение",
+  raw_unit: "Исходная единица", normalized_value: "Значение после пересчёта",
+  normalized_unit: "Единица после пересчёта", result_origin: "Происхождение",
+  extraction_status: "Извлечение", validation_status: "Проверка", duplicate_of: "Повтор",
+  source_page: "Страница", source_section: "Раздел", source_table: "Таблица",
+  source_figure: "Рисунок", source_fragment: "Цитата", note: "Примечание",
+  issue_id: "Замечание", check_name: "Проверка", description: "Описание",
+  severity: "Важность", status: "Статус", title: "Название", year: "Год",
+  authors: "Авторы", doi: "DOI", topic: "Тема",
 };
 
 function badge(status) {
@@ -50,7 +74,7 @@ function artifactLink(id, path, label) {
 function stageList(manifest, job) {
   let rows = Array.isArray(manifest?.stages) ? manifest.stages : null;
   if (!rows && job.summary?.llm?.stages) rows = Object.entries(job.summary.llm.stages).map(([name, status]) => ({name, status}));
-  if (!rows?.length) return el("p", {class: "muted", text: job.llm === "off" ? "LLM-этап не запускался." : "Стадии появятся после обработки документа."});
+  if (!rows?.length) return el("p", {class: "muted", text: "Стадии появятся после обработки документа."});
   return el("div", {class: "parse-stages"}, rows.map(stage => el("div", {class: "parse-stage"},
     el("span", {text: STAGES[stage.name] || stage.name}), badge(stage.status),
     stage.error ? el("p", {class: "parse-stage-note error-hint", text: stage.error}) :
@@ -59,26 +83,33 @@ function stageList(manifest, job) {
 
 function auditCounts(manifest, job) {
   const counts = manifest?.counts || job.summary?.llm?.counts;
-  if (!counts) return el("p", {class: "muted", text: "Сводка аудита пока недоступна."});
+  if (!counts) return el("p", {class: "muted", text: "Сводка проверки пока недоступна."});
   return el("div", {class: "parse-counts"}, [
     ["Записей интерпретировано", counts.interpreted_records],
-    ["Замечаний валидации", counts.validation_issues],
-    ["Находок аудита", counts.audit_findings],
+    ["Замечаний структуры", counts.validation_issues],
+    ["Находок проверки", counts.audit_findings],
   ].map(([label, value]) => el("div", {}, el("strong", {text: Number.isFinite(Number(value)) ? String(value) : "-"}), el("span", {text: label}))));
 }
 
 function artifacts(job, manifest) {
-  if (job.status !== "ok") return el("p", {class: "muted", text: "Артефакты станут доступны после успешного завершения."});
-  const links = ["result.json"].map(name => artifactLink(job.id, name, LABELS[name]));
-  if (manifest?.artifacts?.["candidates.csv"] || job.status === "ok")
-    links.push(artifactLink(job.id, "candidates.csv", LABELS["candidates.csv"]));
+  if (job.status !== "ok") return el("p", {class: "muted", text: "Файлы появятся после завершения разбора."});
+  const main = [
+    artifactLink(job.id, "result.json", LABELS["result.json"]),
+    artifactLink(job.id, "candidates.csv", LABELS["candidates.csv"]),
+  ];
   if (manifest?.artifacts?.["parser.json"] || job.parser === "docling")
-    links.splice(1, 0, artifactLink(job.id, "parser.json", LABELS["parser.json"]));
+    main.push(artifactLink(job.id, "parser.json", LABELS["parser.json"]));
+  const technical = [];
   if (job.llm !== "off") {
-    const names = new Set(Object.keys(manifest?.artifacts || {})); names.add("manifest.json");
-    for (const name of names) links.push(artifactLink(job.id, `llm/${name}`, LABELS[name] || name));
+    const names = new Set(Object.keys(manifest?.artifacts || {}));
+    names.add("manifest.json");
+    for (const name of names) technical.push(artifactLink(job.id, `llm/${name}`, LABELS[name] || name));
   }
-  return el("div", {class: "parse-artifacts"}, links);
+  return el("div", {},
+    el("div", {class: "parse-artifacts"}, main),
+    technical.length ? el("details", {class: "parse-technical"},
+      el("summary", {text: "Технические файлы модели"}),
+      el("div", {class: "parse-artifacts"}, technical)) : null);
 }
 
 function printable(value) {
@@ -99,9 +130,10 @@ function interpretationTables(interpretation) {
     const shown = rows.slice(0, 100);
     sections.push(el("section", {class: "interpretation-table"},
       el("div", {class: "interpretation-table-head"},
-        el("h3", {text: name}), el("span", {text: `${rows.length} ${rows.length === 1 ? "запись" : "записей"}`})),
+        el("h3", {text: TABLE_TITLES[name] || name}), el("span", {text: `${rows.length} ${rows.length === 1 ? "запись" : "записей"}`})),
       rows.length && columns.length ? el("div", {class: "table-wrap"}, el("table", {class: "compact"},
-        el("thead", {}, el("tr", {}, columns.map(column => el("th", {text: column})))),
+        el("thead", {}, el("tr", {}, columns.map(column => el("th", {text: COLUMN_TITLES[column] || column,
+          title: COLUMN_TITLES[column] ? column : null})))),
         el("tbody", {}, shown.map(row => el("tr", {}, columns.map(column => el("td", {text: printable(row[column])}))))))) :
         el("p", {class: "muted", text: "Проверенных записей в этой таблице нет."}),
       rows.length > shown.length ? el("p", {class: "muted interpretation-limit", text: `Показаны первые ${shown.length} записей. Полный результат доступен в interpretation.json.`}) : null));
@@ -132,41 +164,85 @@ function interpretationResult(job, manifest, interpretation, interpretationError
     el("p", {class: "muted", text: interpretationError || "Сервер не предоставил проверенный результат для отображения."}));
 }
 
+function areaLabel(value) {
+  if (value === "solar") return "Solar";
+  if (value === "rag") return "RAG";
+  return value || "Не указана";
+}
+
+function parserLabel(value) {
+  if (value === "docling") return "Docling";
+  if (value === "pdfplumber") return "pdfplumber";
+  return value || "Не указан";
+}
+
+function ocrLabel(value) {
+  if (!value || value === "off") return "выключен";
+  if (value === "auto") return "авто";
+  return value;
+}
+
 function render(container, job, manifest, manifestError, interpretation, interpretationError) {
   const active = ACTIVE.has(job.status), summary = job.summary || {};
-  document.title = `Разбор ${job.filename || job.id} · ВИНИТИ`;
+  const llmOn = job.llm !== "off";
+  document.title = job.filename ? `Разбор ${job.filename} · ВИНИТИ` : "Разбор PDF · ВИНИТИ";
+  const lede = active ? "Документ обрабатывается. Страница обновится автоматически."
+    : job.status === "ok"
+      ? (llmOn ? "Разбор завершён. Результат и проверенная интерпретация готовы."
+        : "Разбор завершён. Таблицы, значения и цитаты готовы.")
+      : "Обработка не завершена. Проверьте сообщение ниже.";
+  const paramsPanel = el("section", {class: "panel parse-panel"},
+    el("div", {class: "panel-head"}, el("h2", {text: "Параметры разбора"})),
+    el("dl", {class: "parse-meta"},
+      el("dt", {text: "Область"}), el("dd", {text: areaLabel(job.profile)}),
+      el("dt", {text: "Парсер"}), el("dd", {text: parserLabel(job.parser)}),
+      el("dt", {text: "OCR"}), el("dd", {text: ocrLabel(job.ocr)}),
+      el("dt", {text: "Модель"}), el("dd", {text: job.llm === "api" ? "включена · API" : (job.llm === "mock" ? "mock · офлайн" : "выключена")}),
+      el("dt", {text: "Создано"}), el("dd", {text: dateTime(job.created_at)}),
+      el("dt", {text: "Время работы"}), el("dd", {text: active ? "Идёт обработка" : seconds(job.elapsed_seconds)})),
+    el("div", {class: "parse-summary"}, ["pages", "sources", "candidates", "warnings"].map(key => el("div", {},
+      el("strong", {text: summary[key] ?? "-"}),
+      el("span", {text: ({pages: "Страниц", sources: "Источников", candidates: "Кандидатов", warnings: "Предупреждений"})[key]})))));
+  const stagesPanel = llmOn ? el("section", {class: "panel parse-panel"},
+    el("div", {class: "panel-head"}, el("h2", {text: "Работа модели"})),
+    stageList(manifest, job),
+    el("h3", {text: "Проверка ответа"}), auditCounts(manifest, job),
+    manifestError ? el("p", {class: "parse-inline-error", text: manifestError}) : null) : null;
+
   fill(container,
     el("section", {class: "hero parse-hero"},
       el("div", {class: "doc-main"},
         el("div", {class: "crumbs"}, el("a", {href: "#/catalog", text: "Каталог"}), " / Разбор PDF"),
-        el("p", {class: "eyebrow data", text: job.id || "Задание"}), el("h1", {text: job.filename || "Разбор документа"}),
-        el("p", {class: "lede", text: active ? "Документ обрабатывается. Страница обновится автоматически." :
-          job.status === "ok" ? "Обработка завершена. Результаты и технические артефакты готовы." : "Обработка не завершена. Проверьте сообщение ниже."})),
-      el("div", {class: "parse-status"}, badge(job.status), active ? el("span", {class: "parse-pulse", "aria-hidden": "true"}) : null)),
+        el("p", {class: "eyebrow data", title: job.filename || "", text: job.filename || "Документ"}),
+        el("h1", {text: "Разбор документа"}),
+        el("p", {class: "lede", text: lede}),
+        active ? el("div", {class: "parse-progress"},
+          el("progress", {"aria-label": "Ход разбора"}),
+          el("span", {text: "Этапы выполняются на сервере. Страница обновится сама."})) : null),
+      el("div", {class: "parse-hero-side"},
+        el("div", {class: "parse-status"}, badge(job.status), active ? el("span", {class: "parse-pulse", "aria-hidden": "true"}) : null),
+        el("div", {class: "bar"},
+          el("a", {class: "button secondary", href: "#/catalog", text: "Каталог"}),
+          job.status === "ok" ? el("a", {
+            class: "button", href: `/api/parse/${encodeURIComponent(job.id)}/file/result.json`,
+            download: "result.json", text: "Скачать результат",
+          }) : null))),
     job.status === "error" ? el("div", {class: "notice bad", role: "alert"}, el("strong", {text: "Разбор завершился с ошибкой"}), el("p", {text: job.error || "Сервер не передал описание ошибки."})) : null,
     job.llm === "api" && job.status === "ok" ? el("div", {class: "notice good", role: "status"},
-      el("strong", {text: "LLM включен · API-модель"}),
+      el("strong", {text: "Модель включена · API"}),
       el("p", {text: "Фрагменты документа отправлены в настроенную API-модель. Ниже отображается только интерпретация, прошедшая проверку."})) :
     job.llm === "api" && active ? el("div", {class: "notice", role: "status"},
-      el("strong", {text: "LLM включен · обработка продолжается"}),
+      el("strong", {text: "Модель включена · обработка продолжается"}),
       el("p", {text: "Запрос к API ещё не подтверждён."})) : null,
     job.llm === "mock" ? el("div", {class: "notice good", role: "status"},
-      el("strong", {text: "LLM mock · офлайн"}),
-      el("p", {text: "Оболочка выполнила стадии поверх scripts-паспорта. Реальная модель не вызывалась, официальные CSV и паспорт не менялись."})) : null,
-    el("div", {class: "parse-layout"},
-      el("section", {class: "panel parse-panel"}, el("div", {class: "panel-head"}, el("h2", {text: "Ход обработки"})),
-        el("dl", {class: "parse-meta"},
-          el("dt", {text: "Профиль"}), el("dd", {text: job.profile || "Не указан"}), el("dt", {text: "Парсер"}), el("dd", {text: job.parser || "Не указан"}),
-          el("dt", {text: "OCR"}), el("dd", {text: job.ocr || "off"}), el("dt", {text: "LLM"}), el("dd", {text: job.llm === "api" ? "включен · API" : (job.llm === "mock" ? "mock · офлайн" : "выключен")}),
-          el("dt", {text: "Создано"}), el("dd", {text: dateTime(job.created_at)}), el("dt", {text: "Время работы"}), el("dd", {text: active ? "Идёт обработка" : seconds(job.elapsed_seconds)})),
-        el("div", {class: "parse-summary"}, ["pages", "sources", "candidates", "warnings"].map(key => el("div", {},
-          el("strong", {text: summary[key] ?? "-"}), el("span", {text: ({pages: "Страниц", sources: "Источников", candidates: "Кандидатов", warnings: "Предупреждений"})[key]}))))),
-      el("section", {class: "panel parse-panel"}, el("div", {class: "panel-head"}, el("h2", {text: "Стадии LLM"})), stageList(manifest, job),
-        el("h3", {text: "Аудит"}), auditCounts(manifest, job), manifestError ? el("p", {class: "parse-inline-error", text: manifestError}) : null)),
-    el("section", {class: "panel parse-panel parse-interpretation"},
+      el("strong", {text: "Модель в режиме mock · офлайн"}),
+      el("p", {text: "Стадии выполнены поверх готового результата. Реальная модель не вызывалась, официальные CSV и результат не менялись."})) : null,
+    el("div", {class: "parse-layout" + (stagesPanel ? "" : " single")}, paramsPanel, stagesPanel),
+    llmOn ? el("section", {class: "panel parse-panel parse-interpretation"},
       el("div", {class: "panel-head"}, el("div", {}, el("p", {class: "eyebrow", text: "Проверенные данные"}), el("h2", {text: "Интерпретация"}))),
-      interpretationResult(job, manifest, interpretation, interpretationError)),
-    el("section", {class: "panel parse-panel parse-files"}, el("div", {class: "panel-head"}, el("h2", {text: "Артефакты"})), artifacts(job, manifest)));
+      interpretationResult(job, manifest, interpretation, interpretationError)) : null,
+    el("section", {class: "panel parse-panel parse-files"},
+      el("div", {class: "panel-head"}, el("h2", {text: "Файлы результата"})), artifacts(job, manifest)));
 }
 
 export async function renderParseJob(container, {jobId, signal, say}) {

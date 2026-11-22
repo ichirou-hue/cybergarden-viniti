@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from csv_safe import safe_csv_value
 import solar_offline
 import solar_version
+from solar_facts import NO_TEXT_LAYER
 
 MAX_BYTES = 32 * 1024 * 1024
 TRACK = "solar"
@@ -362,7 +363,7 @@ class SolarStore:
             try:
                 result = solar_offline.extract_pdf(path, publication_id, progress=progress)
             except ValueError as error:
-                if str(error) != "Нет текстового слоя. OCR в solar-1 пока не реализован.":
+                if str(error) != NO_TEXT_LAYER:
                     raise
                 # An image-only PDF still needs a catalogue card so its Docling
                 # recognition job can start. No scientific facts are inferred
