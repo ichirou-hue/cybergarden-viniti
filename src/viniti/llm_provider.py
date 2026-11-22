@@ -119,9 +119,6 @@ def _load_dotenv(path=None):
         os.environ[name] = value
 
 
-_load_dotenv()
-
-
 class NoRedirect(HTTPRedirectHandler):
     """A redirect would silently move the request (and the key) elsewhere."""
 

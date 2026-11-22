@@ -2460,6 +2460,7 @@ def recover_parse_jobs(root):
 
 
 def main():
+    llm_provider._load_dotenv()
     diagnostics.configure()
     parser = argparse.ArgumentParser(description="VINITI PDF evidence workspace")
     parser.add_argument("--port", type=int, default=8765)
