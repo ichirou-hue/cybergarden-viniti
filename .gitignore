@@ -22,6 +22,8 @@ run_server.ps1
 # Локальные настройки и секреты. Шаблон .env.example остаётся отслеживаемым.
 .env.*
 !.env.example
+*.env
+/env
 *.log
 *.log.*
 
