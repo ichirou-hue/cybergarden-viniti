@@ -15,6 +15,7 @@ from time import monotonic
 
 import pdfplumber
 from pdfplumber.utils.exceptions import PdfminerException
+from pypdf import PdfReader
 
 from pdf_source import MAX_PAGES
 from solar_facts import MAX_BYTES, NUMBER, clean
@@ -404,11 +405,22 @@ def prepare_pdf(name, data, *, ocr="auto", charts=False, converter=None):
         raise ValueError("PDF повреждён, зашифрован или не может быть разобран.") from None
     if not 1 <= total_pages <= MAX_PAGES:
         raise ValueError(f"Поддерживаются PDF от 1 до {MAX_PAGES} страниц.")
+    effective_ocr = ocr
+    if ocr == "auto":
+        # OCR is very expensive and Docling's default mode rasterizes every page.
+        # Prefer the native text layer when it is present; keep auto useful for
+        # scanned PDFs by selecting OCR only when the whole document is empty.
+        try:
+            reader = PdfReader(BytesIO(data), strict=False)
+            text_chars = sum(len(page.extract_text() or "") for page in reader.pages)
+        except Exception:
+            text_chars = 0
+        effective_ocr = "off" if text_chars >= max(200, total_pages * 80) else "full"
     publication_id = Path(name.replace("\\", "/")).stem
     if not publication_id or len(publication_id) > 240:
         raise ValueError("Некорректное имя публикации.")
     if converter is None:
-        converter = make_converter(ocr=ocr, charts=charts)
+        converter = make_converter(ocr=effective_ocr, charts=charts)
     with TemporaryDirectory(prefix="docling-input-") as temporary:
         path = Path(temporary) / "input.pdf"
         path.write_bytes(data)
@@ -465,7 +477,8 @@ def prepare_pdf(name, data, *, ocr="auto", charts=False, converter=None):
         key: parsed[key] for key in ("tables", "figures", "visual_candidates")
     }
     parser_output["parser"] = {
-        "name": "docling", "version": installed, "ocr": ocr, "charts_requested": charts,
+         "name": "docling", "version": installed, "ocr": effective_ocr, "ocr_requested": ocr,
+         "charts_requested": charts,
         "formula_enrichment": True, "script_position_recovery": True,
         "conversion_status": status, "document_schema_version": raw.get("version", ""),
         "elapsed_seconds": round(monotonic() - started, 6),

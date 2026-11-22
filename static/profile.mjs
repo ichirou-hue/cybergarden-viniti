@@ -347,11 +347,13 @@ function missingJob() {
 }
 
 async function awaitJob(job) {
+  const deadline = Date.now() + 35 * 60 * 1000;
   let current = job;
   while (current.status === "queued" || current.status === "running") {
     status.textContent = current.status === "queued" ? "PDF ожидает своей очереди…"
       : "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
     await new Promise(resolve => setTimeout(resolve, 1000));
+    if (Date.now() >= deadline) throw new Error("Разбор PDF превысил лимит ожидания. Проверьте статус задачи и журнал сервера.");
     const next = await readJob(current.id);
     if (!next) throw missingJob();
     current = next;
@@ -398,7 +400,6 @@ async function releasePending() {
     await clearProfilePDF();
   } catch (error) {
     console.warn("Не удалось освободить переданный PDF:", error.message);
-  }
 }
 
 let proposals = [];
