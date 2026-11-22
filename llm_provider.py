@@ -106,12 +106,12 @@ def _load_dotenv(path=None):
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, value = line.split("=", 1)
-        name, value = name.strip(), value.strip()
+        name, value = name.strip().lstrip("\ufeff"), value.strip()
         if not name or name not in {
             "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
             "OPENAI_LLM_TIMEOUT", "OPENAI_LLM_RETRIES",
             "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "VINITI_PARSE_LLM",
-        } or name in os.environ:
+        } or (name in os.environ and os.environ[name].strip()):
             continue
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
