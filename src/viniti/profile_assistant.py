@@ -12,7 +12,7 @@ import json
 import re
 
 from .prompt_rules import DOCUMENT_RULES_RU
-from .llm_provider import complete, resolve_config
+from .llm_provider import complete_env, config_from_env
 
 FIELD_TYPES = {"text", "number", "boolean", "reference"}
 MAX_SOURCES = 24
@@ -238,7 +238,7 @@ def _validate_suggestion(item, entities, sources, mode):
     }
 
 
-def suggest(payload, *, complete_fn=complete, profile_source=None):
+def suggest(payload, *, complete_fn=complete_env, profile_source=None):
     """Return validated suggestions and a deterministic profile audit.
 
     ``profile_source`` is ``"builtin"``, ``"user"`` or ``None``. For a built-in
@@ -272,14 +272,14 @@ def suggest(payload, *, complete_fn=complete, profile_source=None):
             "mode": mode,
         }
 
-    key, model = resolve_config()
-    if not key or not model:
-        raise RuntimeError("Помощник не настроен. Укажите ключ и модель OPENAI или OPENROUTER на сервере.")
+    try:
+        config_from_env()
+    except ValueError:
+        raise RuntimeError(
+            "Помощник не настроен. Нужны OPENAI_API_KEY и OPENAI_MODEL "
+            "(или OPENROUTER_API_KEY и OPENROUTER_MODEL) на сервере.") from None
     messages = _model_messages(mode, question, entities, sources, payload.get("history", []))
-    # Let the provider resolve the configured host together with its key.
-    # Passing explicit credentials to the legacy seam selects OpenRouter.
-    options = {} if complete_fn is complete else {"api_key": key, "model": model}
-    response = complete_fn(messages, **options, max_tokens=1200, timeout=60, retries=1)
+    response = complete_fn(messages, max_tokens=1200, timeout=60, retries=1)
     if not isinstance(response, dict) or not isinstance(response.get("suggestions"), list):
         raise ValueError("Помощник вернул неверный формат предложений.")
     suggestions = []

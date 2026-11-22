@@ -101,4 +101,4 @@ class PdfQualityTest(TestCase):
                          "warnings": [], "issues": [], "results": []})
         joined = " ".join(result["limits"]).lower()
         self.assertIn("не вероятность", joined)
-        self.assertIn("научную достоверность", joined)
+        self.assertIn("научной достоверности", joined)

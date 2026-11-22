@@ -25,7 +25,7 @@ assert.equal($("profileStep").hidden, true);
 assert.equal($("wizardTitle").textContent, "Начните с PDF");
 assert.equal(document.querySelectorAll("#wizard h1").length, 1);
 assert.equal(document.body.classList.contains("wizard-active"), true);
-assert.equal(document.querySelectorAll(".track-switch .track").length, 1);
+assert.equal(document.querySelectorAll(".track-switch .track").length, 3);
 assert.equal(document.querySelector(".track-switch .track").textContent.trim(), "Паспорт");
 assert.equal(document.querySelectorAll("#tracks").length, 0);
 assert.equal($("wizardLLM").checked, false);

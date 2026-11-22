@@ -1,6 +1,6 @@
 import { getJSON } from "./api.js";
 import { el, fill } from "./dom.js";
-import { docStatus, extractStatus, fieldLabel, issueLabel, number, plural, seconds, sharedDemoDocument, unitLabel } from "./ui.js";
+import { docStatus, extractStatus, fieldLabel, issueLabel, number, plural, seconds, sharedDemoDocument, unitLabel, visibleWarnings } from "./ui.js";
 import { openEvidence } from "./evidence.js";
 
 const PAGE = 50;
@@ -11,6 +11,7 @@ const TABS = [
   ["entities", "Сущности"],
   ["issues", "Замечания"],
   ["sources", "Фрагменты PDF"],
+  ["chat", "Чат по статье"],
   ["summary", "Сводка"],
 ];
 
@@ -70,6 +71,7 @@ export async function renderDocument(root, ctx) {
       exportLink(summary, base, "pdf", "PDF", summary.status),
       exportLink(summary, base, "json", "JSON", summary.status),
       exportLink(summary, base, "csv", "CSV", summary.status),
+      markdownButton(summary, base, ctx),
     ),
   );
 
@@ -228,6 +230,42 @@ function exportLink(summary, base, kind, label, status) {
   return el("a", {href, download, text: label});
 }
 
+// Заметка для Obsidian собирается в браузере из того же /export.json, который
+// отдаёт конверт документа. Отдельного серверного шаблона нет: файл можно
+// скачать, но интерфейс не пишет в vault и не синхронизирует его.
+function markdownButton(summary, base, ctx) {
+  if (summary.status === "running" || summary.status === "queued" || summary.status === "failed") return null;
+  const button = el("button", {
+    type: "button", class: "secondary", text: "Скачать Markdown",
+    title: "Скачать заметку для Obsidian: YAML frontmatter, библиография, результаты, замечания и цитаты",
+  });
+  button.addEventListener("click", async () => {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = "Готовим…";
+    try {
+      const envelope = await getJSON(`${base}/export.json`, {}, ctx.signal);
+      if (ctx.signal.aborted) return;
+      const {passportMarkdown, markdownFilename} = await import("./markdown.js");
+      const text = passportMarkdown(envelope);
+      const url = URL.createObjectURL(new Blob([text], {type: "text/markdown;charset=utf-8"}));
+      const link = el("a", {href: url, download: markdownFilename(envelope)});
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      ctx.say("Заметка Markdown скачана.");
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      ctx.say(`Не удалось подготовить Markdown: ${error.message}`, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  });
+  return button;
+}
+
 function noticeBlock(summary) {
   const blocks = [];
   const excluded = scopeFlag(summary.publication?.in_scope) === "false";
@@ -261,8 +299,9 @@ function noticeBlock(summary) {
       el("p", {text: "Текст со страниц не извлекался, OCR не выполнялся. Результатов нет — это не отсутствие данных в статье."}),
     ));
   }
-  if (Array.isArray(summary.warnings) && summary.warnings.length) {
-    blocks.push(el("ul", {class: "warnings"}, summary.warnings.map(warning => el("li", {text: warning}))));
+  const warnings = visibleWarnings(summary.warnings);
+  if (warnings.length) {
+    blocks.push(el("ul", {class: "warnings"}, warnings.map(warning => el("li", {text: warning}))));
   }
   if ((summary.results_count ?? summary.counts?.results ?? 0) === 0
       && summary.status !== "failed" && summary.status !== "queued"
@@ -290,6 +329,13 @@ async function renderTab(body, ctx, summary, facets, facetsOk, tab) {
   if (tab === "entities") return renderEntities(body, ctx);
   if (tab === "issues") return renderIssues(body, ctx, summary);
   if (tab === "sources") return renderSources(body, ctx, summary);
+  if (tab === "chat") {
+    // Чат вынесен в отдельный модуль, чтобы карточка паспорта не тянула его
+    // разметку на вкладках, где он не нужен.
+    const {renderDocumentChat} = await import("./chat-doc.js");
+    if (ctx.signal.aborted) return;
+    return renderDocumentChat(body, ctx, summary);
+  }
   if (tab === "summary") return renderSummary(body, ctx, summary, facets);
   return renderResults(body, ctx, summary, facets, facetsOk);
 }
@@ -1042,5 +1088,6 @@ function renderSummary(body, ctx, summary, facets) {
       el("dt", {text: "Версия источника"}), el("dd", {text: String(run.source_revision ?? "—")}),
       el("dt", {text: "Страниц"}), el("dd", {text: String(summary.pages ?? "—")}),
     ),
+    el("p", {class: "muted", text: "Проверка источников буквальная: наличие цитат проверено, научная корректность связей и полнота извлечения не проверяются."}),
   );
 }

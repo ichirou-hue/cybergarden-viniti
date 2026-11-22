@@ -42,8 +42,10 @@ def rag_envelope(publication_id="D001", title="Solar cell study", dataset="Datas
 
 
 def names(data):
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        return archive.namelist(), archive
+    # Keep the archive open for the caller: closing it inside the helper made
+    # every read() fail with "ZIP archive that was already closed".
+    archive = zipfile.ZipFile(io.BytesIO(data))
+    return archive.namelist(), archive
 
 
 class ObsidianExportTest(TestCase):
@@ -169,6 +171,9 @@ class ObsidianExportRegressionTest(TestCase):
         article = next(name for name in files if name.startswith("Статьи/"))
         body = archive.read(article).decode().split("---", 2)[-1]
         self.assertNotIn("[[evil]]", body)
-        self.assertNotIn("<script>", body)
-        self.assertNotIn("<img", body)
+        # Backslash escaping keeps Markdown from rendering raw HTML; the
+        # escaped forms may still contain the literal "<img"/"<script" text.
+        self.assertNotRegex(body, r"(?<!\\)<script>")
+        self.assertNotRegex(body, r"(?<!\\)<img")
         self.assertIn("\\[\\[evil\\]\\]", body)
+        self.assertIn("\\<img", body)

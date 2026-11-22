@@ -132,6 +132,7 @@ export function setPassport(data) {
       ? [`Набор Solar неполный: нет таблиц ${missing.join(", ")}. `
         + "Контекст прибора, материала и слоёв может быть неполным."]
       : [],
+    envelope: solar ? data : null,
   };
   return rows.length;
 }
@@ -197,6 +198,46 @@ function download(rows, columns) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function passportEnvelope(source) {
+  if (source.envelope) {
+    const envelope = {...source.envelope};
+    const publication = envelope.publication || (Array.isArray(envelope.publications) ? envelope.publications[0] : null);
+    envelope.publication = publication || {title: source.title};
+    envelope.publication_id = envelope.publication_id || envelope.publication?.publication_id || "";
+    envelope.results = (Array.isArray(envelope.results) ? envelope.results : []).map(result => ({
+      ...result,
+      source: result.source || (result.source_fragment ? {
+        page: result.source_page,
+        quote: result.source_fragment,
+        section: result.source_section,
+        table: result.source_table,
+        figure: result.source_figure,
+      } : undefined),
+    }));
+    envelope.track = envelope.track || "solar";
+    return envelope;
+  }
+  const results = source.rows.map(({result, source: evidence, issues}) => ({
+    ...result,
+    source: evidence ? {
+      page: evidence.page,
+      quote: evidence.quote,
+      section: evidence.section,
+      table: evidence.table,
+      figure: evidence.figure,
+    } : undefined,
+    issues,
+  }));
+  return {
+    title: source.title,
+    publication: {title: source.title},
+    publication_id: source.rows[0]?.result?.publication_id || "",
+    results,
+    issues: source.rows.flatMap(row => row.issues || []),
+    warnings: source.warnings || [],
+  };
+}
+
 export function renderPassport(root, ctx) {
   document.title = "Паспорт статьи · ВИНИТИ";
   const source = current || demoState();
@@ -233,6 +274,35 @@ export function renderPassport(root, ctx) {
     type: "button", class: "secondary", text: "Скачать CSV",
     title: "Строки со статусом «Пройдена» и извлечённым значением",
     onclick: () => download(rows, source.columns),
+  });
+
+  const markdownButton = el("button", {
+    type: "button", class: "secondary", text: "Скачать Markdown",
+    title: "Заметка для Obsidian: YAML frontmatter, библиография, результаты, замечания и цитаты",
+    disabled: source.demo ? "" : null,
+    onclick: async () => {
+      if (source.demo) return;
+      const label = markdownButton.textContent;
+      markdownButton.disabled = true;
+      markdownButton.textContent = "Готовим…";
+      try {
+        const envelope = passportEnvelope(source);
+        const {passportMarkdown, markdownFilename} = await import("./markdown.js");
+        const text = passportMarkdown(envelope);
+        const url = URL.createObjectURL(new Blob([text], {type: "text/markdown;charset=utf-8"}));
+        const link = el("a", {href: url, download: markdownFilename(envelope)});
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        ctx.say("Заметка Markdown скачана.");
+      } catch (error) {
+        ctx.say(`Не удалось подготовить Markdown: ${error.message}`, true);
+      } finally {
+        markdownButton.disabled = source.demo;
+        markdownButton.textContent = label;
+      }
+    },
   });
 
   const pdfInput = el("input", {type: "file", accept: ".pdf,application/pdf"});
@@ -424,7 +494,7 @@ export function renderPassport(root, ctx) {
         el("p", {class: "lede", text: source.title}),
         el("p", {class: "passport-note", text: "Таблицы, значения и цитаты одной статьи. Файл JSON с этим результатом скачивает разбор PDF."}),
       ),
-      el("div", {class: "actions"}, importButton, pdfLabel),
+      el("div", {class: "actions"}, markdownButton, importButton, pdfLabel),
     ),
     notice ? el("p", {class: `notice ${notice.tone}`, role: notice.tone === "bad" ? "alert" : "status", text: notice.text}) : null,
     el("section", {class: "stats", "aria-label": "Сводка паспорта"},

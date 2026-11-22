@@ -10,7 +10,11 @@ Two entry points sit on the same rules:
 * :func:`chat` takes a config built by :func:`config_from_env` and is used by
   the profile LLM shell;
 * :func:`complete` resolves ``OPENROUTER_*`` (or explicit arguments) and is the
-  older solar/profile seam.
+  older solar/profile seam;
+* :func:`complete_env` keeps the ``complete`` reply shape but takes credentials,
+  model and base URL from the environment-wide config. The destination follows
+  the credential source: ``OPENROUTER_BASE_URL`` for an OpenRouter fallback key,
+  ``OPENAI_BASE_URL`` otherwise.
 
 The transport is provider-neutral: any endpoint that speaks the chat-completions
 shape works. Configuration is read only from the environment:
@@ -20,7 +24,10 @@ shape works. Configuration is read only from the environment:
 * ``OPENAI_BASE_URL`` - optional, defaults to ``https://api.openai.com/v1``;
 * ``OPENAI_LLM_TIMEOUT`` - optional request timeout in seconds (1..600),
   defaults to ``90``;
-* ``OPENAI_LLM_RETRIES`` - optional retry count (0..3), defaults to ``2``.
+* ``OPENAI_LLM_RETRIES`` - optional retry count (0..3), defaults to ``2``;
+* ``OPENAI_JSON_MODE`` - ``off`` stops sending ``response_format`` for gateways
+  that reject it; any other value keeps provider-side JSON mode on;
+* ``OPENAI_VISION_MODEL`` / ``OPENROUTER_VISION_MODEL`` - optional vision model.
 
 ``OPENROUTER_API_KEY`` / ``OPENROUTER_MODEL`` stay as a fallback so the older
 solar transport keeps working. When the key comes from the fallback and no
@@ -70,6 +77,11 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_MESSAGES = 16
 MAX_CONTENT_CHARS = 2_000_000
 ROLES = {"system", "user", "assistant"}
+JSON_MODE_OFF = frozenset({"off", "0", "false", "no"})
+MAX_CONTENT_PARTS = 32
+MAX_IMAGE_URL_CHARS = 4 * 1024 * 1024
+MAX_IMAGE_CHARS_TOTAL = 5_000_000
+IMAGE_DATA_PREFIX = "data:image/"
 DEFAULT_TIMEOUT = 90
 DEFAULT_RETRIES = 2
 DEFAULT_MAX_TOKENS = 16000
@@ -110,8 +122,10 @@ def _load_dotenv(path=None):
         name, value = name.strip().lstrip("\ufeff"), value.strip()
         if not name or name not in {
             "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-            "OPENAI_LLM_TIMEOUT", "OPENAI_LLM_RETRIES",
-            "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "VINITI_PARSE_LLM",
+            "OPENAI_LLM_TIMEOUT", "OPENAI_LLM_RETRIES", "OPENAI_JSON_MODE",
+            "OPENAI_VISION_MODEL", "OPENROUTER_VISION_MODEL",
+            "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "OPENROUTER_MODEL",
+            "VINITI_PARSE_LLM",
         } or (name in os.environ and os.environ[name].strip()):
             continue
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
@@ -131,6 +145,17 @@ urlopen = build_opener(NoRedirect).open
 
 def _text(value):
     return value.strip() if isinstance(value, str) else ""
+
+
+def json_mode(environ=None):
+    """Whether provider-side JSON mode is requested.
+
+    Gateways that reject ``response_format`` are supported through
+    ``OPENAI_JSON_MODE=off``. Missing or unknown values keep it on, because the
+    reply is validated as JSON either way.
+    """
+    env = os.environ if environ is None else environ
+    return _text(env.get("OPENAI_JSON_MODE")).lower() not in JSON_MODE_OFF
 
 
 def _bounded_int(raw, default, low, high):
@@ -203,7 +228,6 @@ def config_from_env(environ=None):
     env = os.environ if environ is None else environ
     key = _text(env.get("OPENAI_API_KEY"))
     model = _text(env.get("OPENAI_MODEL"))
-    base = _text(env.get("OPENAI_BASE_URL"))
     source = "openai"
     if not key:
         key = _text(env.get("OPENROUTER_API_KEY"))
@@ -216,12 +240,16 @@ def config_from_env(environ=None):
             "Не заданы переменные окружения: " + ", ".join(missing)
             + ". Ключ и модель передаются только через окружение, не аргументами."
         )
-    if not base and source == "openrouter":
-        base = OPENROUTER_BASE_URL
-    base = base or DEFAULT_BASE_URL
+    if source == "openrouter":
+        # An OpenRouter key must never follow OPENAI_BASE_URL, even when that
+        # variable is set for another provider in the same environment.
+        base = _text(env.get("OPENROUTER_BASE_URL")) or OPENROUTER_BASE_URL
+    else:
+        base = _text(env.get("OPENAI_BASE_URL")) or DEFAULT_BASE_URL
     return {
         "api_key": key, "model": model, "base_url": base,
         "endpoint": endpoint_for(base), "source": source or "openai",
+        "json_mode": json_mode(env),
         **transport_options(environ=env),
     }
 
@@ -277,10 +305,13 @@ def chat(messages, config, *, timeout=DEFAULT_TIMEOUT, retries=DEFAULT_RETRIES,
         raise ValueError("Конфигурация LLM неполна: нужны ключ, модель и адрес.")
     _check_messages(messages)
     _check_options(timeout, retries, max_tokens)
-    body = json.dumps({
+    body = {
         "model": model, "messages": messages, "temperature": 0,
-        "max_tokens": max_tokens, "response_format": {"type": "json_object"},
-    }, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        "max_tokens": max_tokens,
+    }
+    if config.get("json_mode", True):
+        body["response_format"] = {"type": "json_object"}
+    body = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if len(body) > MAX_REQUEST_BYTES:
         raise ValueError("Запрос к модели превышает допустимый размер.")
     request = Request(endpoint, data=body, headers={
@@ -388,6 +419,42 @@ def legacy_endpoint(base_url=None, *, api_key=None, model=None, environ=None):
     return endpoint_for(_text(env.get("OPENAI_BASE_URL")) or DEFAULT_BASE_URL)
 
 
+def _content_size(content):
+    """Return ``(text_chars, image_chars)`` for one message content.
+
+    Plain strings are the legacy shape. A list of content parts is accepted for
+    vision requests: text parts and ``data:image/*`` URLs, bounded per part and
+    in total. Text and images have separate budgets, so one large page image
+    does not consume the text allowance. Anything else is rejected before any
+    network I/O.
+    """
+    if isinstance(content, str):
+        return len(content), 0
+    if not isinstance(content, list) or not 1 <= len(content) <= MAX_CONTENT_PARTS:
+        raise ProviderConfigError("Некорректная роль или содержимое сообщения модели.")
+    text_total = image_total = 0
+    for part in content:
+        if not isinstance(part, dict):
+            raise ProviderConfigError("Некорректная часть содержимого сообщения модели.")
+        kind = part.get("type")
+        if kind == "text":
+            text = part.get("text")
+            if not isinstance(text, str):
+                raise ProviderConfigError("Текстовая часть сообщения должна быть строкой.")
+            text_total += len(text)
+        elif kind == "image_url":
+            image = part.get("image_url")
+            url = image.get("url") if isinstance(image, dict) else None
+            if not isinstance(url, str) or not url.startswith(IMAGE_DATA_PREFIX) \
+                    or len(url) > MAX_IMAGE_URL_CHARS:
+                raise ProviderConfigError(
+                    "Изображение должно быть data:image/* URL в допустимом размере.")
+            image_total += len(url)
+        else:
+            raise ProviderConfigError("Неизвестный тип части сообщения модели.")
+    return text_total, image_total
+
+
 def _check_legacy_messages(messages):
     """Size and shape limits for :func:`complete`.
 
@@ -398,17 +465,21 @@ def _check_legacy_messages(messages):
     if not isinstance(messages, list) or len(messages) > MAX_MESSAGES:
         raise ProviderConfigError(
             f"Сообщения модели должны быть списком не длиннее {MAX_MESSAGES}.")
-    total = 0
+    text_total = image_total = 0
     for message in messages:
         if not isinstance(message, dict):
             raise ProviderConfigError(
                 "Сообщение модели должно быть объектом с role и content.")
-        role, content = message.get("role"), message.get("content")
-        if role not in ROLES or not isinstance(content, str):
+        role = message.get("role")
+        if role not in ROLES:
             raise ProviderConfigError("Некорректная роль или содержимое сообщения модели.")
-        total += len(content)
-    if total > MAX_CONTENT_CHARS:
-        raise ProviderConfigError("Запрос к модели превышает допустимый размер.")
+        text_chars, image_chars = _content_size(message.get("content"))
+        text_total += text_chars
+        image_total += image_chars
+    if text_total > MAX_CONTENT_CHARS:
+        raise ProviderConfigError("Текст запроса к модели превышает допустимый размер.")
+    if image_total > MAX_IMAGE_CHARS_TOTAL:
+        raise ProviderConfigError("Изображения запроса к модели превышают допустимый размер.")
 
 
 def _read_reply(transport, request, *, timeout, retries, limit, sleep):
@@ -463,10 +534,13 @@ def complete(messages, *, api_key=None, model=None, timeout=DEFAULT_TIMEOUT,
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise ProviderConfigError("Некорректный лимит ответа.")
 
-    body = json.dumps({
+    body = {
         "model": name, "messages": messages, "temperature": 0,
-        "max_tokens": max_tokens, "response_format": {"type": "json_object"},
-    }, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        "max_tokens": max_tokens,
+    }
+    if json_mode():
+        body["response_format"] = {"type": "json_object"}
+    body = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
     if len(body) > MAX_REQUEST_BYTES:
         raise ProviderConfigError("Запрос к модели превышает допустимый размер.")
     endpoint = legacy_endpoint(base_url, api_key=api_key, model=model)
@@ -494,6 +568,22 @@ def complete(messages, *, api_key=None, model=None, timeout=DEFAULT_TIMEOUT,
         raise ProviderResponseError(
             "Ответ модели должен быть JSON-объектом или массивом.")
     return candidate
+
+
+def complete_env(messages, *, model=None, **options):
+    """One :func:`complete` request configured from the environment.
+
+    Unlike bare :func:`complete`, the endpoint follows the configured base URL
+    even though the credentials are passed explicitly. Callers therefore get
+    the same destination as :func:`chat`, while ``model`` can still override
+    the environment default (``--model``).
+    """
+    config = config_from_env()
+    options.setdefault("timeout", config["timeout"])
+    options.setdefault("retries", config["retries"])
+    return complete(messages, api_key=config["api_key"],
+                    model=model or config["model"],
+                    base_url=config["base_url"], **options)
 
 
 CANDIDATE_SYSTEM = (

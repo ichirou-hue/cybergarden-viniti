@@ -132,6 +132,10 @@ class SolarIndependentQA(unittest.TestCase):
                        if k not in {"OPENROUTER_API_KEY", "OPENROUTER_MODEL"}}
         environment["OPENROUTER_API_KEY"] = ""
         environment["OPENROUTER_MODEL"] = ""
+        # Present-but-empty names win over the developer's .env, so the child
+        # process stays offline no matter what the local environment holds.
+        environment.update({"OPENAI_API_KEY": "", "OPENAI_MODEL": "",
+                            "OPENAI_BASE_URL": ""})
         return subprocess.run([sys.executable, "-X", "utf8", "-m", "viniti", "solar-extract", str(pdf),
                                "-o", str(output), *options], env=environment,
                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
@@ -142,7 +146,7 @@ class SolarIndependentQA(unittest.TestCase):
             pdf.write_bytes(synthetic_pdf())
             run = self.run_cli(pdf, output, "--model", "fake")
             self.assertEqual(run.returncode, 1)
-            self.assertIn("OPENROUTER_API_KEY", run.stderr)
+            self.assertIn("OPENAI_API_KEY", run.stderr)
             self.assertNotIn("Traceback", run.stderr)
             self.assertFalse(output.exists())
 

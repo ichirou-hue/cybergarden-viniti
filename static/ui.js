@@ -67,6 +67,20 @@ export function unitLabel(descriptor, unit) {
   return (descriptor.units && descriptor.units[unit]) || unit;
 }
 
+// Общие оговорки экстрактора повторяются в каждом документе и уже описаны в
+// паспорте и README. На карточке они занимают место рядом с настоящими
+// предупреждениями конкретной статьи, поэтому список для интерфейса их не
+// показывает. Сам JSON результата не меняется: текст остаётся в выгрузке.
+const BOILERPLATE_WARNINGS = new Set([
+  "Проверено буквальное наличие источников, но не научная корректность связей и полнота.",
+  "OCR и оцифровка графиков не реализованы; единицы raw_unit нормализуются по словарю шаблона, остальные требуют ручной проверки.",
+]);
+
+export function visibleWarnings(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(text => !BOILERPLATE_WARNINGS.has(String(text).trim()));
+}
+
 // Общий демо-документ (`rag:demo`) виден всем вошедшим, поэтому его надо
 // отличать от личных загрузок прямо в интерфейсе.
 export function sharedDemoDocument(documentId) {

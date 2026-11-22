@@ -11,8 +11,8 @@ from tempfile import TemporaryDirectory
 from . import llm_provider
 from .atomic_output import publish_directory
 from .llm_provider import (
-    DEFAULT_MAX_TOKENS, DEFAULT_RETRIES, DEFAULT_TIMEOUT, ENDPOINT,
-    MAX_RESPONSE_BYTES, NoRedirect, resolve_config,
+    DEFAULT_MAX_TOKENS, DEFAULT_RETRIES, DEFAULT_TIMEOUT,
+    MAX_RESPONSE_BYTES, NoRedirect,
 )
 from .prompt_rules import DOCUMENT_RULES
 from .solar_facts import MAX_BYTES, export_bundle, finalize, prepare_pdf
@@ -102,6 +102,13 @@ def complete(messages, *, api_key, model, timeout=DEFAULT_TIMEOUT,
     )
 
 
+def complete_env(messages, *, model=None, **options):
+    """Environment-configured wrapper over :func:`llm_provider.complete_env`."""
+    options.setdefault("opener", urlopen)
+    return llm_provider.complete_env(
+        messages, model=model, response_limit=MAX_RESPONSE_BYTES, **options)
+
+
 def analyze_pdf(name, data, *, api_key, model, max_input_chars=200000, **options):
     document = prepare_pdf(name, data)
     candidate = complete(messages(document, max_input_chars), api_key=api_key, model=model, **options)
@@ -109,10 +116,10 @@ def analyze_pdf(name, data, *, api_key, model, max_input_chars=200000, **options
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Извлечение solar: PDF → OpenRouter → проверенный JSON и 7 CSV.")
+    parser = argparse.ArgumentParser(description="Извлечение solar: PDF → LLM → проверенный JSON и 7 CSV.")
     parser.add_argument("pdf", type=Path)
     parser.add_argument("-o", "--output", required=True, type=Path, help="Новый каталог результата.")
-    parser.add_argument("--model", default=os.environ.get("OPENROUTER_MODEL", ""))
+    parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL") or os.environ.get("OPENROUTER_MODEL", ""))
     parser.add_argument("--max-input-chars", type=int, default=200000)
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--timeout", type=int, default=90)
@@ -142,9 +149,9 @@ def main():
                 publish_directory(folder, args.output)
             print(f"Подготовлен запрос без API: {args.output / 'request.json'}")
             return 0
-        api_key, model = resolve_config(model=args.model)
-        candidate = complete(
-            prompt, api_key=api_key, model=model,
+        model = args.model or llm_provider.config_from_env()["model"]
+        candidate = complete_env(
+            prompt, model=model,
             timeout=args.timeout, retries=args.retries, max_tokens=args.max_tokens,
         )
         result = finalize(candidate, document, model=model)

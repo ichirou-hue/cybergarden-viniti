@@ -31,9 +31,19 @@ class ProfileAssistantTest(TestCase):
         self.assertEqual(result["suggestions"][1]["quote"], "")
 
     def test_missing_configuration_is_explicit(self):
-        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": ""}):
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": "",
+                                          "OPENAI_API_KEY": "", "OPENAI_MODEL": ""}):
             with self.assertRaisesRegex(RuntimeError, "не настроен"):
                 suggest({"question": "Нужны поля", "sources": [], "profile": {"types": []}})
+
+    def test_openai_configuration_enables_the_assistant(self):
+        payload = {"question": "Нужны поля", "sources": [], "profile": {"types": []}}
+        response = {"suggestions": []}
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": "",
+                                          "OPENAI_API_KEY": "sk-test",
+                                          "OPENAI_MODEL": "test/model"}):
+            result = suggest(payload, complete_fn=lambda *args, **kwargs: response)
+        self.assertEqual(result["suggestions"], [])
 
     def start_server(self):
         """A real server with auth enabled, as production runs it."""
@@ -78,10 +88,11 @@ class ProfileAssistantTest(TestCase):
     def test_http_requires_server_configuration(self):
         server = self.start_server()
         client, csrf = self.register(server)
-        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": ""}):
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "", "OPENROUTER_MODEL": "",
+                                          "OPENAI_API_KEY": "", "OPENAI_MODEL": ""}):
             status, body = self.assist(server, client, csrf)
         # An authenticated request reaches the assistant, which reports the
-        # missing OpenRouter configuration instead of failing on auth.
+        # missing provider configuration instead of failing on auth.
         self.assertEqual(status, 503)
         self.assertIn("не настроен", body["error"])
 

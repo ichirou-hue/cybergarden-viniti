@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 from .extraction_core import export_result, load_profile, prepare_pdf, run
-from .llm_provider import complete, resolve_config
+from .llm_provider import complete_env, config_from_env
 from .solar_facts import MAX_BYTES
 
 
@@ -17,7 +17,7 @@ def main():
     parser.add_argument("--mode", choices=["scripts", "auto", "model"], default="scripts",
                         help="scripts — offline-кандидаты; auto/model отправляют текст внешнему API.")
     parser.add_argument("-o", "--output", required=True, type=Path)
-    parser.add_argument("--model", default=os.environ.get("OPENROUTER_MODEL", ""))
+    parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL") or os.environ.get("OPENROUTER_MODEL", ""))
     parser.add_argument("--max-input-chars", type=int, default=200000)
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--timeout", type=int, default=90)
@@ -36,11 +36,9 @@ def main():
         if args.ocr != "auto" and args.parser != "docling":
             raise ValueError("--ocr full/off требует --parser docling.")
         profile = load_profile(args.profile)
-        api_key = model = ""
+        model = ""
         if args.mode != "scripts":
-            api_key, model = resolve_config(model=args.model)
-            if not api_key or not model:
-                raise ValueError("Для API задайте OPENROUTER_API_KEY и OPENROUTER_MODEL или --model.")
+            model = args.model or config_from_env()["model"]
         with args.pdf.open("rb") as stream:
             data = stream.read(MAX_BYTES + 1)
         assets = None
@@ -52,8 +50,8 @@ def main():
         client = None
         if args.mode != "scripts":
             def client(messages):
-                return complete(messages, api_key=api_key, model=model,
-                                max_tokens=args.max_tokens, timeout=args.timeout, retries=args.retries)
+                return complete_env(messages, model=model,
+                                    max_tokens=args.max_tokens, timeout=args.timeout, retries=args.retries)
         result = run(document, profile, mode=args.mode, model_client=client, model=model,
                      max_input_chars=args.max_input_chars)
         export_result(result, args.output, assets=assets)

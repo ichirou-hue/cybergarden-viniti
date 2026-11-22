@@ -9,6 +9,7 @@ import { stashProfilePDF, takeProfilePDF } from "./pending.js";
 import { mountAuthScreen, currentAccount, isSignedIn, recordActivity, signOutAccount, restoreSession } from "./auth.js";
 import { mountAccountMenu, renderProfile } from "./account.js";
 import { renderParseJob } from "./parse.js";
+import { renderChatScreen } from "./chat-screen.js";
 
 const view = document.getElementById("view");
 const statusLine = document.getElementById("status");
@@ -18,6 +19,7 @@ const uploadState = document.getElementById("uploadState");
 const demoButton = document.getElementById("demo");
 const passportInput = document.getElementById("passport");
 const passportLink = document.getElementById("passportLink");
+const chatLink = document.getElementById("chatLink");
 const trackBar = document.getElementById("tracks");
 const evidenceDialog = document.getElementById("evidence");
 const wizard = document.getElementById("wizard");
@@ -144,6 +146,10 @@ async function route() {
   const pathChanged = path !== lastPath;
   lastPath = path;
   say("");
+  chatLink?.removeAttribute("aria-current");
+  // «Паспорт» нужен только в каталоге и на самом паспорте. В аккаунте,
+  // разборе и чате он не показывается.
+  passportLink.hidden = !(path === "/passport" || path === "/catalog");
   const wizardActive = path === "/";
   wizard.hidden = !wizardActive;
   document.body.classList.toggle("wizard-active", wizardActive);
@@ -198,6 +204,35 @@ async function route() {
     if (booted && pathChanged) focusView();
     booted = true;
     document.getElementById("bootError").hidden = true;
+    return;
+  }
+
+  if (path === "/chat") {
+    app.controller?.abort();
+    document.body.dataset.view = "chat";
+    passportLink.removeAttribute("aria-current");
+    chatLink?.setAttribute("aria-current", "page");
+    renderTracks("");
+    setUploadEnabled(true);
+    const controller = new AbortController();
+    app.controller = controller;
+    try {
+      await renderChatScreen(view, {
+        descriptors: app.descriptors, params,
+        patch, reload: route, signal: controller.signal,
+      });
+      if (!controller.signal.aborted && booted && pathChanged) focusView();
+      booted = true;
+      document.getElementById("bootError").hidden = true;
+    } catch (error) {
+      if (error.name === "AbortError" || controller.signal.aborted) return;
+      fill(view, el("div", {class: "notice bad", role: "alert"},
+        el("strong", {text: "Не удалось открыть чат"}),
+        el("p", {text: error.message}),
+        el("p", {}, el("a", {href: "#/", text: "Вернуться к загрузке"})),
+      ));
+      say(error.message, true);
+    }
     return;
   }
 
@@ -698,7 +733,7 @@ async function enterApp(account, notice = "") {
   // Вход ведёт на мастер загрузки, а не на каталог. Прямые ссылки на
   // документ и его источник сохраняются.
   const {path} = parse();
-  if (!path.startsWith("/doc/") && !path.startsWith("/parse/")) {
+  if (!path.startsWith("/doc/") && !path.startsWith("/parse/") && path !== "/chat") {
     history.replaceState(null, "", buildHash("/", {track: app.track}));
   }
   // Адрес не трогаем сверх этого: глубокая ссылка должна открыться и при

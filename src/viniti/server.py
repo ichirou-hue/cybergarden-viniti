@@ -804,8 +804,12 @@ class Handler(BaseHTTPRequestHandler):
         if parser not in {"auto", "vision", "pdfplumber", "docling"}:
             self.error("Парсер должен быть auto, vision, pdfplumber или docling.", 400)
             return
-        if parser == "vision" and (not os.environ.get("OPENROUTER_API_KEY") or not os.environ.get("OPENROUTER_VISION_MODEL")):
-            self.error("Для явного vision-разбора задайте OPENROUTER_API_KEY и OPENROUTER_VISION_MODEL на сервере.", 503)
+        if parser == "vision" and (
+                not (os.environ.get("OPENROUTER_VISION_MODEL") or os.environ.get("OPENAI_VISION_MODEL"))
+                or not llm_provider.describe()["configured"]):
+            self.error("Для явного vision-разбора задайте OPENAI_API_KEY/OPENAI_MODEL "
+                       "и OPENAI_VISION_MODEL (или OPENROUTER_API_KEY/OPENROUTER_MODEL "
+                       "и OPENROUTER_VISION_MODEL) на сервере.", 503)
             return
         if ocr not in {"auto", "full", "off"}:
             self.error("OCR должен быть auto, full или off.", 400)

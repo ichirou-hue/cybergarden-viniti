@@ -59,7 +59,7 @@ check("каталог: не меньше 8 публикаций", rows("#view tb
 const statValues = rows(".stats > div strong").map(node => node.textContent.trim()).join("/");
 check("каталог: сводка прогона", statValues === "90/4/3", statValues);
 check("каталог: статусы текстом", text("#view").includes("частично") && text("#view").includes("в очереди"));
-check("каталог: в шапке только «Паспорт»", document.querySelectorAll(".track-switch .track").length === 1);
+check("каталог: ссылки шапки", document.querySelectorAll(".track-switch .track").length === 3 && !document.getElementById("passportLink").hidden);
 
 // Поиск по каталогу
 const search = document.querySelector(".filters input[type=search]");
@@ -72,7 +72,7 @@ check("каталог: поиск фильтрует", text("#view tbody").inclu
 location.hash = "#/doc/rag:d020?track=rag";
 await waitFor(() => text(".doc-main h1").includes("Web Retrieval"), "карточка открылась");
 check("карточка: заголовок", text(".doc-main h1").includes("W-RAC"), text(".doc-main h1"));
-check("карточка: вкладки", rows(".tabs .tab").length === 5);
+check("карточка: вкладки", rows(".tabs .tab").length === 6);
 check("карточка: ARIA вкладок", Boolean(document.querySelector('.tabs [role=tab][aria-controls="tabpanel"]')) && Boolean(document.querySelector('#tabpanel[role=tabpanel]')));
 check("карточка: ссылка CSV", Boolean(document.querySelector('.doc-actions a[download$=".csv"]')));
 

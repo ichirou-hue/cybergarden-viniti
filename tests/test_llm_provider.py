@@ -54,9 +54,10 @@ class ProviderSuccessTest(TestCase):
             self.assertEqual(timeout, 90)
             return envelope('{"ok": true}')
 
-        self.assertEqual(
-            complete([], api_key="secret", model="test/model", opener=opener),
-            {"ok": True})
+        with mock.patch.dict(os.environ, {"OPENAI_JSON_MODE": "on"}):
+            self.assertEqual(
+                complete([], api_key="secret", model="test/model", opener=opener),
+                {"ok": True})
 
     def test_environment_is_the_default_source(self):
         opener, calls = opener_returning(envelope("[]"))

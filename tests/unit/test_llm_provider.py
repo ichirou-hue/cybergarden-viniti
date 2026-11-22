@@ -95,6 +95,93 @@ class ProviderConfigTest(unittest.TestCase):
         self.assertNotIn("sk-test-secret", json.dumps(status))
         self.assertFalse(llm_provider.describe({})["configured"])
 
+    def test_json_mode_flag_defaults_on_and_accepts_off(self):
+        self.assertTrue(llm_provider.config_from_env(OPENAI_ENV)["json_mode"])
+        for value in ("off", "0", "false", "no", " OFF "):
+            with self.subTest(value=value):
+                self.assertFalse(llm_provider.config_from_env(
+                    {**OPENAI_ENV, "OPENAI_JSON_MODE": value})["json_mode"])
+        for value in ("", "on", "1", "true", "anything"):
+            with self.subTest(value=value):
+                self.assertTrue(llm_provider.config_from_env(
+                    {**OPENAI_ENV, "OPENAI_JSON_MODE": value})["json_mode"])
+
+    def test_complete_env_follows_configured_base_url(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            seen["auth"] = request.get_header("Authorization")
+            seen["body"] = json.loads(request.data)
+            return envelope('{"ok": true}')
+
+        with patch.dict(os.environ, {**OPENAI_ENV, "OPENAI_LLM_TIMEOUT": "7",
+                                     "OPENAI_LLM_RETRIES": "0"}):
+            self.assertEqual(
+                llm_provider.complete_env([{"role": "user", "content": "{}"}],
+                                          opener=opener),
+                {"ok": True})
+        self.assertEqual(seen["url"], "https://example.invalid/v1/chat/completions")
+        self.assertEqual(seen["auth"], "Bearer sk-test-secret")
+        self.assertEqual(seen["body"]["model"], "test/model")
+
+    def test_openrouter_key_never_follows_openai_base_url(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["url"] = request.full_url
+            return envelope('{"ok": true}')
+
+        environment = {"OPENAI_BASE_URL": "https://openai.example/v1",
+                       "OPENROUTER_API_KEY": "sk-or", "OPENROUTER_MODEL": "or/model"}
+        with patch.dict(os.environ, environment):
+            for name in ("OPENAI_API_KEY", "OPENAI_MODEL", "OPENROUTER_BASE_URL"):
+                os.environ.pop(name, None)
+            llm_provider.complete_env([{"role": "user", "content": "{}"}], opener=opener)
+        self.assertEqual(seen["url"],
+                         "https://openrouter.ai/api/v1/chat/completions")
+
+    def test_complete_honours_json_mode_off(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["body"] = json.loads(request.data)
+            return envelope('{"ok": true}')
+
+        with patch.dict(os.environ, {**OPENAI_ENV, "OPENAI_JSON_MODE": "off"}):
+            self.assertEqual(
+                llm_provider.complete_env([{"role": "user", "content": "{}"}],
+                                          opener=opener),
+                {"ok": True})
+        self.assertNotIn("response_format", seen["body"])
+
+    def test_image_budget_is_separate_from_text_budget(self):
+        messages = [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {
+                "url": "data:image/png;base64," + "A" * 500}},
+        ]}]
+
+        def opener(request, timeout):
+            return envelope('{"ok": true}')
+
+        with patch.object(llm_provider, "MAX_CONTENT_CHARS", 100):
+            self.assertEqual(
+                llm_provider.complete(messages, api_key="k", model="m", opener=opener),
+                {"ok": True})
+
+    def test_image_total_budget_is_enforced(self):
+        image = {"type": "image_url", "image_url": {
+            "url": "data:image/png;base64," + "A" * 500}}
+
+        def network(*args, **kwargs):
+            raise AssertionError("transport must not be called")
+
+        with patch.object(llm_provider, "MAX_IMAGE_CHARS_TOTAL", 900), \
+                self.assertRaises(llm_provider.ProviderConfigError):
+            llm_provider.complete(
+                [{"role": "user", "content": [image, image]}],
+                api_key="k", model="m", opener=network)
+
     def test_transport_options_default_when_env_is_missing(self):
         self.assertEqual(llm_provider.transport_options({}),
                          {"timeout": 90, "retries": 2})
@@ -168,6 +255,48 @@ class ProviderTransportTest(unittest.TestCase):
         self.assertEqual(seen["body"]["model"], "test/model")
         self.assertEqual(seen["body"]["temperature"], 0)
         self.assertEqual(seen["body"]["response_format"], {"type": "json_object"})
+
+    def test_json_mode_can_be_switched_off_for_gateways(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen["body"] = json.loads(request.data)
+            return envelope('{"ok": true}')
+
+        config = {**self.config, "json_mode": False}
+        self.assertEqual(llm_provider.chat(self.messages, config, opener=opener),
+                         {"ok": True})
+        self.assertNotIn("response_format", seen["body"])
+        self.assertEqual(seen["body"]["messages"], self.messages)
+
+    def test_multimodal_content_parts_are_accepted(self):
+        seen = {}
+        messages = [{"role": "user", "content": [
+            {"type": "text", "text": "page 1"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]}]
+
+        def opener(request, timeout):
+            seen["body"] = json.loads(request.data)
+            return envelope('{"ok": true}')
+
+        self.assertEqual(
+            llm_provider.complete(messages, api_key="k", model="m", opener=opener),
+            {"ok": True})
+        self.assertEqual(seen["body"]["messages"], messages)
+
+    def test_bad_content_parts_are_rejected_before_transport(self):
+        def network(*args, **kwargs):
+            raise AssertionError("transport must not be called")
+
+        for part in ({"type": "audio"}, {"type": "text", "text": 1},
+                     {"type": "image_url", "image_url": {"url": "https://e/x.png"}},
+                     {"type": "image_url", "image_url": {"url": "data:text/plain;base64,AA"}},
+                     [], "raw"):
+            with self.subTest(part=part), \
+                    self.assertRaises(llm_provider.ProviderConfigError):
+                llm_provider.complete([{"role": "user", "content": [part]}],
+                                      api_key="k", model="m", opener=network)
 
     def test_truncated_or_non_object_reply_is_rejected(self):
         for reply in (envelope("{}", finish="length"), envelope("not json"),
