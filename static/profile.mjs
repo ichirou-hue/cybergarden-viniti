@@ -1,4 +1,4 @@
-import { stashProfilePDF, takeProfilePDF } from "./pending.js";
+import { clearProfilePDF, peekProfilePDF, stashProfilePDF } from "./pending.js";
 import { apiFetch, loadSession } from "./api.js";
 
 const byId = id => document.getElementById(id);
@@ -295,23 +295,110 @@ async function parseResponse(response) {
   return data;
 }
 
-async function readPdf(file) {
-  let job = await parseResponse(await authorized(await apiFetch("/api/parse", {
+// Разбор по полям идёт на сервере, поэтому номер задания запоминается на
+// время вкладки: после перехода на другую страницу и возврата прогресс и
+// результат возвращаются, а не пропадают вместе со страницей.
+const JOB_KEY = "viniti.profile.job";
+// Сервер держит разбор до 30 минут, поэтому запись живёт чуть дольше:
+// иначе возврат на страницу потерял бы ещё идущее задание.
+const JOB_TTL_MS = 45 * 60 * 1000;
+const HANDOFF_KEY = "viniti.profile.handoff";
+
+function rememberJob(job) {
+  try {
+    sessionStorage.setItem(JOB_KEY, JSON.stringify({
+      id: job.id, filename: job.filename || "", savedAt: Date.now(),
+    }));
+  } catch {
+    // Приватный режим: разбор просто не возобновится после перехода.
+  }
+}
+
+function forgetJob() {
+  try { sessionStorage.removeItem(JOB_KEY); } catch { /* см. rememberJob */ }
+}
+
+function rememberedJob() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(JOB_KEY) || "null");
+    if (!saved || typeof saved.id !== "string" || !saved.id) return null;
+    if (Date.now() - Number(saved.savedAt) > JOB_TTL_MS) return null;
+    return saved;
+  } catch {
+    return null;
+  }
+}
+
+function jobPath(jobId) {
+  return "/api/parse/" + encodeURIComponent(jobId);
+}
+
+// null значит, что задание уже удалено на сервере: возобновлять нечего.
+async function readJob(jobId) {
+  const response = await authorized(await apiFetch(jobPath(jobId), {cache: "no-store"}));
+  if (response.status === 404) return null;
+  return parseResponse(response);
+}
+
+function missingJob() {
+  const error = new Error("Разбор больше не доступен. Выберите PDF снова.");
+  error.missing = true;
+  return error;
+}
+
+async function awaitJob(job) {
+  let current = job;
+  while (current.status === "queued" || current.status === "running") {
+    status.textContent = current.status === "queued" ? "PDF ожидает своей очереди…"
+      : "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const next = await readJob(current.id);
+    if (!next) throw missingJob();
+    current = next;
+  }
+  if (current.status !== "ok") {
+    forgetJob();
+    throw new Error(current.error || "Разбор PDF завершился с ошибкой.");
+  }
+  const result = await parseResponse(await authorized(
+    await apiFetch(jobPath(current.id) + "/result", {cache: "no-store"})));
+  return {job: current, data: {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []}};
+}
+
+async function startJob(file) {
+  const job = await parseResponse(await authorized(await apiFetch("/api/parse", {
     method: "POST",
     headers: {"Content-Type": "application/pdf", "X-Parser": "pdfplumber", "X-Profile": "solar",
       "X-Filename": encodeURIComponent(file.name)},
     body: file,
   })));
-  const path = "/api/parse/" + encodeURIComponent(job.id);
-  while (job.status === "queued" || job.status === "running") {
-    status.textContent = job.status === "queued" ? "PDF ожидает своей очереди…"
-      : "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    job = await parseResponse(await apiFetch(path, {cache: "no-store"}));
+  rememberJob(job);
+  return job;
+}
+
+function showParsed(data, filename) {
+  documentData = {...data, filename};
+  clearHandoff();
+  const sourceLine = byId("profileSource");
+  if (sourceLine) {
+    sourceLine.textContent = filename + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
+      + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
   }
-  if (job.status !== "ok") throw new Error(job.error || "Разбор PDF завершился с ошибкой.");
-  const result = await parseResponse(await apiFetch(path + "/result", {cache: "no-store"}));
-  return {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []};
+  form.hidden = false;
+  byId("assistantEntry").hidden = true;
+  if (!entities.children.length) applyPreset("basic");
+  if (!byId("assistantMessages").children.length) {
+    chatMessage("PDF прочитан. Спросите, какие поля искать в статье, или отметьте фрагменты слева.");
+  }
+  status.textContent = "PDF прочитан. Выберите готовый набор или опишите поля вручную.";
+}
+
+async function releasePending() {
+  try {
+    await clearProfilePDF();
+  } catch (error) {
+    console.warn("Не удалось освободить переданный PDF:", error.message);
+  }
 }
 
 let proposals = [];
@@ -398,10 +485,13 @@ byId("assistantApply").onclick = () => {
 
 let loading = false;
 let currentFile = null;
+let handoffStored = false;
 async function loadFile(file) {
   if (!file || loading) return;
   if (!(await sessionReady)) return;
   currentFile = file;
+  handoffStored = false;
+  clearHandoff();
   assistantHistory.length = 0;
   byId("assistantMessages").replaceChildren();
   byId("assistantSuggestions").replaceChildren();
@@ -416,21 +506,15 @@ async function loadFile(file) {
   byId("profilePanel").hidden = false;
   status.textContent = "Читаем текст, таблицы и подписи страниц. Это может занять несколько минут…";
   try {
-    const data = await readPdf(file);
-    documentData = {...data, filename: file.name};
-    const sourceLine = byId("profileSource");
-    if (sourceLine) {
-      sourceLine.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
-        + (data.warnings.length ? " · " + data.warnings.join(" ") : "");
-    }
-    form.hidden = false;
-    byId("assistantEntry").hidden = true;
-    if (!entities.children.length) applyPreset("basic");
-    if (!byId("assistantMessages").children.length) {
-      chatMessage("PDF прочитан. Спросите, какие поля искать в статье, или отметьте фрагменты слева.");
-    }
-    status.textContent = "PDF прочитан. Выберите готовый набор или опишите поля вручную.";
+    const {data, job} = await awaitJob(await startJob(file));
+    showParsed(data, job.filename || file.name);
+    await releasePending();
   } catch (error) {
+    // Файл, который сервер не принял, не возвращаем в мастер: иначе каждый
+    // вход на страницу повторял бы тот же отказ. Выбрать другой PDF можно
+    // кнопкой «Загрузить PDF» в шапке.
+    currentFile = null;
+    await releasePending();
     showError(error.message);
   } finally {
     upload.value = "";
@@ -439,20 +523,116 @@ async function loadFile(file) {
   }
 }
 
+// Возврат на страницу профиля: активный разбор и его результат показываются
+// снова, вместо пустого экрана с просьбой выбрать PDF.
+async function resumeJob(saved, file = null) {
+  // Файл уже выбран вручную: возобновление не должно перебивать его разбор.
+  if (loading) return false;
+  loading = true;
+  upload.disabled = true;
+  form.hidden = true;
+  currentFile = file || currentFile;
+  if (file) handoffStored = false;
+  clearError();
+  clearMatches();
+  byId("profilePanel").hidden = false;
+  byId("assistantEntry").hidden = true;
+  status.textContent = "Возвращаемся к разбору PDF. Это может занять несколько минут…";
+  try {
+    const current = await readJob(saved.id);
+    if (!current) throw missingJob();
+    const wasActive = current.status === "queued" || current.status === "running";
+    const {data, job} = await awaitJob(current);
+    showParsed(data, job.filename || saved.filename || "Документ");
+    if (!wasActive) {
+      // Поля профиля живут только в форме, поэтому после возврата их
+      // приходится заполнять заново: об этом честно сообщаем.
+      status.textContent = "Разбор восстановлен. Поля профиля нужно проверить заново.";
+    }
+    await releasePending();
+    return true;
+  } catch (error) {
+    forgetJob();
+    if (error.missing) {
+      // Задание исчезло на сервере: возвращаем экран к выбору PDF.
+      byId("profilePanel").hidden = true;
+      byId("assistantEntry").hidden = false;
+      status.textContent = "";
+      return false;
+    }
+    showError(error.message);
+    return true;
+  } finally {
+    upload.disabled = false;
+    loading = false;
+  }
+}
+
+function handoffFailed() {
+  try {
+    if (sessionStorage.getItem(HANDOFF_KEY) !== "failed") return false;
+    sessionStorage.removeItem(HANDOFF_KEY);
+  } catch {
+    return false;
+  }
+  byId("assistantEntry").textContent = "PDF из мастера не передался. Выберите файл снова: "
+    + "поля, фрагменты и помощник появятся после чтения.";
+  return true;
+}
+
+function clearHandoff() {
+  try { sessionStorage.removeItem(HANDOFF_KEY); } catch { /* хранилище недоступно */ }
+}
+
+// Что показать при входе: переданный из мастера PDF, продолжение активного
+// разбора или просьбу выбрать файл.
+async function restoreEntry() {
+  // Без сессии страница уже уходит на вход: переданный PDF трогать нельзя.
+  if (!(await sessionReady)) return;
+  let file;
+  if ("indexedDB" in globalThis) {
+    try {
+      file = await peekProfilePDF();
+    } catch (error) {
+      console.warn("Не удалось прочитать переданный PDF:", error.message);
+    }
+  }
+  const saved = rememberedJob();
+  if (file) {
+    if (saved && saved.filename && saved.filename === file.name) {
+      // Этот файл уже разбирается: продолжаем задание, а не запускаем второе.
+      if (await resumeJob(saved, file)) return;
+    }
+    await loadFile(file);
+    return;
+  }
+  if (saved) {
+    const restored = await resumeJob(saved);
+    // Задание истекло на сервере: если PDF из мастера тоже не передался,
+    // об этом надо сказать, а не оставлять общую подсказку.
+    if (!restored) handoffFailed();
+    return;
+  }
+  handoffFailed();
+}
+
 upload.onchange = () => {
   const file = upload.files[0];
   if (file) loadFile(file);
 };
 
-// Без IndexedDB (jsdom, старый браузер) страница работает как обычно:
-// PDF выбирается вручную.
-if ("indexedDB" in globalThis) {
-  takeProfilePDF().then(file => {
-    if (file) loadFile(file);
-  }).catch(error => {
-    console.warn("Не удалось забрать PDF из мастер-потока:", error.message);
-  });
-}
+// Страница сама решает, что показать при входе; без IndexedDB (jsdom, старый
+// браузер) остаётся обычный выбор PDF.
+void restoreEntry();
+
+// Браузерная кнопка «назад» не проходит через ссылку, поэтому PDF, который
+// ещё разбирается, сохраняется и на уходе со страницы. Если файл уже отдан
+// стрелкой «назад», второй записи не нужно.
+window.addEventListener("pagehide", () => {
+  if (!currentFile || handoffStored) return;
+  stashProfilePDF(currentFile)
+    .catch(error => console.warn("Не удалось вернуть PDF в мастер:", error.message));
+});
 
 // Стрелка «назад» возвращает в мастер выбранный PDF: без этого файл
 // пришлось бы выбирать заново, а мастер терял бы шаг с профилем.
@@ -463,6 +643,7 @@ if (backLink) {
     event.preventDefault();
     try {
       await stashProfilePDF(currentFile);
+      handoffStored = true;
     } catch (error) {
       console.warn("Не удалось вернуть PDF в мастер:", error.message);
     }

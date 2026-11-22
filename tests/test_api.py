@@ -17,8 +17,9 @@ from urllib.request import urlopen
 import db as storage
 from library import Library
 from server import Handler, ThreadingHTTPServer, serve_until_interrupt
+from viniti import paths
 
-ROOT = Path(__file__).resolve().parents[1]
+STATIC = paths.STATIC_DIR
 
 
 def get(url):
@@ -193,10 +194,10 @@ class ApiTest(unittest.TestCase):
         status, media_type, body = get_with_type(self.base + "/")
         self.assertEqual(status, 200)
         self.assertEqual(media_type, "text/html; charset=utf-8")
-        self.assertEqual(body, (ROOT / "static" / "index.html").read_bytes())
+        self.assertEqual(body, (STATIC / "index.html").read_bytes())
 
     def test_manual_profile_is_served_from_its_own_screen(self):
-        expected = (ROOT / "static" / "manual-profile.html").read_bytes()
+        expected = (STATIC / "manual-profile.html").read_bytes()
         for path in ("/manual-profile", "/solar", "/solar.html"):
             status, media_type, body = get_with_type(self.base + path)
             self.assertEqual(status, 200, path)
@@ -208,12 +209,12 @@ class ApiTest(unittest.TestCase):
         status, media_type, body = get_with_type(self.base + "/style.css")
         self.assertEqual(status, 200)
         self.assertEqual(media_type, "text/css; charset=utf-8")
-        self.assertEqual(body, (ROOT / "static" / "style.css").read_bytes())
+        self.assertEqual(body, (STATIC / "style.css").read_bytes())
 
         status, media_type, body = get_with_type(self.base + "/app.js")
         self.assertEqual(status, 200)
         self.assertEqual(media_type, "text/javascript; charset=utf-8")
-        self.assertEqual(body, (ROOT / "static" / "app.js").read_bytes())
+        self.assertEqual(body, (STATIC / "app.js").read_bytes())
 
     def test_missing_static_file_is_404(self):
         status, _, _ = get_with_type(self.base + "/solar.js")

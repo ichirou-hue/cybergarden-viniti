@@ -104,3 +104,55 @@ class SolarRecognitionTest(unittest.TestCase):
         envelope = self.store.get(self.document_id)
         self.assertEqual(set(envelope["anchors"]), {"7", "1000001"})
         self.assertEqual(envelope["results"], self.original["results"])
+
+
+class CatalogRecognitionReuseTest(unittest.TestCase):
+    """One document and owner must not queue two recognition jobs."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+
+        import server
+
+        self.server = server
+        self.temporary = TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.handler = server.Handler.__new__(server.Handler)
+        self.handler.server = SimpleNamespace(parse_root=Path(self.temporary.name))
+
+    def start(self, owner=7):
+        with mock.patch.object(self.server.Handler, "run_parse") as runner, \
+                mock.patch.object(self.server.threading, "Thread", InlineThread):
+            job_id = self.handler.start_catalog_parse(
+                "solar:repeat", "D001.pdf", b"%PDF-synthetic", owner_user_id=owner)
+        return job_id, runner.call_count
+
+    def test_active_job_is_reused_and_finished_job_is_not(self):
+        first, calls = self.start()
+        self.assertEqual(calls, 1)
+        again, calls = self.start()
+        self.assertEqual(again, first)
+        self.assertEqual(calls, 0)
+        # A finished run keeps its result; the next upload may start a new one.
+        folder = Path(self.temporary.name) / first
+        job = self.handler.read_job(folder)
+        job["status"] = "ok"
+        self.handler.write_job(folder, job)
+        third, calls = self.start()
+        self.assertNotEqual(third, first)
+        self.assertEqual(calls, 1)
+
+    def test_another_owner_gets_its_own_job(self):
+        first, _ = self.start(owner=7)
+        second, _ = self.start(owner=8)
+        self.assertNotEqual(first, second)
+
+
+class InlineThread:
+    """Run the target at once instead of spawning a real thread."""
+
+    def __init__(self, target=None, args=(), **kwargs):
+        self.target, self.args = target, args
+
+    def start(self):
+        self.target(*self.args)

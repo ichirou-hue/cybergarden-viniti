@@ -58,6 +58,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from prompt_rules import DOCUMENT_RULES
+from viniti import paths
 
 
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
@@ -96,7 +97,7 @@ class ProviderResponseError(ProviderError):
 
 def _load_dotenv(path=None):
     """Load a small project-local .env without overriding the shell environment."""
-    path = Path(path or Path(__file__).with_name(".env"))
+    path = Path(path or paths.REPO_ROOT / ".env")
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
