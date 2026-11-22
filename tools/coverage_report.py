@@ -19,8 +19,9 @@ exporter or in the storage layer is a silent data-loss bug waiting to happen.
     python -X utf8 tools/coverage_report.py --threshold 70
         exit 1 when any measured module is below 70 percent. Opt-in gate.
 
-Modules are discovered by globbing the repo root for ``*.py`` and ``viniti/`` for
-``**/*.py``. Excluded: ``test_*.py`` and ``tests/`` (they are the suite),
+Modules are discovered by globbing the repo root for ``*.py`` and each package
+(``viniti/``, ``rag/``) for ``**/*.py``. Excluded: ``test_*.py`` and ``tests/``
+(they are the suite),
 ``__init__.py`` (package markers), ``demo.py`` and ``passport.py``
 (fixtures/generator), ``analyze_pdfs.py`` (runs in a subprocess, so in-process
 coverage would read 0), ``serve_data.py`` (a thin datasette wrapper), and
@@ -49,15 +50,23 @@ WATCHLIST = (
     "norm.py", "extract.py", "verify.py",
 )
 
+# Packages beside the root modules. A new package must be added here, or its
+# modules are measured as "never imported" without ever appearing in the table.
+PACKAGE_DIRS = ("rag", "viniti")
+
 
 def discover_modules():
-    """Production modules: root-level *.py plus viniti/**, in path order.
+    """Production modules: root-level *.py plus the packages, in path order.
 
     ``tests/`` is not measured: those files are the suite itself, and
     ``run_suite`` already discovers them through the ``tests`` package.
     """
     found = []
-    candidates = sorted(ROOT.glob("*.py")) + sorted((ROOT / "viniti").rglob("*.py"))
+    candidates = sorted(ROOT.glob("*.py"))
+    for package in PACKAGE_DIRS:
+        directory = ROOT / package
+        if directory.is_dir():
+            candidates += sorted(directory.rglob("*.py"))
     for path in candidates:
         if path.name.startswith("test_") or path.name == "__init__.py":
             continue

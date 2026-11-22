@@ -4,12 +4,17 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 
 from extraction_core import export_result, load_profile, prepare_pdf, run
 from solar_facts import MAX_BYTES
+from viniti import diagnostics
+
+logger = diagnostics.get_logger("parse_document")
 
 
 def parse(args):
+    started = time.perf_counter()
     if args.output.exists():
         raise ValueError("Каталог результата уже существует.")
     if args.charts and args.parser != "docling":
@@ -21,12 +26,19 @@ def parse(args):
         data = stream.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise ValueError("PDF больше 40 МиБ.")
+    diagnostics.event(logger, "parse.start", parser=args.parser,
+                      publication_id=args.publication_id or path.stem,
+                      ocr=args.ocr if args.parser == "docling" else "off",
+                      charts=bool(args.charts), bytes=len(data))
     profile = load_profile(args.profile)
     if args.parser == "docling":
         from docling_source import prepare_pdf as prepare_docling
         document, assets = prepare_docling(path.name, data, ocr=args.ocr, charts=args.charts)
     else:
         document, assets = prepare_pdf(path.name, data), None
+    diagnostics.event(logger, "parse.prepared", parser=args.parser,
+                      pages=document.get("pages", 0),
+                      sources=len(document.get("sources") or []))
     if args.publication_id:
         document["publication_id"] = args.publication_id
     result = run(document, profile, mode="scripts")
@@ -49,10 +61,17 @@ def parse(args):
         "candidates": len(result["candidates"]),
         "warnings": len(result["warnings"]),
     }, ensure_ascii=False))
+    diagnostics.event(logger, "parse.done", parser=args.parser,
+                      duration_ms=int((time.perf_counter() - started) * 1000),
+                      pages=result["document"]["pages"],
+                      sources=len(result["sources"]),
+                      candidates=len(result["candidates"]),
+                      warnings=len(result["warnings"]))
     return 0
 
 
 def main(argv=None):
+    diagnostics.configure()
     parser = argparse.ArgumentParser(
         description="PDF + профиль -> разбор без LLM: источники, кандидаты и артефакты.")
     parser.add_argument("pdf", type=Path)
@@ -67,6 +86,9 @@ def main(argv=None):
     try:
         return parse(args)
     except (OSError, ValueError) as error:
+        # Emit before the contract line: the server reads the last stderr line
+        # as the job error, so ``parse: ...`` must stay last.
+        diagnostics.error(logger, "parse.failed", kind=type(error).__name__)
         print(f"parse: {error}", file=sys.stderr)
         return 1
 

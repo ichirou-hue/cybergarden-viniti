@@ -227,7 +227,7 @@ function emptyState(ctx) {
         type: "button", class: "ghost", text: "Сбросить фильтры",
         onclick: () => {
           const track = ctx.descriptor.track;
-          location.hash = `#/?track=${encodeURIComponent(track)}`;
+          location.hash = `#/catalog?track=${encodeURIComponent(track)}`;
         },
       }),
     ),

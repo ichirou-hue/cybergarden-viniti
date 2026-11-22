@@ -15,7 +15,6 @@ from hashlib import sha256
 import io
 import hmac
 import json
-import logging
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -52,7 +51,7 @@ from rag_api import (
 )
 from solar_api import SolarStore, solar_sources
 from solar_api import MAX_BYTES as SOLAR_MAX_BYTES
-from viniti import paths
+from viniti import diagnostics, paths
 
 
 ROOT = paths.REPO_ROOT
@@ -108,7 +107,9 @@ ASSETS = {
 }
 PAPER = re.compile(r"/api/papers/([0-9a-f]{64})(?:/(pdf|sources|facts|headers)(?:/([1-9][0-9]{0,8})\.png)?)?")
 HEAVY_FIELDS = {"entities", "results", "issues", "anchors", "text_sources"}
-log = logging.getLogger(__name__)
+# Configured by diagnostics.configure() in main(); importing the module does
+# not touch process-wide logging.
+log = diagnostics.get_logger("server")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -448,6 +449,9 @@ class Handler(BaseHTTPRequestHandler):
             "owner_user_id": session["user"]["id"],
         }
         self.write_job(folder, job)
+        diagnostics.event(log, "parse.queued", job_id=run_id,
+                          parser=parser, ocr=job["ocr"], charts=charts,
+                          profile=name, bytes=len(data))
         threading.Thread(
             target=self.run_parse,
             args=(folder, profile_path, parser, ocr, charts),
@@ -469,70 +473,90 @@ class Handler(BaseHTTPRequestHandler):
     def run_parse(self, folder, profile_path, parser, ocr, charts):
         slot = getattr(self.server, "docling_slot", None) if parser == "docling" else None
         slots = getattr(self.server, "parse_slots", None)
-        try:
-            if slots is not None:
-                slots.acquire()
-            if slot is not None:
-                slot.acquire()
-            started = round(time(), 3)
-            job = self.read_job(folder)
-            job.update(status="running", started_at=started, updated_at=started)
-            self.write_job(folder, job)
-            interpreter = sys.executable
-            if parser == "docling":
-                interpreter = os.environ.get("VINITI_DOCLING_PYTHON") or interpreter
-            publication_id = Path(job.get("filename", "article.pdf")).stem or "article"
-            command = [
-                interpreter, "-X", "utf8", str(paths.PARSE_SCRIPT), str(folder / "input.pdf"),
-                "--profile", str(profile_path), "--publication-id", publication_id,
-                "-o", str(folder / "bundle"), "--parser", parser,
-            ]
-            if parser == "docling":
-                command += ["--ocr", ocr]
-                if charts:
-                    command.append("--charts")
-            completed = subprocess.run(
-                command, cwd=ROOT, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
-            )
-            self.write_log(folder, completed)
-            job = self.read_job(folder)
-            if completed.returncode:
-                lines = (completed.stderr or completed.stdout or "").strip().splitlines()
-                message = lines[-1] if lines else "Разбор завершился с ошибкой."
-                job.update(status="error", error=message[:500], returncode=completed.returncode)
-            else:
-                lines = (completed.stdout or "").strip().splitlines()
-                try:
-                    summary = json.loads(lines[-1]) if lines else {}
-                except json.JSONDecodeError:
-                    summary = {}
-                if isinstance(summary, dict):
-                    summary.pop("output", None)
-                job.update(status="ok", summary=summary)
-            job.update(updated_at=round(time(), 3), elapsed_seconds=round(time() - started, 3))
-            self.write_job(folder, job)
-        except subprocess.TimeoutExpired:
-            job = self.read_job(folder)
-            job.update(status="error", error=f"Разбор превысил лимит {PARSE_TIMEOUT} с.",
-                       updated_at=round(time(), 3))
-            self.write_job(folder, job)
-        except OSError as error:
-            job = self.read_job(folder)
-            job.update(status="error", error=f"Не удалось запустить разбор: {error}"[:500],
-                       updated_at=round(time(), 3))
-            self.write_job(folder, job)
-        except Exception:
-            log.exception("Разбор PDF завершился внутренней ошибкой")
-            job = self.read_job(folder)
-            job.update(status="error", error="Внутренняя ошибка разбора; подробности в логе сервера.",
-                       updated_at=round(time(), 3))
-            self.write_job(folder, job)
-        finally:
-            if slot is not None:
-                slot.release()
-            if slots is not None:
-                slots.release()
+        with diagnostics.context(job_id=folder.name, parser=parser):
+            try:
+                if slots is not None:
+                    slots.acquire()
+                if slot is not None:
+                    slot.acquire()
+                started = round(time(), 3)
+                job = self.read_job(folder)
+                job.update(status="running", started_at=started, updated_at=started)
+                self.write_job(folder, job)
+                diagnostics.event(log, "parse.running",
+                                  ocr=job.get("ocr"), charts=job.get("charts"),
+                                  profile=job.get("profile"))
+                interpreter = sys.executable
+                if parser == "docling":
+                    interpreter = os.environ.get("VINITI_DOCLING_PYTHON") or interpreter
+                publication_id = Path(job.get("filename", "article.pdf")).stem or "article"
+                command = [
+                    interpreter, "-X", "utf8", str(paths.PARSE_SCRIPT), str(folder / "input.pdf"),
+                    "--profile", str(profile_path), "--publication-id", publication_id,
+                    "-o", str(folder / "bundle"), "--parser", parser,
+                ]
+                if parser == "docling":
+                    command += ["--ocr", ocr]
+                    if charts:
+                        command.append("--charts")
+                completed = subprocess.run(
+                    command, cwd=ROOT, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
+                )
+                self.write_log(folder, completed)
+                job = self.read_job(folder)
+                if completed.returncode:
+                    lines = (completed.stderr or completed.stdout or "").strip().splitlines()
+                    message = lines[-1] if lines else "Разбор завершился с ошибкой."
+                    job.update(status="error", error=message[:500], returncode=completed.returncode)
+                    # No message text here: the subprocess stderr may quote the
+                    # document, and the same string is already in job.json.
+                    diagnostics.error(log, "parse.error",
+                                      returncode=completed.returncode)
+                else:
+                    lines = (completed.stdout or "").strip().splitlines()
+                    try:
+                        summary = json.loads(lines[-1]) if lines else {}
+                    except json.JSONDecodeError:
+                        summary = {}
+                    if isinstance(summary, dict):
+                        summary.pop("output", None)
+                    job.update(status="ok", summary=summary)
+                job.update(updated_at=round(time(), 3), elapsed_seconds=round(time() - started, 3))
+                self.write_job(folder, job)
+                if job.get("status") == "ok":
+                    diagnostics.event(log, "parse.ok",
+                                      duration_ms=int(job["elapsed_seconds"] * 1000),
+                                      pages=job.get("summary", {}).get("pages", 0),
+                                      sources=job.get("summary", {}).get("sources", 0),
+                                      candidates=job.get("summary", {}).get("candidates", 0),
+                                      warnings=job.get("summary", {}).get("warnings", 0))
+            except subprocess.TimeoutExpired:
+                job = self.read_job(folder)
+                job.update(status="error", error=f"Разбор превысил лимит {PARSE_TIMEOUT} с.",
+                           updated_at=round(time(), 3))
+                self.write_job(folder, job)
+                diagnostics.error(log, "parse.timeout",
+                                  timeout_s=PARSE_TIMEOUT)
+            except OSError as error:
+                job = self.read_job(folder)
+                job.update(status="error", error=f"Не удалось запустить разбор: {error}"[:500],
+                           updated_at=round(time(), 3))
+                self.write_job(folder, job)
+                diagnostics.exception(log, "parse.spawn_failed",
+                                      kind=type(error).__name__)
+            except Exception:
+                # One record, not two: the traceback is already in the event.
+                diagnostics.exception(log, "parse.failed")
+                job = self.read_job(folder)
+                job.update(status="error", error="Внутренняя ошибка разбора; подробности в логе сервера.",
+                           updated_at=round(time(), 3))
+                self.write_job(folder, job)
+            finally:
+                if slot is not None:
+                    slot.release()
+                if slots is not None:
+                    slots.release()
 
     def write_log(self, folder, completed):
         text = (completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")
@@ -1262,6 +1286,9 @@ class Handler(BaseHTTPRequestHandler):
             self.error("Файл не является PDF.", 422)
             return
         name = unquote(self.headers.get("X-Filename", "article.pdf"))
+        started = time()
+        diagnostics.event(log, "document.ingest.start", area=track,
+                          bytes=len(data), stream=True)
         self.send_response(200)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -1284,17 +1311,30 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.rag_store().ingest(name, data, track=track, progress=emit)
             document_id = result.get("document_id") if isinstance(result, dict) else None
             if not self.claim_uploaded_document(track, document_id, session):
+                diagnostics.warning(log, "document.ingest.conflict",
+                                    area=track, document_id=document_id or "")
                 emit(0, "Документ уже загружен другим пользователем.",
                      error="Документ с таким содержимым уже загружен другим пользователем.")
             else:
+                counts = (result or {}).get("counts") or {}
+                diagnostics.event(log, "document.ingest.done", area=track,
+                                  duration_ms=int((time() - started) * 1000),
+                                  document_id=document_id or "", stream=True,
+                                  results=counts.get("results", 0),
+                                  issues=counts.get("issues", 0))
                 emit(4, "Обработка завершена", result=result)
         except ValueError as error:
+            diagnostics.error(log, "document.ingest.rejected",
+                              area=track, kind="ValueError")
             emit(0, "Ошибка обработки", error=str(error))
         except Exception:
-            log.exception("Streaming PDF ingest failed")
+            # One record, not two: the traceback is already in the event.
+            diagnostics.exception(log, "document.ingest.failed",
+                                  area=track, stream=True)
             emit(0, "Ошибка обработки", error="Ошибка обработки PDF. Подробности в консоли сервера.")
 
     def documents_post(self, path, session):
+        started = time()
         track = self.headers.get("X-Track", "rag").strip().lower()
         max_bytes = SOLAR_MAX_BYTES if track == "solar" else RAG_MAX_BYTES
         try:
@@ -1313,6 +1353,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             data = self.rfile.read(length)
             name = unquote(self.headers.get("X-Filename", "article.pdf"))
+            diagnostics.event(log, "document.ingest.start", area=track,
+                              bytes=len(data), stream=False)
             try:
                 if track == "solar":
                     summary = self.solar_store().ingest(name, data)
@@ -1322,15 +1364,29 @@ class Handler(BaseHTTPRequestHandler):
                     self.error("Недопустимая область. Допустимы: rag, solar.", 400)
                     return
             except ValueError as error:
+                diagnostics.error(log, "document.ingest.rejected",
+                                  area=track, kind="ValueError")
                 self.error(str(error), 422)
                 return
             except Exception:
-                log.exception("RAG ingest failed")
+                diagnostics.exception(log, "document.ingest.failed",
+                                      area=track)
                 self.error("Ошибка обработки PDF. Подробности в консоли сервера.", 500)
                 return
             if not self.claim_uploaded_document(track, summary.get("document_id"), session):
+                diagnostics.warning(log, "document.ingest.conflict",
+                                    area=track,
+                                    document_id=summary.get("document_id", ""))
                 self.error("Документ с таким содержимым уже загружен другим пользователем.", 409)
                 return
+            counts = summary.get("counts") or {}
+            diagnostics.event(log, "document.ingest.done", area=track,
+                              duration_ms=int((time() - started) * 1000),
+                              document_id=summary.get("document_id", ""),
+                              status=summary.get("status", ""),
+                              pages=summary.get("pages", 0),
+                              results=counts.get("results", 0),
+                              issues=counts.get("issues", 0))
             self.send_json(summary, 201)
             return
 
@@ -1391,6 +1447,7 @@ def serve_until_interrupt(server):
 
 
 def main():
+    diagnostics.configure()
     parser = argparse.ArgumentParser(description="VINITI PDF evidence workspace")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db", type=Path, default=paths.DATA_DIR / "papers.sqlite3")
@@ -1405,6 +1462,9 @@ def main():
         server.parse_root = paths.DATA_DIR / "parses"
         server.parse_slots = threading.BoundedSemaphore(2)
         server.docling_slot = threading.Semaphore(1)
+        diagnostics.event(log, "server.start", port=server.server_port,
+                          db=str(args.db), data=str(args.data),
+                          parse_root=str(server.parse_root))
         print(f"http://127.0.0.1:{server.server_port}", flush=True)
         serve_until_interrupt(server)
 

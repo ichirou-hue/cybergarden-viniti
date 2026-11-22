@@ -22,7 +22,10 @@
   шаблона участников, без LLM; `solar_facts.py` - контракт кандидатов, проверка цитат,
   нормализация единиц и согласованность, `solar_schema.py` - колонки и словари шаблона,
   `solar_version.py` - общая ревизия экстрактора для `documents` и `jobs`;
-- `score.py` - precision/recall против эталона, `tools/gate.py` - гейт валидаторов.
+- `score.py` - precision/recall против эталона, `tools/gate.py` - гейт валидаторов;
+- `viniti/paths.py` - единственный источник корневых путей: `REPO_ROOT`, `DATA_DIR`,
+  `STATIC_DIR`, `PROFILES_DIR`, `PASSPORT`, `VOCAB`, `CORPUS_ROOTS`, `PARSE_SCRIPT`.
+  Корневые модули берут готовые значения оттуда, а не считают их из своего `__file__`.
 
 Качество извлечения - baseline, а не решение. `extract.TableFiller` берёт только строки
 таблиц, которые `pdf_source` уже разложил на ячейки, и только когда шапка с метриками
@@ -105,6 +108,12 @@ CI (`.github/workflows/smoke.yml`) гоняет `python -m unittest -v` на ubu
 Тесты не требуют ни `_corpus/`, ни `_refs/`: они строят синтетические PDF через `reportlab`
 и временные базы. Всё, что ходит в настоящий корпус, лежит в `tools/` и в `.slim/`.
 
+Аудиты обходят не только корень и `tools/`: `tools/ci_parity.py` читает ещё `tests/`,
+`viniti/` и `rag/`, `tests/test_portability.py` проверяет их разбор под Python 3.12, а
+`tools/coverage_report.py` меряет корневые модули вместе с `viniti/**` и `rag/**` и подписывает
+строки путём от корня (`viniti/paths.py`), а не именем файла. Новый пакет с кодом надо
+добавить в эти три обхода, иначе он выпадет из аудита и из замера покрытия.
+
 ## Как связан код
 
 ```
@@ -125,6 +134,14 @@ pdf_source.extract(bytes)            текст страниц (pypdf), табл
 `batch.py` крутит эту цепочку по одной публикации и ведёт `jobs`; `pipeline.py` вызывает
 `batch.run`, `issues`, `export_csv` и `tools/gate` по очереди на каждую область.
 `server.py` и `serve_data.py` читают ту же базу и ничего не пересчитывают.
+
+Корневые пути собраны в `viniti/paths.py`: `db.py`, `batch.py`, `import_gold.py`,
+`passport.py`, `pipeline.py`, `profiles_store.py`, `score.py`, `server.py`, `serve_data.py`,
+`filler_rag.py` и `extraction_core.py` берут `REPO_ROOT`/`DATA_DIR`/`PROFILES_DIR`/`PASSPORT`/
+`VOCAB`/`CORPUS_ROOTS`/`PARSE_SCRIPT` оттуда. Публичные имена модулей при этом не менялись:
+`db.PASSPORT`, `batch.CORPUS_ROOTS`, `import_gold.GOLD`, `score.DEFAULT_DB` остаются на месте,
+поэтому команды, тесты и подпроцессы работают как раньше. `batch.CORPUS_ROOTS` - копия
+словаря из `paths`, её можно подменять в тестах, не задевая общий источник.
 Карточка `solar:` повторяет контракт якорей RAG: `anchors/{id}.json` и
 `anchors/{id}.png`; геометрию (`bbox`/`bboxes`) `solar_api` берёт из `pdf_source`
 sources при ingest, PNG рисует тот же `rag_api.render_anchor_png`.
@@ -136,6 +153,12 @@ PyMuPDF; если изображение не загрузилось, viewer п�
 `OPENROUTER_API_KEY`/`OPENROUTER_MODEL`. Провайдеру уходят вопрос, имена полей и
 ограниченные фрагменты PDF. Ответ не меняет профиль автоматически: пользователь
 отмечает предложенные поля, а клиент добавляет только отмеченные.
+
+Диагностические события не меняют этот поток: `viniti/diagnostics.py` вызывается
+из тех же точек (`batch.run`, `pipeline.run_area`, границы запросов `server.py`,
+`solar_offline`, `parse_document`, fallback `pdf_source`), пишет только в stderr и
+не трогает ни stdout CLI, ни базу, ни файлы результата. Подробности - в разделе
+«Диагностика».
 
 У области solar основной экстрактор - детерминированный `solar_offline`, а не
 `extract.TableFiller`. `batch.py` и `pipeline.py` вызывают его по умолчанию через
@@ -188,6 +211,10 @@ solar_offline.build(bytes)           таблицы из координат сл
 - `server.py`: статика отдаётся из `static/` по расширению, список файлов больше не
   хардкодится. Новый эндпоинт добавляется в `do_GET` явно, общего regex на все
   маршруты статьи (`PAPER`) больше нет для новых путей.
+- Пути не собираются заново из `__file__` в корневых модулях: новое место живёт в
+  `viniti/paths.py`, а модуль берёт готовое значение. Иначе при переносе файла в
+  подпакет молча поедет `data/`, `static/` и `_corpus/`. `viniti/paths.py` - лист:
+  только `pathlib`, чтобы `batch --dry-run` работал без pdfplumber.
 
 Читающие эндпоинты `server.py`: `/api/passport` (схема, по области и целиком),
 `/api/results` и `/api/results.csv` (срез: `col`, `where`, `order`, `limit`),
@@ -409,6 +436,31 @@ python tools\check_submission.py dev_gold dev --json-report report.json
   без текстового слоя относится к другому снимку и к этим файлам не применяется.
   OCR по-прежнему не реализован: PDF без текстового слоя `solar_facts.prepare_pdf`
   отвергает, а `extract` получает только fallback PyMuPDF на слова, не OCR.
+
+## Диагностика
+
+`viniti/diagnostics.py` - необязательный слой логов для batch, pipeline, серверных
+границ запроса и разборщиков. При импорте он ничего не настраивает: пока точка входа
+(`batch.main`, `pipeline.main`, `server.main`, `parse_document.main`,
+`solar_offline.main`) не вызвала `configure()`, логгер `viniti` держит только
+`NullHandler` и молчит.
+
+- `VINITI_LOG_LEVEL` - уровень, по умолчанию `WARNING`; неизвестное имя тоже даёт
+  `WARNING`. `INFO` и `DEBUG` включают пошаговые события явно: stdout уже занят CLI,
+  и второй поток на stderr дублировал бы его.
+- `VINITI_LOG_FORMAT` - `text` (по умолчанию) или `json`; запись всегда одна строка,
+  traceback экранирован и ограничен `MAX_EXCEPTION_CHARS`.
+- Файла лога нет: события идут в stderr (или в поток, переданный в `configure`) и
+  сбрасываются на каждой записи. На узкой консоли (cp1251/cp1252) непечатаемый
+  символ экранируется, а не роняет handler.
+- Поля с именами секретов и тел документов (`password`, `token`, `cookie`, `api_key`,
+  `pdf`, `text`, `raw`, `payload`, `bytes`, `*_fragment`, `*_quote`) заменяются на
+  `<redacted>`, длинные значения обрезаются. Свободный текст и traceback очищаются
+  от форм вида `password=...` и `Bearer ...`. Текст PDF, сырые payload и ключи не
+  логируются никогда - это правило вызывающего кода.
+- Контекст (`area`, `publication_id`, `job_id`, `parser`) задаётся через
+  `diagnostics.context()` и попадает во все вложенные события.
+- Тесты - `tests/test_diagnostics.py`.
 
 ## Документация
 

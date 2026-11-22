@@ -32,6 +32,7 @@ guessed. ``absent`` is never inferred from a failed parse.
 from collections import Counter
 from io import BytesIO
 import re
+import time
 import unicodedata
 
 import pdfplumber
@@ -39,6 +40,9 @@ import pdfplumber
 import solar_facts
 import solar_schema
 from solar_version import PARSER_VERSION
+from viniti import diagnostics
+
+logger = diagnostics.get_logger("solar_offline")
 
 # ---------------------------------------------------------------- vocabulary
 
@@ -1741,7 +1745,19 @@ def build(data, publication_id):
     import pdf_source
     from solar_facts import has_unit, unit_name
 
+    started = time.perf_counter()
     doc = pdf_source.extract(data)
+    diagnostics.event(logger, "solar.build.start", publication_id=publication_id,
+                      pages=doc.get("pages", 0), sources=len(doc.get("sources") or []),
+                      warnings=len(doc.get("warnings") or []))
+    if doc.get("fallback_pages"):
+        # PyMuPDF words replaced an empty pdfplumber word layer: results from
+        # these pages have no table detection, only line sources.
+        diagnostics.warning(logger, "solar.parse.fallback", parser="pymupdf",
+                            pages=doc["fallback_pages"])
+    if doc.get("warnings"):
+        diagnostics.debug(logger, "solar.parse.warnings",
+                          warnings=doc["warnings"][:5], total=len(doc["warnings"]))
     model = layout(data)
     # pdf_source keys page text by int; the rest of this module uses the string
     # form everywhere, so convert once instead of at every lookup.
@@ -1846,6 +1862,11 @@ def build(data, publication_id):
         results.append(row)
 
     if not results:
+        diagnostics.event(logger, "solar.build.empty", publication_id=publication_id,
+                          reason="no_results",
+                          duration_ms=int((time.perf_counter() - started) * 1000),
+                          table_rows=len(table_rows), prose_rows=len(prose_rows),
+                          kept=len(kept))
         return _empty_result(publication_id, doc, page_texts)
 
     publication = _publication_row(publication_id, doc, page_texts)
@@ -1855,6 +1876,9 @@ def build(data, publication_id):
         # keeping the rows found in it would make the whole bundle invalid.
         publication["in_scope"] = "false"
         publication["exclusion_reason"] = reason
+        diagnostics.event(logger, "solar.build.empty", publication_id=publication_id,
+                          reason="out_of_scope",
+                          duration_ms=int((time.perf_counter() - started) * 1000))
         return {"publications": [publication], "materials": [], "devices": [],
                 "layers": [], "measurements": [], "results": [], "issues": []}
     publication["in_scope"] = "true"
@@ -1948,6 +1972,10 @@ def build(data, publication_id):
         row["_source_ids"] = row.get("_source_ids", [])
     results = [row for row in results if row["_source_ids"]]
     if not results:
+        diagnostics.event(logger, "solar.build.empty", publication_id=publication_id,
+                          reason="no_anchored_results",
+                          duration_ms=int((time.perf_counter() - started) * 1000),
+                          kept=len(kept))
         return _empty_result(publication_id, doc, page_texts)
 
     tables = {
@@ -1959,6 +1987,13 @@ def build(data, publication_id):
         "results": results,
         "issues": [],
     }
+    diagnostics.event(logger, "solar.build.done", publication_id=publication_id,
+                      duration_ms=int((time.perf_counter() - started) * 1000),
+                      pages=doc.get("pages", 0), sources=len(doc.get("sources") or []),
+                      table_rows=len(table_rows), prose_rows=len(prose_rows),
+                      kept=len(kept), devices=len(devices_out), materials=len(materials),
+                      layers=len(layers), measurements=len(measurements),
+                      results=len(results))
     return tables
 
 
@@ -1989,6 +2024,7 @@ def extract_pdf(path, publication_id=None, *, model="", progress=None):
     from pdfplumber.utils.exceptions import PdfminerException
 
     data = Path(path).read_bytes()
+    started = time.perf_counter()
     document = solar_facts.prepare_pdf(publication_id or Path(path).name, data)
     if progress: progress(1, "Страницы PDF прочитаны")
     try:
@@ -1996,9 +2032,17 @@ def extract_pdf(path, publication_id=None, *, model="", progress=None):
     except PdfminerException:
         # prepare_pdf parsed the same bytes, so this is a table-layer failure,
         # not a different file; report it the same way.
+        diagnostics.exception(logger, "solar.extract.failed", kind="PdfminerException",
+                              publication_id=document.get("publication_id", ""))
         raise ValueError("PDF повреждён, зашифрован или не может быть разобран.") from None
     if progress: progress(2, "Результаты извлечены")
-    return solar_facts.finalize(tables, document, model=model)
+    result = solar_facts.finalize(tables, document, model=model)
+    diagnostics.event(logger, "solar.extract.done",
+                      publication_id=document.get("publication_id", ""),
+                      duration_ms=int((time.perf_counter() - started) * 1000),
+                      pages=document.get("pages", 0),
+                      tables={name: len(rows) for name, rows in tables.items()})
+    return result
 
 
 def _write_envelope(connection, area, publication_id, result, source_path):
@@ -2049,7 +2093,10 @@ def process(area, publication_id, pdf_path):
     if area != "solar":
         raise ValueError("solar_offline обслуживает только область solar.")
     path = Path(pdf_path)
+    started = time.perf_counter()
     data = path.read_bytes()
+    diagnostics.event(logger, "solar.process.start", area=area,
+                      publication_id=publication_id, bytes=len(data))
 
     db_path = Path(os.environ.get("VINITI_DATA_DB") or storage.DEFAULT_DB)
     if not db_path.exists():
@@ -2068,6 +2115,9 @@ def process(area, publication_id, pdf_path):
         if previous and previous["parser_status"] == "imported":
             # Gold rows share the same tables and the same R ids; replacing
             # them silently would destroy the reference the scorer needs.
+            diagnostics.error(logger, "solar.process.refused", area=area,
+                              publication_id=publication_id,
+                              reason="documents.parser_status=imported")
             raise ValueError(
                 f"{publication_id}: в базе эталон (parser_status=imported); "
                 "извлечение заменит его - выберите отдельную базу")
@@ -2082,6 +2132,9 @@ def process(area, publication_id, pdf_path):
                     f"WHERE area = ? AND publication_id = ? LIMIT 1",
                     (area, publication_id)).fetchone()
                 if existing:
+                    diagnostics.error(logger, "solar.process.refused", area=area,
+                                      publication_id=publication_id,
+                                      reason="rows_without_documents", table=table)
                     raise ValueError(
                         f"{publication_id}: строки без записи documents (вероятно, "
                         "эталон); извлечение заменит их - выберите отдельную базу")
@@ -2097,11 +2150,23 @@ def process(area, publication_id, pdf_path):
                 rows = result["tables"][table]
                 written[table] = extract._insert(connection, name, area, table, meta, rows) \
                     if rows else 0
+    except Exception as exc:
+        diagnostics.exception(logger, "solar.process.failed", area=area,
+                              publication_id=publication_id,
+                              kind=type(exc).__name__)
+        raise
     finally:
         connection.close()
-    return {"area": area, "publication_id": publication_id, "tables": written,
-            "blocks": blocks, "pages": result.get("pages", 0),
-            "sources": len(result.get("sources") or []), "sha256": result.get("sha256", "")}
+    summary = {"area": area, "publication_id": publication_id, "tables": written,
+               "blocks": blocks, "pages": result.get("pages", 0),
+               "sources": len(result.get("sources") or []), "sha256": result.get("sha256", "")}
+    diagnostics.event(logger, "solar.process.done", area=area,
+                      publication_id=publication_id,
+                      duration_ms=int((time.perf_counter() - started) * 1000),
+                      pages=summary["pages"], sources=summary["sources"],
+                      blocks=blocks, rows=sum(written.values()),
+                      tables={table: count for table, count in written.items()})
+    return summary
 
 
 def main(argv=None):
@@ -2112,6 +2177,7 @@ def main(argv=None):
 
     from solar_schema import TABLES as SCHEMA
 
+    diagnostics.configure()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("pdf", nargs="*", type=Path, help="PDF files to parse")
     parser.add_argument("--pdf-dir", type=Path, help="directory of PDFs")
@@ -2150,6 +2216,9 @@ def main(argv=None):
             result = extract_pdf(path)
         except (ValueError, OSError) as error:
             failures.append((path.name, str(error)))
+            diagnostics.error(logger, "solar.cli.file_failed",
+                              publication_id=path.stem,
+                              kind=type(error).__name__)
             if not arguments.skip_errors:
                 print(f"{path.name}: ошибка: {error}")
                 return 1
