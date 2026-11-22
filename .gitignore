@@ -51,3 +51,11 @@ service-account*.json
 .DS_Store
 ._*
 node_modules/
+
+# Local case archives and oversized source material
+archive/
+
+# BEGIN oh-my-opencode-slim worktrees
+.slim/worktrees/
+.slim/worktrees.json
+# END oh-my-opencode-slim worktrees
