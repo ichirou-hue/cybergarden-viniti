@@ -16,7 +16,7 @@ import auth
 
 from reportlab.pdfgen import canvas
 
-from server import Handler, ThreadingHTTPServer
+from server import Handler, ThreadingHTTPServer, PARSE_STALE_ERROR, PARSE_TIMEOUT
 
 
 def get(url, client=None):
@@ -245,6 +245,59 @@ class ParseApiTest(unittest.TestCase):
         status, body = self.get_auth(f"{self.base}/api/parse/{job['id']}")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["created_at"], job["created_at"])
+
+    def test_stale_running_job_is_terminal_on_read_and_absent_from_active_list(self):
+        """Ctrl+C leaves job.json running; the next read must not keep it active."""
+        status, body = self.get_auth(self.base + "/api/auth/me")
+        self.assertEqual(status, 200, body)
+        owner = json.loads(body)["user"]["id"]
+        folder = self.root / "parses" / "a1b2c3d4e5f60718"
+        folder.mkdir(parents=True)
+        (folder / "job.json").write_text(json.dumps({
+            "id": folder.name, "status": "running", "owner_user_id": owner,
+            "filename": "D001.pdf", "created_at": 1.0, "updated_at": 1.0,
+            "started_at": time() - PARSE_TIMEOUT - 120,
+        }), encoding="utf-8")
+
+        status, body = self.get_auth(f"{self.base}/api/parse/{folder.name}")
+        self.assertEqual(status, 200, body)
+        job = json.loads(body)
+        self.assertEqual(job["status"], "error")
+        self.assertEqual(job["error"], PARSE_STALE_ERROR)
+        self.assertEqual(job["owner_user_id"], owner)
+
+        status, body = self.get_auth(self.base + "/api/parse?active=1")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["total"], 0)
+
+        # The terminal state is on disk, so a restart keeps the same answer.
+        stored = json.loads((folder / "job.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["status"], "error")
+
+    def test_active_list_alone_persists_the_stale_verdict(self):
+        """The list route, not only the single route, must close a dead job."""
+        status, body = self.get_auth(self.base + "/api/auth/me")
+        self.assertEqual(status, 200, body)
+        owner = json.loads(body)["user"]["id"]
+        folder = self.root / "parses" / "b1b2c3d4e5f60718"
+        folder.mkdir(parents=True)
+        (folder / "job.json").write_text(json.dumps({
+            "id": folder.name, "status": "running", "owner_user_id": owner,
+            "sha256": "abc", "document_id": "solar:card",
+            "filename": "D001.pdf", "created_at": 1.0, "updated_at": 1.0,
+            "started_at": time() - PARSE_TIMEOUT - 120,
+        }), encoding="utf-8")
+
+        status, body = self.get_auth(self.base + "/api/parse?active=1")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["total"], 0)
+
+        stored = json.loads((folder / "job.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["status"], "error")
+        self.assertEqual(stored["error"], PARSE_STALE_ERROR)
+        self.assertEqual(stored["owner_user_id"], owner)
+        self.assertEqual(stored["sha256"], "abc")
+        self.assertEqual(stored["document_id"], "solar:card")
 
     def test_parse_rejects_unknown_profile(self):
         status, _ = self.send_auth(self.base + "/api/parse", tiny_pdf(), {

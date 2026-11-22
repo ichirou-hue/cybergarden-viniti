@@ -19,11 +19,12 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
 import threading
-from time import time
+from time import sleep, time
 import uuid
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -99,6 +100,18 @@ def llm_api_status(environ=None):
 
 
 PARSE_FAILURE_DEFAULT = "Разбор завершился с ошибкой; подробности в логе сервера."
+# A job left active by a stopped server is terminal, not silently resumable:
+# nobody can prove the old worker finished, and re-running an unknown job on
+# startup would invent work the user did not ask for.
+PARSE_INTERRUPTED_ERROR = "Разбор прерван перезапуском сервера; запустите его снова."
+PARSE_STALE_ERROR = "Разбор прерван: процесс не завершился за отведённое время."
+# ``job.json`` is read by request threads while the worker replaces it.  On
+# Windows ``os.replace`` needs delete access to the target, so an open reader
+# turns the atomic write into a sharing violation.  One in-process lock removes
+# that race; the retry only covers handles held by another process.
+PARSE_JOB_LOCK = threading.RLock()
+PARSE_JOB_REPLACE_ATTEMPTS = 10
+PARSE_JOB_REPLACE_DELAY = 0.05
 
 
 def parse_failure_error(completed):
@@ -130,6 +143,237 @@ def parse_spawn_error(error):
     if isinstance(error, PermissionError):
         return "Не удалось запустить разбор: нет доступа к интерпретатору или скрипту."
     return "Не удалось запустить разбор; подробности в логе сервера."
+
+
+class ParseClosed(RuntimeError):
+    """Raised when a server that is shutting down refuses new parser work."""
+
+
+def parse_child_options():
+    """Start the parser in its own group so a stop can reach its children.
+
+    The worker itself only owns the direct process, but Docling and its
+    converters may spawn helpers.  A dedicated group is what makes
+    ``killpg``/``taskkill /T`` able to stop that whole tree instead of leaving
+    grandchildren writing into ``data/parses/<id>``.
+    """
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def stop_parse_tree(process, *, force):
+    """Stop the child's process group, falling back to the direct process.
+
+    POSIX: the child runs in its own session, so ``killpg`` reaches the parser
+    and everything it spawned.  Windows has no group signal for console
+    children, so ``taskkill /T`` walks the tree by parent pid.  A failed
+    ``taskkill`` is not treated as success: the direct ``terminate``/``kill``
+    still runs, so a missing or restricted tool cannot leave the job alive.
+    """
+    pid = getattr(process, "pid", None)
+    if getattr(process, "returncode", None) is not None:
+        # Already reaped: a recycled pid must not be killed by mistake.
+        return
+    if os.name == "nt":
+        if pid:
+            try:
+                completed = subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(pid)],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=10, check=False,
+                )
+                if completed.returncode == 0:
+                    return
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    elif pid:
+        try:
+            os.killpg(pid, signal.SIGKILL if force else signal.SIGTERM)
+            return
+        except OSError:
+            pass
+    try:
+        (process.kill if force else process.terminate)()
+    except OSError:
+        pass
+
+
+class ParseChildren:
+    """Live parse subprocesses so a server stop does not leave orphans.
+
+    A daemon worker thread dies with the interpreter, but ``subprocess.run``
+    would leave its child writing into the job folder after the server is gone.
+    ``main`` installs one registry per server; handlers without it keep the old
+    ``subprocess.run`` path, so embedded servers and tests are unchanged.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._processes = set()
+        self._closing = False
+
+    @property
+    def closing(self):
+        return self._closing
+
+    def spawn(self, command, *, env, timeout):
+        """Run one child like ``subprocess.run`` and keep it terminable."""
+        with self._lock:
+            if self._closing:
+                raise ParseClosed("Сервер останавливается; новый разбор не запускается.")
+            process = subprocess.Popen(
+                command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", env=env,
+                **parse_child_options(),
+            )
+            self._processes.add(process)
+        try:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                stop_parse_tree(process, force=True)
+                process.communicate()
+                raise
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        finally:
+            with self._lock:
+                self._processes.discard(process)
+
+    def terminate_all(self, grace=1.0):
+        """Stop every live child tree and refuse new work; return how many.
+
+        Each process is asked to stop as a tree first, then waited for so the
+        entry is reaped.  Only a child that outlives the grace period is killed
+        forcibly, and that wait is bounded too: shutdown must not hang on a
+        parser that ignores the first request.
+        """
+        with self._lock:
+            self._closing = True
+            processes = list(self._processes)
+        for process in processes:
+            stop_parse_tree(process, force=False)
+        deadline = time() + grace
+        for process in processes:
+            remaining = max(0.0, deadline - time())
+            try:
+                process.wait(timeout=remaining)
+                continue
+            except subprocess.TimeoutExpired:
+                pass
+            except OSError:
+                continue
+            stop_parse_tree(process, force=True)
+            try:
+                process.wait(timeout=grace)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+        return len(processes)
+
+
+def run_parse_child(children, command, *, env, timeout):
+    """Run the parser child, through the registry when the server has one."""
+    if children is not None:
+        return children.spawn(command, env=env, timeout=timeout)
+    return subprocess.run(
+        command, cwd=ROOT, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=timeout, check=False,
+        env=env,
+    )
+
+
+def write_parse_job(folder, job):
+    """Atomically replace ``job.json``; shared by worker, watchdog and recovery.
+
+    Readers and the writer share ``PARSE_JOB_LOCK`` because on Windows
+    ``os.replace`` needs delete access to the target: a reader that has
+    ``job.json`` open turns the replace into a sharing violation, and the
+    worker would report a fake parse failure.  The bounded retry covers a
+    handle held by another process (antivirus, backup); it does not hide a
+    persistent error, because the last attempt re-raises.
+    """
+    folder = Path(folder)
+    temporary = folder / f".job-{uuid.uuid4().hex}.json"
+    with PARSE_JOB_LOCK:
+        temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False),
+                             encoding="utf-8")
+        try:
+            replace_parse_job(temporary, folder / "job.json")
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+
+def replace_parse_job(source, target):
+    """Replace ``target`` atomically, retrying only a transient sharing error."""
+    for attempt in range(PARSE_JOB_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt + 1 >= PARSE_JOB_REPLACE_ATTEMPTS:
+                raise
+            sleep(PARSE_JOB_REPLACE_DELAY)
+
+
+def read_parse_job(folder):
+    """Read one ``job.json`` under the same lock the writer holds."""
+    with PARSE_JOB_LOCK:
+        try:
+            return json.loads((Path(folder) / "job.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+
+def mark_parse_interrupted(folder, job, message=PARSE_INTERRUPTED_ERROR):
+    """Give a stale job a terminal state without claiming any result."""
+    job.update(status="error", error=message, updated_at=round(time(), 3))
+    write_parse_job(folder, job)
+    return job
+
+
+def parse_job_stale(job, now=None):
+    """Whether a ``running`` job can no longer be owned by a live worker.
+
+    The worker's own ``subprocess.run`` timeout is ``PARSE_TIMEOUT``; the extra
+    minute covers writing the error and releasing the slot.  ``queued`` jobs are
+    not age-checked: they may legitimately wait for a parse slot that long.
+    """
+    if job.get("status") != "running":
+        return False
+    started = job.get("started_at", job.get("created_at", 0)) or 0
+    return (time() if now is None else now) - started > PARSE_TIMEOUT + 60
+
+
+def refresh_parse_job(folder, job):
+    """Apply the stale watchdog and persist the verdict.
+
+    The single-job route and the active list both call this, so they cannot
+    disagree about a job whose worker died without writing its own error.
+    Ownership, ``sha256``, ``document_id`` and ``started_at`` stay untouched:
+    ``mark_parse_interrupted`` only rewrites status, error and ``updated_at``.
+    The decision is re-read under the job lock, so a worker that finished
+    between the caller's read and this write is not overwritten by a stale
+    error.
+    """
+    if not parse_job_stale(job):
+        return job
+    with PARSE_JOB_LOCK:
+        current = read_parse_job(folder)
+        if not current:
+            return job
+        if not parse_job_stale(current):
+            return current
+        try:
+            mark_parse_interrupted(folder, current, message=PARSE_STALE_ERROR)
+        except OSError:
+            # A read-only folder still answers truthfully for this request; the
+            # disk copy is left as it was instead of pretending the write worked.
+            current.update(status="error", error=PARSE_STALE_ERROR)
+        return current
 
 
 def static_file(path):
@@ -628,19 +872,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(job, 202)
 
     def read_job(self, folder):
-        try:
-            return json.loads((folder / "job.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        return read_parse_job(folder)
 
     def write_job(self, folder, job):
-        temporary = folder / f".job-{uuid.uuid4().hex}.json"
-        temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-        os.replace(temporary, folder / "job.json")
+        write_parse_job(folder, job)
 
     def run_parse(self, folder, profile_path, parser, ocr, charts, llm="off"):
         slot = getattr(self.server, "docling_slot", None) if parser == "docling" else None
         slots = getattr(self.server, "parse_slots", None)
+        children = getattr(self.server, "parse_children", None)
         with diagnostics.context(job_id=folder.name, parser=parser):
             try:
                 if slots is not None:
@@ -681,15 +921,17 @@ class Handler(BaseHTTPRequestHandler):
                     # Keep the worker's explicit network opt-in aligned with the
                     # admission check, including embedded/test HTTP servers.
                     child_env["VINITI_PARSE_LLM"] = "api"
-                completed = subprocess.run(
-                    command, cwd=ROOT, capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", timeout=PARSE_TIMEOUT, check=False,
-                    env=child_env,
-                )
+                completed = run_parse_child(
+                    children, command, env=child_env, timeout=PARSE_TIMEOUT)
                 self.write_log(folder, completed)
                 job = self.read_job(folder)
                 if completed.returncode:
-                    job.update(status="error", error=parse_failure_error(completed),
+                    # A child stopped by server shutdown is not a parser
+                    # failure, and it must not be retried silently either.
+                    interrupted = children is not None and children.closing
+                    job.update(status="error",
+                               error=(PARSE_INTERRUPTED_ERROR if interrupted
+                                      else parse_failure_error(completed)),
                                returncode=completed.returncode)
                     # No message text here: the subprocess stderr may quote the
                     # document, and the same string is already in parse.log.
@@ -723,6 +965,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_job(folder, job)
                 diagnostics.error(log, "parse.timeout",
                                   timeout_s=PARSE_TIMEOUT)
+            except ParseClosed:
+                job = self.read_job(folder)
+                job.update(status="error", error=PARSE_INTERRUPTED_ERROR,
+                           updated_at=round(time(), 3))
+                try:
+                    self.write_job(folder, job)
+                except OSError:
+                    pass
+                diagnostics.event(log, "parse.closed")
             except OSError as error:
                 job = self.read_job(folder)
                 job.update(status="error", error=parse_spawn_error(error),
@@ -879,6 +1130,7 @@ class Handler(BaseHTTPRequestHandler):
                 job = self.read_job(folder)
                 if not job or job.get("owner_user_id") != owner:
                     continue
+                job = refresh_parse_job(folder, job)
                 if active and job.get("status") not in PARSE_ACTIVE_STATUSES:
                     continue
                 if status and job.get("status") != status:
@@ -907,10 +1159,10 @@ class Handler(BaseHTTPRequestHandler):
         if job.get("owner_user_id") != session["user"]["id"]:
             self.error("Разбор не найден.", 404)
             return
-        started = job.get("started_at", job.get("created_at", 0))
-        if job.get("status") == "running" and time() - started > PARSE_TIMEOUT + 60:
-            # Не перезаписываем job на диске: рабочий процесс мог ещё завершиться.
-            job.update(status="error", error="Разбор прерван: процесс не завершился за отведённое время.")
+        if parse_job_stale(job):
+            # Persist the watchdog verdict so the list endpoint stops showing
+            # the job as active; the disk write is the single source of truth.
+            job = refresh_parse_job(folder, job)
         if len(segments) == 3:
             self.send_json(job)
             return
@@ -1804,34 +2056,65 @@ def serve_until_interrupt(server):
         server.serve_forever()
     except KeyboardInterrupt:
         print("Сервер остановлен.", flush=True)
+    finally:
+        shutdown_parse_workers(server)
+
+
+def shutdown_parse_workers(server):
+    """Stop live parser children and leave every active job terminal.
+
+    Daemon worker threads die with the interpreter, so without this the child
+    would keep writing into ``data/parses/<id>`` after the server exits and the
+    job would stay ``running`` until the next start.  Stopping the child makes
+    the job terminal now; ``recover_parse_jobs`` covers a thread that never got
+    to write its own error.  A worker that is still waiting for a parse slot can
+    only be interrupted at the next start, which is bounded, not infinite.
+    """
+    children = getattr(server, "parse_children", None)
+    stopped = children.terminate_all() if children is not None else 0
+    root = getattr(server, "parse_root", None)
+    interrupted = recover_parse_jobs(root) if root is not None else 0
+    if stopped or interrupted:
+        diagnostics.event(log, "parse.shutdown", stopped=stopped,
+                          interrupted=interrupted)
 
 
 def recover_parse_jobs(root):
-    """Mark jobs owned by a previous process as interrupted, never replaying API calls."""
+    """Mark jobs owned by a previous process as interrupted, never replaying API calls.
+
+    This is the only safe rule available at startup: a job that is still
+    ``queued`` or ``running`` cannot have a live worker, because workers live in
+    the server process that just started.  The result is a terminal error with a
+    retry hint, not a fabricated success, and the stored owner and input hash
+    stay untouched so the user still sees their own job.  The rule assumes one
+    server per ``parse_root``: two servers sharing the directory would treat the
+    other's live jobs as interrupted.
+    """
+    if root is None:
+        return 0
     root = Path(root)
     if not root.exists():
-        return
+        return 0
+    recovered = 0
     for folder in root.iterdir():
         if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
             continue
-        job_path = folder / "job.json"
-        try:
-            job = json.loads(job_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if job.get("status") not in {"queued", "running"}:
-            continue
-        job.update(status="error", error="Разбор прерван перезапуском сервера; запустите его снова.",
-                   updated_at=round(time(), 3))
-        temporary = folder / f".job-recover-{uuid.uuid4().hex}.json"
-        try:
-            temporary.write_text(json.dumps(job, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-            os.replace(temporary, job_path)
-        except OSError:
+        # The read and the terminal write share the job lock: shutdown calls
+        # this while worker threads may still be finishing, and an unguarded
+        # read could collide with their atomic replace on Windows.
+        with PARSE_JOB_LOCK:
+            job = read_parse_job(folder)
+            if job.get("status") not in PARSE_ACTIVE_STATUSES:
+                continue
             try:
-                temporary.unlink(missing_ok=True)
+                mark_parse_interrupted(folder, job)
             except OSError:
-                pass
+                log.warning("Не удалось записать прерванный job %s", folder.name)
+                continue
+        recovered += 1
+    if recovered:
+        diagnostics.event(log, "parse.recovered", jobs=recovered, root=str(root))
+    return recovered
 
 
 def main():
@@ -1849,6 +2132,7 @@ def main():
         server.profiles_dir = paths.DATA_DIR / "profiles"
         server.parse_root = paths.DATA_DIR / "parses"
         recover_parse_jobs(server.parse_root)
+        server.parse_children = ParseChildren()
         server.parse_slots = threading.BoundedSemaphore(2)
         server.docling_slot = threading.Semaphore(1)
         diagnostics.event(log, "server.start", port=server.server_port,
