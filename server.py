@@ -1192,9 +1192,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def parse_file(self, base, parts):
         relative = PurePosixPath(*parts)
+        # The optional semantic layer is written next to the fixed LLM
+        # artifacts but is not part of the scientific tables. Take its name
+        # from the module instead of repeating "semantic.json" here, so the
+        # served whitelist keeps a single source. If the name later joins
+        # ARTIFACT_NAMES, the union simply stays a no-op.
+        llm_artifacts = {("llm", name) for name in llm_shell.ARTIFACT_NAMES}
+        llm_artifacts.add(("llm", llm_shell.SEMANTIC_ARTIFACT))
         allowed = relative.parts in (
             {("result.json",), ("parser.json",), ("candidates.csv",)}
-            | {("llm", name) for name in llm_shell.ARTIFACT_NAMES}
+            | llm_artifacts
         )
         if not allowed and (
             len(relative.parts) != 3 or relative.parts[0] != "assets"
