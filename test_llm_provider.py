@@ -23,7 +23,11 @@ import llm_shell
 import parse_document
 import server
 from solar_schema import TABLES
-from test_solar import fixture, synthetic_pdf
+
+try:  # раскладка репозитория: тесты лежат в tests/
+    from tests.test_solar import fixture, synthetic_pdf
+except ImportError:  # запуск из tests/ или с PYTHONPATH=tests
+    from test_solar import fixture, synthetic_pdf
 
 
 OPENAI_ENV = {

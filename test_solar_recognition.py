@@ -11,7 +11,11 @@ import unittest
 from unittest import mock
 
 from solar_api import SolarStore, solar_sources
-from test_solar_api import fake_result
+
+try:  # раскладка репозитория: тесты лежат в tests/
+    from tests.test_solar_api import fake_result
+except ImportError:  # запуск из tests/ или с PYTHONPATH=tests
+    from test_solar_api import fake_result
 
 
 class SolarRecognitionTest(unittest.TestCase):
