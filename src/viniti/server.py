@@ -30,9 +30,13 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import db as storage
 from . import auth
+from . import chat
 from . import export_csv as result_export
 from . import llm_provider
 from . import llm_shell
+from . import obsidian
+from . import pdf_quality
+from . import parse_workspace
 from . import profiles_store
 from . import profile_assistant
 
@@ -1167,6 +1171,23 @@ class Handler(BaseHTTPRequestHandler):
         if len(segments) == 3:
             self.send_json(job)
             return
+        if len(segments) == 4 and segments[3] in {"pdf", "quality", "obsidian.zip"}:
+            if job.get("status") != "ok":
+                self.error("Результат ещё не готов.", 409)
+                return
+            try:
+                if segments[3] == "pdf":
+                    self.send_data((folder / "input.pdf").read_bytes(), "application/pdf")
+                else:
+                    envelope = parse_workspace.load_envelope(folder, job)
+                    if segments[3] == "quality":
+                        self.send_json(pdf_quality.assess(envelope))
+                    else:
+                        data = obsidian.export_zip([{"document_id": "parse:" + job["id"], "envelope": envelope}])
+                        self.send_data(data, "application/zip", Content_Disposition=f'attachment; filename="parse-{job["id"]}-obsidian.zip"')
+            except (OSError, ValueError):
+                self.error("Артефакт разбора не найден или повреждён.", 404)
+            return
         if segments[3] == "result":
             if job.get("status") != "ok":
                 self.error("Результат ещё не готов.", 409)
@@ -1317,6 +1338,112 @@ class Handler(BaseHTTPRequestHandler):
             self.server.solar_store = store
         return store
 
+    # --- chat context ----------------------------------------------------
+    @staticmethod
+    def document_track(document_id):
+        return "solar" if str(document_id).startswith("solar:") else "rag"
+
+    def load_owned_envelope(self, document_id):
+        """Return ``(track, envelope)`` only for a document this user may read."""
+        if not isinstance(document_id, str) or not 1 <= len(document_id) <= 200:
+            return None, None
+        if document_id.startswith("parse:"):
+            parse_id = document_id[6:]
+            session = self.current_session()
+            if not PARSE_ID.fullmatch(parse_id) or session is None:
+                return None, None
+            folder = self.parses_root() / parse_id
+            job = self.read_job(folder)
+            if not job or job.get("owner_user_id") != session["user"]["id"] or job.get("status") != "ok":
+                return None, None
+            try:
+                return "universal", parse_workspace.load_envelope(folder, job)
+            except (OSError, ValueError):
+                return None, None
+        track = self.document_track(document_id)
+        if not self.owns_document(track, document_id):
+            return None, None
+        envelope = self.solar_store().get(document_id) if track == "solar" \
+            else self.rag_store().get(document_id)
+        return track, envelope
+
+    def chat_store(self):
+        path = getattr(self.server, "data", None)
+        if path is None:
+            self.error("Чат недоступен: база не подключена.", 503)
+            return None
+        return chat.ChatStore(path)
+
+    def workspace_items(self, track="all"):
+        """Visible catalog cards plus completed standalone profile parses."""
+        items = []
+        if track in {"all", "rag"}:
+            items += self.visible_documents("rag", self.rag_store().list("rag"))
+        if track in {"all", "solar"}:
+            items += self.visible_documents("solar", self.solar_store().list())
+        if track != "all":
+            return items
+        session = self.current_session()
+        root = self.parses_root()
+        if session is None or not root.is_dir():
+            return items
+        for folder in sorted(root.iterdir()):
+            if not folder.is_dir() or not PARSE_ID.fullmatch(folder.name):
+                continue
+            job = self.read_job(folder)
+            if (not job or job.get("owner_user_id") != session["user"]["id"]
+                    or job.get("status") != "ok" or job.get("document_id")):
+                continue
+            if (folder / "bundle" / "result.json").is_file():
+                items.append({"document_id": "parse:" + folder.name})
+        return items
+
+    def chat_documents(self, mode, document_id=None, document_ids=None):
+        """Resolve chat context with the same ownership rules as the catalog.
+
+        Returns ``(documents, total)``. Raises ``KeyError`` for a missing or
+        foreign document; the route turns it into the same 404 as the catalog.
+        """
+        if mode == "general":
+            return [], 0
+        if mode == "document":
+            if not isinstance(document_id, str) or not document_id:
+                raise ValueError("Не указана статья.")
+            _, envelope = self.load_owned_envelope(document_id)
+            if envelope is None:
+                raise KeyError(document_id)
+            return [{"document_id": document_id, "envelope": envelope}], 1
+        if mode == "selection":
+            if not isinstance(document_ids, list) or not document_ids:
+                raise ValueError("Не выбраны статьи.")
+            unique = list(dict.fromkeys(
+                str(item) for item in document_ids
+                if isinstance(item, str) and item.strip()
+            ))
+            if not 1 <= len(unique) <= chat.MAX_DOCUMENTS:
+                raise ValueError(f"Выберите от 1 до {chat.MAX_DOCUMENTS} статей.")
+            documents = []
+            for doc_id in unique:
+                _, envelope = self.load_owned_envelope(doc_id)
+                if envelope is None:
+                    raise KeyError(doc_id)
+                documents.append({"document_id": doc_id, "envelope": envelope})
+            return documents, len(documents)
+        if mode != "library":
+            raise ValueError("Неизвестный режим чата.")
+        items = self.workspace_items()
+        total = len(items)
+        documents = []
+        for item in items[:chat.MAX_DOCUMENTS]:
+            doc_id = item.get("document_id")
+            _, envelope = self.load_owned_envelope(doc_id)
+            if envelope is not None:
+                documents.append({"document_id": doc_id, "envelope": envelope})
+        return documents, total
+
+    def library_count(self):
+        return len(self.workspace_items())
+
     # --- общие помощники ------------------------------------------------
     @staticmethod
     def _int(query, name, default, minimum=0, maximum=None):
@@ -1439,6 +1566,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(llm_api_status())
             return
 
+        if path == "/api/chat":
+            self.chat_get(single)
+            return
+
+        if path == "/api/obsidian.zip":
+            self.obsidian_library_get(single)
+            return
+
         if path == "/api/parse":
             self.parse_jobs(query, self.current_session())
             return
@@ -1471,6 +1606,157 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self.error("Маршрут не найден.", 404)
+
+    # --- chat and linked export -----------------------------------------
+    def chat_get(self, single):
+        session = self.require_user(csrf=False)
+        if session is None:
+            return
+        mode = (single.get("mode") or "document").strip()
+        document_ids = [item.strip() for item in (single.get("document_ids") or "").split(",")
+                        if item.strip()]
+        try:
+            if mode in {"document", "selection"}:
+                documents, total = self.chat_documents(mode, single.get("document_id"), document_ids)
+                key = chat.context_key(mode, [item["document_id"] for item in documents])
+                label = chat.context_label(mode, documents, total=total)
+            elif mode == "library":
+                key = chat.context_key("library")
+                label = chat.context_label("library", [], total=self.library_count())
+            elif mode == "general":
+                key = chat.context_key("general")
+                label = chat.context_label("general", [])
+            else:
+                raise ValueError("Неизвестный режим чата.")
+        except KeyError:
+            self.error("Документ не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 400)
+            return
+        store = self.chat_store()
+        if store is None:
+            return
+        self.send_json({
+            "mode": mode,
+            "context_key": key,
+            "context_label": label,
+            "history": store.history(session["user"]["id"], mode, key),
+        })
+
+    def chat_post(self):
+        session = self.require_user()
+        if session is None:
+            return
+        value = self.auth_payload()
+        if value is None:
+            return
+        mode = value.get("mode", "document")
+        document_ids = value.get("document_ids")
+        try:
+            documents, total = self.chat_documents(mode, value.get("document_id"), document_ids)
+            key = chat.context_key(mode, [item["document_id"] for item in documents])
+        except KeyError:
+            self.error("Документ не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 400)
+            return
+        store = self.chat_store()
+        if store is None:
+            return
+        user_id = session["user"]["id"]
+        history = store.history(user_id, mode, key)
+        try:
+            result = chat.ask(value.get("question"), mode, documents, history=history,
+                              total_documents=total if mode == "library" else None)
+        except RuntimeError as error:
+            self.error(str(error), 503)
+            return
+        except llm_provider.ProviderError as error:
+            self.error(str(error), 502)
+            return
+        except ValueError as error:
+            self.error(str(error), 400)
+            return
+        store.append(user_id, mode, key, "user", value.get("question"))
+        store.append(user_id, mode, key, "assistant", result["answer"], {
+            "citations": result["citations"],
+            "not_found": result["not_found"],
+            "unverified": result["unverified"],
+            "contradictions": result["contradictions"],
+            "context": {"mode": result["context"]["mode"], "label": result["context"]["label"]},
+        })
+        self.send_json({**result, "context_key": key})
+
+    def chat_delete(self):
+        session = self.require_user()
+        if session is None:
+            return
+        parts = urlsplit(self.path)
+        query = parse_qs(parts.query)
+        single = {name: values[0] for name, values in query.items()}
+        mode = (single.get("mode") or "document").strip()
+        document_ids = [item.strip() for item in (single.get("document_ids") or "").split(",")
+                        if item.strip()]
+        try:
+            if mode in {"document", "selection"}:
+                documents, _ = self.chat_documents(mode, single.get("document_id"), document_ids)
+                key = chat.context_key(mode, [item["document_id"] for item in documents])
+            elif mode == "library":
+                key = chat.context_key("library")
+            elif mode == "general":
+                key = chat.context_key("general")
+            else:
+                raise ValueError("Неизвестный режим чата.")
+        except KeyError:
+            self.error("Документ не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 400)
+            return
+        store = self.chat_store()
+        if store is None:
+            return
+        store.clear(session["user"]["id"], mode, key)
+        self.send_json({"cleared": True})
+
+    def obsidian_library_get(self, single):
+        session = self.require_user(csrf=False)
+        if session is None:
+            return
+        track = (single.get("track") or "all").strip().lower()
+        ids = [item.strip() for item in (single.get("ids") or "").split(",") if item.strip()]
+        try:
+            if track not in {"all", "rag", "solar"}:
+                raise ValueError("Допустимы области rag, solar или all.")
+            if ids:
+                if len(ids) > obsidian.MAX_ARTICLES:
+                    raise ValueError(f"За один экспорт можно взять не больше {obsidian.MAX_ARTICLES} статей.")
+                documents = []
+                for document_id in ids:
+                    _, envelope = self.load_owned_envelope(document_id)
+                    if envelope is None:
+                        raise KeyError(document_id)
+                    documents.append({"document_id": document_id, "envelope": envelope})
+            else:
+                items = self.workspace_items(track)
+                documents = []
+                for item in items[:obsidian.MAX_ARTICLES]:
+                    document_id = item.get("document_id")
+                    _, envelope = self.load_owned_envelope(document_id)
+                    if envelope is not None:
+                        documents.append({"document_id": document_id, "envelope": envelope})
+            data = obsidian.export_zip(documents)
+        except KeyError:
+            self.error("Документ не найден.", 404)
+            return
+        except ValueError as error:
+            self.error(str(error), 400)
+            return
+        name = "viniti-obsidian.zip" if track == "all" else f"viniti-{track}-obsidian.zip"
+        self.send_data(data, "application/zip",
+                       Content_Disposition=f"attachment; filename=\"{name}\"")
 
     def documents_get(self, path, query, single):
         segments = [unquote(part) for part in path.split("/") if part]
@@ -1638,6 +1924,21 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if resource == "quality":
+            self.send_json(pdf_quality.assess(envelope))
+            return
+
+        if resource == "obsidian.zip":
+            try:
+                data = obsidian.export_zip([{"document_id": document_id, "envelope": envelope}])
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            name = document_id.replace(":", "-") + "-obsidian.zip"
+            self.send_data(data, "application/zip",
+                           Content_Disposition=f"attachment; filename=\"{name}\"")
+            return
+
         self.error("Маршрут не найден.", 404)
 
     def solar_documents_get(self, document_id, resources, query, single):
@@ -1724,6 +2025,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.error("Документ не найден.", 404)
             else:
                 self.send_data(data, "text/csv; charset=utf-8", Content_Disposition=f"attachment; filename=\"{document_id.replace(':', '-')}.csv\"")
+        elif resource == "quality":
+            self.send_json(pdf_quality.assess(envelope))
+        elif resource == "obsidian.zip":
+            try:
+                data = obsidian.export_zip([{"document_id": document_id, "envelope": envelope}])
+            except ValueError as error:
+                self.error(str(error), 400)
+                return
+            name = document_id.replace(":", "-") + "-obsidian.zip"
+            self.send_data(data, "application/zip",
+                           Content_Disposition=f"attachment; filename=\"{name}\"")
         elif resource == "pdf":
             data = self.solar_store().pdf(document_id)
             if data is None:
@@ -1811,9 +2123,25 @@ class Handler(BaseHTTPRequestHandler):
             if raw is None:
                 return
             try:
-                result = profile_assistant.suggest(json.loads(raw))
+                value = json.loads(raw)
+                if not isinstance(value, dict):
+                    raise ValueError("Ожидается JSON-объект.")
+                profile_id = value.get("profile_id")
+                profile_source = None
+                if isinstance(profile_id, str) and profile_id:
+                    if profile_id == "rag":
+                        profile = {"tables": storage.load_passport()["areas"]["rag"]["tables"]}
+                        profile_source = "builtin"
+                    else:
+                        profile, profile_source, _ = self.load_profile(profile_id)
+                    value["profile"] = profile
+                result = profile_assistant.suggest(value, profile_source=profile_source)
+            except llm_provider.ProviderError as error:
+                self.error(str(error), 502)
             except (ValueError, UnicodeError, json.JSONDecodeError) as error:
                 self.error(str(error), 400)
+            except KeyError:
+                self.error("Профиль не найден.", 404)
             except RuntimeError as error:
                 self.error(str(error), 503)
             else:
@@ -1853,6 +2181,9 @@ class Handler(BaseHTTPRequestHandler):
             if session is not None:
                 self.documents_stream(session)
             return
+        if path == "/api/chat":
+            self.chat_post()
+            return
         if path.startswith("/api/profiles/"):
             if self.require_user() is not None:
                 self.profiles_put(path)
@@ -1878,6 +2209,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = urlsplit(self.path).path
+        if path == "/api/chat":
+            self.chat_delete()
+            return
         if path.startswith("/api/profiles/"):
             if self.require_user() is not None:
                 self.profiles_delete(path)

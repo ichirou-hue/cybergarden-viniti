@@ -11,7 +11,7 @@ from viniti import paths
 
 
 ROOT = paths.REPO_ROOT
-BUILTINS = ("solar", "custom-example")
+BUILTINS = ("solar", "universal", "custom-example")
 NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
 MAX_BYTES = 1024 * 1024
 
@@ -72,8 +72,8 @@ def summary(profile, *, source, name=None):
                     "description": settings["description"],
                     "required": bool(settings.get("required")),
                 }
-                for key in ("unit", "reference"):
-                    if settings.get(key):
+                for key in ("unit", "reference", "allowed", "minimum", "maximum", "aliases", "units"):
+                    if key in settings:
                         item[key] = settings[key]
                 fields.append(item)
             tables.append({
@@ -105,14 +105,15 @@ def _solar_tables():
         known = schema.get(table, {}).get("fields", {})
         tables.append({
             "name": table,
-            "key": "publication_id" if table == "publications" else f"{table[:-1]}_id",
+            "key": schema.get(table, {}).get("key", "publication_id" if table == "publications" else f"{table[:-1]}_id"),
             "description": "",
             "fields": [
                 {
+                    **known.get(column, {}),
                     "name": column,
                     "type": known.get(column, {}).get("type", "text"),
-                    "description": "",
-                    "required": False,
+                    "description": known.get(column, {}).get("description", ""),
+                    "required": bool(known.get(column, {}).get("required")),
                 }
                 for column in columns
             ],

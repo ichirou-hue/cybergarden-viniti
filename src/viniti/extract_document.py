@@ -13,7 +13,7 @@ from .solar_facts import MAX_BYTES
 def main():
     parser = argparse.ArgumentParser(description="PDF + профиль → кандидаты или связанные данные с источниками.")
     parser.add_argument("pdf", type=Path)
-    parser.add_argument("--profile", default="solar", help="solar, custom-example или путь к JSON-профилю.")
+    parser.add_argument("--profile", default="solar", help="solar, universal, custom-example или путь к JSON-профилю.")
     parser.add_argument("--mode", choices=["scripts", "auto", "model"], default="scripts",
                         help="scripts — offline-кандидаты; auto/model отправляют текст внешнему API.")
     parser.add_argument("-o", "--output", required=True, type=Path)

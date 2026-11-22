@@ -99,7 +99,7 @@ def main(argv=None):
         description="PDF + профиль -> источники, кандидаты и артефакты; auto использует "
                     "локальный Docling; опционально оболочка LLM (mock или api).")
     parser.add_argument("pdf", type=Path)
-    parser.add_argument("--profile", required=True, help="solar, custom-example или путь к JSON-профилю.")
+    parser.add_argument("--profile", required=True, help="solar, universal, custom-example или путь к JSON-профилю.")
     parser.add_argument("--publication-id", default="", help="Исходное имя публикации без расширения.")
     parser.add_argument("-o", "--output", required=True, type=Path)
     parser.add_argument("--parser", choices=["auto", "vision", "pdfplumber", "docling"], default="auto")

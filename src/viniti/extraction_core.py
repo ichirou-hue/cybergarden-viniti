@@ -159,7 +159,7 @@ def response_schema(profile):
 
 
 def load_profile(name):
-    path = paths.PROFILES_DIR / f"{name}.json" if name in {"solar", "custom-example"} else Path(name)
+    path = paths.PROFILES_DIR / f"{name}.json" if name in {"solar", "universal", "custom-example"} else Path(name)
     return compile_profile(json.loads(path.read_text(encoding="utf-8")))
 
 
