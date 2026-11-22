@@ -7,6 +7,9 @@ data/
 docs/materials/
 _refs/
 _corpus/
+# Local unpacked hackathon archives; use _corpus/ for tracked tooling inputs.
+Кейс5_область1_участникам/
+RAG_ВИНИТИ_участникам_*/
 *.zip
 .slim/deepwork/
 out/

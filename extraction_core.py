@@ -164,29 +164,163 @@ def candidate_fields(profile):
     return fields
 
 
+# A closed list of words that may stand between a metric name and its printed
+# value. Prose such as "PCE reaches 18.4 %" is accepted; a number that merely
+# sits near the name is not. The list stays explicit so recall grows without
+# turning proximity into evidence.
+CONNECTOR = re.compile(
+    r"(?:=|:|≈|~|\b(?:is|was|are|were|of|at|reach|reaches|reached|achieve|achieves|"
+    r"achieved|equal|equals|up\s+to|about|approximately)\b)", re.I,
+)
+NUMBER = re.compile(r"[+\-−]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+\-]?\d+)?")
+# A cell holding a range, uncertainty or threshold is not a scalar value. The
+# lookbehind keeps a plain negative number ("-20") out of this guard.
+RANGE_GUARD = re.compile(r"(?:±|\+/-|[<>≤≥]|\bto\b|[–—]|(?<=\d)\s*-\s*(?=\d))", re.I)
+
+
+def _alias_alternation(aliases):
+    return "|".join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True))
+
+
+def _expression(aliases):
+    return re.compile(
+        r"(?<!\w)(?:" + _alias_alternation(aliases) + r")(?!\w)\s*"
+        r"(?:(?P<connector>" + CONNECTOR.pattern + r")\s*)?"
+        r"(?P<value>" + NUMBER.pattern + r")(?![\w.,])", re.I,
+    )
+
+
+def _label_pattern(aliases):
+    return re.compile(r"(?<!\w)(?:" + _alias_alternation(aliases) + r")(?!\w)", re.I)
+
+
+def _cell_texts(source):
+    """Cell texts of a table row source, or the printed row split on the delimiter."""
+    cells = source.get("cells")
+    if isinstance(cells, list) and cells:
+        return [cell.get("quote", "") if isinstance(cell, dict) else "" for cell in cells]
+    return source.get("quote", "").split(" | ")
+
+
+def _scalar_in_cell(text):
+    """The single clean numeric token in a cell, or None for ranges/ambiguity."""
+    if RANGE_GUARD.search(text):
+        return None
+    matches = list(NUMBER.finditer(text))
+    if len(matches) != 1:
+        return None
+    raw = matches[0].group()
+    return raw if has_value(raw, text) else None
+
+
+def _best_label(text, patterns):
+    """Pick the field whose alias is the longest match in a label cell.
+
+    Comparing lengths keeps "stabilized PCE" from also being reported as "PCE".
+    """
+    best = None
+    for field, pattern in patterns.items():
+        match = pattern.search(text)
+        if match is not None and (best is None or match.end() - match.start() > best[2]):
+            best = (field, match.group(), match.end() - match.start())
+    return best
+
+
+def _candidate(field, raw, source, *, connector="", cell=None, header=None, note=""):
+    context = {
+        "kind": source.get("kind", "text"), "page": source.get("page"),
+        "section": source.get("section") or "", "table": source.get("table"),
+        "row": source.get("row"), "cell": cell,
+    }
+    if connector:
+        context["connector"] = connector
+    if header:
+        context["header_source_id"], context["header_quote"] = header
+    return {
+        "field": field, "raw_value": raw, "raw_unit": "",
+        "status": "candidate", "context_status": "unresolved",
+        "source_id": source["id"], "evidence": deepcopy(source), "context": context,
+        "note": note or "Keyword match only; unit, entity and experimental context are not established.",
+    }
+
+
 def script_candidates(document, profile):
+    """Emit verifiable value candidates from the sources that already exist.
+
+    Each candidate points at one real source id and repeats a literal numeric
+    token printed in that source. Prose and captions use the closed connector
+    list; a table row is read either from a label and value printed in the same
+    row, or from a header cell of the same table that names the column. No
+    source id, quote or value is generated, and a range, uncertainty or
+    threshold never becomes a scalar candidate.
+    """
+    fields = candidate_fields(profile)
+    expressions = {field: _expression(aliases) for field, aliases in fields.items()}
+    patterns = {field: _label_pattern(aliases) for field, aliases in fields.items()}
+    headers = {}
+    for source in document["sources"]:
+        if source.get("kind") == "table" and source.get("row") == 1:
+            headers[(source.get("page"), source.get("table"))] = (_cell_texts(source), source["id"])
     candidates = []
-    # Deliberately narrow: no inference from captions, neighboring numbers,
-    # table-column positions, ranges, or model-generated entity identifiers.
-    number = r"[+\-−]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+\-]?\d+)?"
-    for field, aliases in candidate_fields(profile).items():
-        expression = re.compile(
-            r"(?<!\w)(?:" + "|".join(re.escape(alias) for alias in sorted(aliases, key=len, reverse=True))
-            + r")(?!\w)\s*(?:=|:|\bis\b|\bof\b)?\s*(?P<value>" + number
-            + r")(?![\w.,])", re.I,
-        )
-        for source in document["sources"]:
-            for match in expression.finditer(source["quote"]):
-                raw = match["value"]
-                if not has_value(raw, source["quote"]):
-                    continue
-                candidates.append({
-                    "field": field, "raw_value": raw, "raw_unit": "",
-                    "status": "candidate", "context_status": "unresolved",
-                    "source_id": source["id"], "evidence": deepcopy(source),
-                    "note": "Keyword match only; unit, entity and experimental context are not established.",
-                })
-    return candidates
+    for source in document["sources"]:
+        kind = source.get("kind", "text")
+        if kind == "cell":
+            continue
+        if kind != "table":
+            for field, expression in expressions.items():
+                for match in expression.finditer(source.get("quote", "")):
+                    raw = match["value"]
+                    if not has_value(raw, source["quote"]):
+                        continue
+                    candidates.append(_candidate(
+                        field, raw, source, connector=match["connector"] or "",
+                        note=("Caption keyword match; unit and experimental context are not established."
+                              if kind == "caption" else
+                              "Keyword match only; unit, entity and experimental context are not established."),
+                    ))
+            continue
+        texts = _cell_texts(source)
+        if not texts:
+            continue
+        # Same-row label and value: one numeric cell, no other numeric cells.
+        for index, text in enumerate(texts):
+            best = _best_label(text, patterns)
+            if best is None:
+                continue
+            numeric = [(other, value) for other, value in enumerate(texts)
+                       if other != index and NUMBER.search(value)]
+            if len(numeric) != 1:
+                continue
+            value_cell, value_text = numeric[0]
+            raw = _scalar_in_cell(value_text)
+            if raw is None or not has_value(raw, source.get("quote", "")):
+                continue
+            candidates.append(_candidate(best[0], raw, source, cell=value_cell))
+        # Header-named column: the header row and the data row are separate
+        # sources, so the header id is recorded as context, never invented.
+        header = headers.get((source.get("page"), source.get("table")))
+        if source.get("row") == 1 or header is None:
+            continue
+        header_texts, header_id = header
+        for index, text in enumerate(texts):
+            if index >= len(header_texts):
+                continue
+            best = _best_label(header_texts[index], patterns)
+            if best is None:
+                continue
+            raw = _scalar_in_cell(text)
+            if raw is None or not has_value(raw, source.get("quote", "")):
+                continue
+            candidates.append(_candidate(
+                best[0], raw, source, cell=index, header=(header_id, header_texts[index]),
+            ))
+    unique, seen = [], set()
+    for candidate in candidates:
+        key = (candidate["field"], candidate["raw_value"], candidate["source_id"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
 
 
 def model_messages(document, profile, candidates, max_input_chars):

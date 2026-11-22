@@ -157,6 +157,32 @@ export async function uploadPDFWithProgress(file, track, onProgress, signal) {
   return result;
 }
 
+export function getProfiles(signal) {
+  return getJSON("/api/profiles", {}, signal);
+}
+
+export function getLLM(signal) {
+  return getJSON("/api/llm", {}, signal);
+}
+
+export function startParse(file, options = {}, signal) {
+  const llm = options.llm === "api" ? "api" : "off";
+  return request("/api/parse", {
+    method: "POST",
+    body: file,
+    signal,
+    headers: {
+      "Content-Type": "application/pdf",
+      "X-Profile": options.profile || "solar",
+      "X-Parser": options.parser || "pdfplumber",
+      "X-OCR": options.ocr || "auto",
+      "X-Charts": options.charts ? "1" : "0",
+      "X-LLM": llm,
+      "X-Filename": encodeURIComponent(file.name),
+    },
+  }, signal).then(unwrap);
+}
+
 export function openDemo(track, signal) {
   return request("/api/demo", {
     method: "POST",

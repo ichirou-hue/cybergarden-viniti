@@ -12,7 +12,9 @@ from unittest.mock import Mock
 from urllib.error import HTTPError
 from urllib.request import Request
 
-from extraction_core import compile_profile, export_result, load_profile, response_schema, run
+from extraction_core import (
+    compile_profile, export_result, load_profile, response_schema, run, script_candidates,
+)
 from solar_extract import NoRedirect
 from solar_facts import finalize
 from tests.test_solar import ROOT, fixture, synthetic_pdf
@@ -222,6 +224,95 @@ class ExtractionCoreTest(unittest.TestCase):
             self.assertTrue((out / "candidates.csv").exists())
             self.assertFalse((out / "results.csv").exists())
             self.assertEqual(json.loads((out / "result.json").read_text())["run"]["mode"], "scripts")
+
+
+class ScriptCandidateEnrichmentTest(unittest.TestCase):
+    """The script channel may find more values, never invent evidence."""
+
+    def document(self, *sources):
+        return {"publication_id": "S001", "sha256": "synthetic", "pages": 1,
+                "warnings": [], "sources": list(sources)}
+
+    def test_caption_with_verb_connector_yields_candidate(self):
+        quote = "Figure 2: PCE reaches 18.4 % under reverse scan."
+        candidates = script_candidates(self.document(
+            {"id": 1, "page": 1, "kind": "caption", "quote": quote}), load_profile("solar"))
+        pce = [candidate for candidate in candidates if candidate["field"] == "PCE"]
+        self.assertEqual(len(pce), 1)
+        self.assertEqual(pce[0]["raw_value"], "18.4")
+        self.assertEqual(pce[0]["source_id"], 1)
+        self.assertEqual(pce[0]["context"]["kind"], "caption")
+        self.assertEqual(pce[0]["context"]["connector"], "reaches")
+        self.assertIn("Caption", pce[0]["note"])
+
+    def test_table_header_and_same_row_values_are_both_found(self):
+        header = {"id": 1, "page": 2, "kind": "table", "table": 1, "row": 1,
+                  "quote": "Device | PCE | Voc",
+                  "cells": [{"quote": "Device"}, {"quote": "PCE"}, {"quote": "Voc"}]}
+        data = {"id": 2, "page": 2, "kind": "table", "table": 1, "row": 2,
+                "quote": "DV1 | 18.4 | 1.05",
+                "cells": [{"quote": "DV1"}, {"quote": "18.4"}, {"quote": "1.05"}]}
+        key_value = {"id": 3, "page": 2, "kind": "table", "table": 2, "row": 1,
+                     "quote": "PCE (%) | 19.2",
+                     "cells": [{"quote": "PCE (%)"}, {"quote": "19.2"}]}
+        candidates = script_candidates(self.document(header, data, key_value), load_profile("solar"))
+        by_value = {candidate["raw_value"]: candidate
+                    for candidate in candidates if candidate["field"] == "PCE"}
+        self.assertEqual(set(by_value), {"18.4", "19.2"})
+        self.assertEqual(by_value["18.4"]["source_id"], 2)
+        self.assertEqual(by_value["18.4"]["context"]["header_source_id"], 1)
+        self.assertEqual(by_value["18.4"]["context"]["header_quote"], "PCE")
+        self.assertEqual(by_value["18.4"]["context"]["cell"], 1)
+        self.assertEqual(by_value["19.2"]["source_id"], 3)
+        self.assertEqual(by_value["19.2"]["context"]["table"], 2)
+        self.assertNotIn("header_source_id", by_value["19.2"]["context"])
+        voc = [candidate for candidate in candidates if candidate["field"] == "Voc"]
+        self.assertEqual([candidate["raw_value"] for candidate in voc], ["1.05"])
+
+    def test_ranges_uncertainties_and_thresholds_are_not_scalars(self):
+        profile = load_profile("solar")
+        for quote in ("PCE = 16–20 %", "PCE = 16-20 %", "PCE = 16 to 20 %",
+                      "PCE = 16 ± 1 %", "PCE = <16 %"):
+            with self.subTest(quote=quote):
+                candidates = script_candidates(self.document(
+                    {"id": 1, "page": 1, "kind": "text", "quote": quote}), profile)
+                self.assertFalse([candidate for candidate in candidates if candidate["field"] == "PCE"])
+        header = {"id": 1, "page": 1, "kind": "table", "table": 1, "row": 1,
+                  "quote": "Metric | PCE", "cells": [{"quote": "Metric"}, {"quote": "PCE"}]}
+        data = {"id": 2, "page": 1, "kind": "table", "table": 1, "row": 2,
+                "quote": "champion | 16–20",
+                "cells": [{"quote": "champion"}, {"quote": "16–20"}]}
+        self.assertFalse(script_candidates(self.document(header, data), profile))
+
+    def test_plain_negative_scalar_keeps_its_sign(self):
+        profile = load_profile("custom-example")
+        candidates = script_candidates(self.document(
+            {"id": 1, "page": 1, "kind": "text", "quote": "temperature = −20 °C"}), profile)
+        self.assertEqual([candidate["raw_value"] for candidate in candidates], ["−20"])
+
+    def test_every_candidate_points_at_a_real_source(self):
+        sources = [
+            {"id": 1, "page": 1, "kind": "caption", "quote": "Table 1: PCE reaches 18.4 %."},
+            {"id": 2, "page": 2, "kind": "table", "table": 1, "row": 1,
+             "quote": "Device | PCE", "cells": [{"quote": "Device"}, {"quote": "PCE"}]},
+            {"id": 3, "page": 2, "kind": "table", "table": 1, "row": 2,
+             "quote": "DV1 | 1,05", "cells": [{"quote": "DV1"}, {"quote": "1,05"}]},
+            {"id": 4, "page": 3, "kind": "text", "quote": "The champion Voc equals 1000 mV."},
+        ]
+        candidates = script_candidates(self.document(*sources), load_profile("solar"))
+        self.assertTrue(candidates)
+        by_id = {source["id"]: source for source in sources}
+        for candidate in candidates:
+            self.assertIn(candidate["source_id"], by_id)
+            self.assertEqual(candidate["evidence"]["id"], candidate["source_id"])
+            self.assertEqual(candidate["evidence"]["quote"], by_id[candidate["source_id"]]["quote"])
+            self.assertIn(candidate["raw_value"], by_id[candidate["source_id"]]["quote"])
+            header_id = candidate["context"].get("header_source_id")
+            if header_id is not None:
+                self.assertIn(header_id, by_id)
+                self.assertNotEqual(header_id, candidate["source_id"])
+        self.assertEqual({candidate["source_id"] for candidate in candidates
+                          if candidate["field"] == "PCE"}, {1, 3})
 
 
 class SolarReviewRegressionTest(unittest.TestCase):

@@ -1,4 +1,11 @@
-"""Разбор PDF через Docling с OCR и формулами, без связывания фактов LLM."""
+"""Разбор одного PDF по профилю: источники, кандидаты и артефакты парсера.
+
+По умолчанию модель не вызывается. `--llm-shell mock` прогоняет офлайн-оболочку
+LLM (`llm_shell`) поверх готового scripts-паспорта; `--llm-shell api` вызывает
+реальную модель через chat-completions endpoint, ключ и адрес берутся только из
+окружения (`OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL`). Паспорт и
+официальные CSV при этом не меняются.
+"""
 
 import argparse
 import json
@@ -6,6 +13,8 @@ from pathlib import Path
 import sys
 import time
 
+import llm_provider
+import llm_shell
 from extraction_core import export_result, load_profile, prepare_pdf, run
 from solar_facts import MAX_BYTES
 from viniti import diagnostics
@@ -33,6 +42,10 @@ def parse(args):
                       ocr=args.ocr if args.parser == "docling" else "off",
                       charts=bool(args.charts), bytes=len(data))
     profile = load_profile(args.profile)
+    if args.llm_shell == "api":
+        # Fail before any export when the environment is not configured; the
+        # message names variables, never their values.
+        llm_provider.config_from_env()
     if args.parser == "vision":
         from vision_source import prepare_pdf as prepare_vision
         document, assets = prepare_vision(path.name, data)
@@ -59,13 +72,18 @@ def parse(args):
         "Смысловое связывание научных фактов не выполнялось, кандидаты требуют проверки."
     )
     export_result(result, args.output, assets=assets)
-    print(json.dumps({
+    summary = {
         "output": str(args.output),
         "pages": result["document"]["pages"],
         "sources": len(result["sources"]),
         "candidates": len(result["candidates"]),
         "warnings": len(result["warnings"]),
-    }, ensure_ascii=False))
+    }
+    if args.llm_shell != "off":
+        mode = args.llm_shell
+        summary["llm"] = llm_shell.summarize(llm_shell.run_bundle(
+            args.output, mode=mode, allow_network=mode == "api"))
+    print(json.dumps(summary, ensure_ascii=False))
     diagnostics.event(logger, "parse.done", parser=args.parser,
                       duration_ms=int((time.perf_counter() - started) * 1000),
                       pages=result["document"]["pages"],
@@ -78,7 +96,8 @@ def parse(args):
 def main(argv=None):
     diagnostics.configure()
     parser = argparse.ArgumentParser(
-        description="PDF + профиль -> источники, кандидаты и артефакты; auto использует локальный Docling.")
+        description="PDF + профиль -> источники, кандидаты и артефакты; auto использует "
+                    "локальный Docling; опционально оболочка LLM (mock или api).")
     parser.add_argument("pdf", type=Path)
     parser.add_argument("--profile", required=True, help="solar, custom-example или путь к JSON-профилю.")
     parser.add_argument("--publication-id", default="", help="Исходное имя публикации без расширения.")
@@ -87,6 +106,10 @@ def main(argv=None):
     parser.add_argument("--ocr", choices=["auto", "full", "off"], default="auto", help="Только для Docling.")
     parser.add_argument("--charts", action="store_true",
                         help="Только Docling: локальный chart2csv VLM, результаты требуют проверки.")
+    parser.add_argument("--llm-shell", choices=["off", "mock", "api"], default="off",
+                        help="Оболочка LLM: mock пишет кандидаты и аудит офлайн; "
+                             "api вызывает модель по OPENAI_API_KEY/OPENAI_MODEL/OPENAI_BASE_URL. "
+                             "Паспорт и официальные CSV не меняются.")
     args = parser.parse_args(argv)
     try:
         return parse(args)

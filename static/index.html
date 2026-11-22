@@ -156,11 +156,23 @@
   <div class="track-switch" role="group" aria-label="Разделы">
     <a class="track" id="passportLink" href="#/passport">Паспорт</a>
   </div>
+  <fieldset id="toolbarLLM" class="llm-switch" aria-label="Использование LLM" title="При включении фрагменты документа отправляются в настроенную API-модель">
+    <legend>LLM:</legend>
+    <label>
+      <input type="radio" name="toolbarLLM" value="off" checked>
+      <span>Выкл</span>
+    </label>
+    <span class="llm-switch-divider" aria-hidden="true">|</span>
+    <label>
+      <input type="radio" name="toolbarLLM" value="api">
+      <span>Вкл</span>
+    </label>
+  </fieldset>
   <form id="upload" class="upload">
     <label class="file"><span id="fileName">Загрузить PDF</span>
       <input id="file" type="file" accept=".pdf,application/pdf">
     </label>
-    <button type="submit">Разобрать</button>
+    <button type="submit">Разобрать PDF</button>
     <button type="button" id="demo" class="secondary">Демо</button>
     <label class="file">Импорт паспорта JSON
       <input id="passport" type="file" accept=".json,application/json">
@@ -181,10 +193,16 @@
     </div>
     <div id="profileStep" hidden>
       <p id="selectedFile"></p>
+      <h2>Выберите профиль обработки</h2>
       <div id="profileChoices" class="profile-choices"></div>
+      <div class="llm-inherited" aria-live="polite">
+        <strong id="wizardLLMState">LLM выключен</strong>
+        <span id="wizardLLMNote">Разбор выполняется без передачи фрагментов документа модели.</span>
+      </div>
       <div class="wizard-actions">
         <a href="/manual-profile" id="createProfile" class="button secondary">Создать профиль</a>
         <button id="wizardBack" type="button" class="secondary">Другой PDF</button>
+        <button id="wizardCancel" type="button" class="secondary">Закрыть</button>
         <button id="wizardSubmit" type="button" class="primary">Разобрать PDF</button>
       </div>
       <div id="processingProgress" class="processing-progress" hidden role="status" aria-live="polite">
