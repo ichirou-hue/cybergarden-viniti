@@ -12,11 +12,11 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from urllib.request import build_opener
 from http.cookiejar import CookieJar
-import auth
+from viniti import auth
 
 from reportlab.pdfgen import canvas
 
-from server import Handler, ThreadingHTTPServer
+from viniti.server import Handler, ThreadingHTTPServer
 
 
 def get(url, client=None):

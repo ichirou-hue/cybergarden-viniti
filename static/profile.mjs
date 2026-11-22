@@ -8,12 +8,54 @@ const entities = byId("profileEntities");
 const matches = byId("profileMatches");
 const status = byId("profileStatus");
 const errorLine = byId("profileError");
-let documentData;
-let selection;
+const state = {
+  document: undefined,
+  selection: undefined,
+  matchesStale: false,
+  proposals: [],
+  assistantHistory: [],
+  loading: false,
+};
+
 const presets = {
-  solar: {title: "Солнечные элементы", types: [{name: "Устройство", aliases: "device, cell, ячейка", fields: ["Структура", "Материал", "Площадь"]}, {name: "Измерение", aliases: "efficiency, PCE, Voc, Jsc, FF, КПД", fields: ["Показатель", "Значение", "Единица", "Условия измерения"]}]},
-  rag: {title: "RAG-система", types: [{name: "Система", aliases: "RAG, retrieval, model, модель", fields: ["Название", "Модель", "Метод поиска"]}, {name: "Результат", aliases: "accuracy, recall, precision, F1, benchmark, dataset", fields: ["Набор данных", "Метрика", "Значение", "Конфигурация"]}]},
-  basic: {title: "Результаты статьи", types: [{name: "Результат", aliases: "result, results, experiment, результат, эксперимент", fields: ["Объект", "Показатель", "Значение", "Условия"]}]},
+  solar: {
+    title: "Солнечные элементы",
+    types: [
+      {
+        name: "Устройство",
+        aliases: "device, cell, ячейка",
+        fields: ["Структура", "Материал", "Площадь"],
+      },
+      {
+        name: "Измерение",
+        aliases: "efficiency, PCE, Voc, Jsc, FF, КПД",
+        fields: ["Показатель", "Значение", "Единица", "Условия измерения"],
+      },
+    ],
+  },
+  rag: {
+    title: "RAG-система",
+    types: [
+      {
+        name: "Система",
+        aliases: "RAG, retrieval, model, модель",
+        fields: ["Название", "Модель", "Метод поиска"],
+      },
+      {
+        name: "Результат",
+        aliases: "accuracy, recall, precision, F1, benchmark, dataset",
+        fields: ["Набор данных", "Метрика", "Значение", "Конфигурация"],
+      },
+    ],
+  },
+  basic: {
+    title: "Результаты статьи",
+    types: [{
+      name: "Результат",
+      aliases: "result, results, experiment, результат, эксперимент",
+      fields: ["Объект", "Показатель", "Значение", "Условия"],
+    }],
+  },
 };
 
 const value = (row, name) => row.querySelector('[name="' + name + '"]').value.trim();
@@ -28,16 +70,15 @@ export function matchingSources(sources, names) {
   });
 }
 
-let matchesStale = false;
 function clearMatches() {
-  selection = undefined;
+  state.selection = undefined;
   matches.replaceChildren();
-  matchesStale = false;
+  state.matchesStale = false;
 }
 
 function staleMatches() {
-  if (!matches.children.length || matchesStale) return;
-  matchesStale = true;
+  if (!matches.children.length || state.matchesStale) return;
+  state.matchesStale = true;
   matches.querySelectorAll('input[type="checkbox"]').forEach(input => {
     input.checked = false;
     input.disabled = true;
@@ -133,11 +174,11 @@ function addField(container, name = "", kind = "text", example = "") {
   field.innerHTML = fieldMarkup();
   const type = field.querySelector('[name="type"]');
   type.addEventListener("change", () => updateExtra(field));
-  field.querySelector(".pf-remove").onclick = () => {
+  field.querySelector(".pf-remove").addEventListener("click", () => {
     field.remove();
     staleMatches();
     markEdited();
-  };
+  });
   container.append(field);
   field.querySelector('[name="fieldName"]').value = name;
   type.value = kind;
@@ -158,16 +199,16 @@ function addEntity(preset) {
     <div class="profile-fields"></div>
     <div class="entity-actions"><button type="button" class="button">Добавить поле</button></div>`;
   const fields = entity.querySelector(".profile-fields");
-  entity.querySelector(".entity-actions button").onclick = () => {
+  entity.querySelector(".entity-actions button").addEventListener("click", () => {
     addField(fields);
     markEdited();
-  };
-  entity.querySelector(".pf-remove").onclick = () => {
+  });
+  entity.querySelector(".pf-remove").addEventListener("click", () => {
     entity.remove();
     refreshTypes();
     staleMatches();
     markEdited();
-  };
+  });
   entities.append(entity);
   if (preset) {
     entity.querySelector('[name="entityName"]').value = preset.name;
@@ -196,10 +237,14 @@ function applyPreset(key) {
   form.elements.title.value = preset.title;
   preset.types.forEach(addEntity);
   refreshTypes();
-  document.querySelectorAll('[data-preset]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.preset === key)));
+  document.querySelectorAll("[data-preset]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.preset === key));
+  });
   status.textContent = "Готовый набор добавлен. Можно изменить названия и поля под статью.";
 }
-document.querySelectorAll('[data-preset]').forEach(button => button.onclick = () => applyPreset(button.dataset.preset));
+document.querySelectorAll("[data-preset]").forEach(button => {
+  button.addEventListener("click", () => applyPreset(button.dataset.preset));
+});
 
 function readProfile() {
   const types = [...entities.children].map(entity => ({
@@ -218,6 +263,11 @@ function readProfile() {
       };
     }),
   }));
+  validateTypes(types);
+  return {title: value(form, "title"), types};
+}
+
+function validateTypes(types) {
   const unique = names => new Set(names.map(normalize)).size === names.length;
   if (!types.length) throw new Error("Добавьте хотя бы один тип сущности.");
   if (!types.every(type => type.name) || !unique(types.map(type => type.name))) {
@@ -238,16 +288,15 @@ function readProfile() {
       }
     }
   }
-  return {title: value(form, "title"), types};
 }
 
 function showMatches(profile, browseAll) {
   clearError();
   clearMatches();
-  selection = [];
+  state.selection = [];
   for (const type of profile.types.filter(type => type.selected)) {
     const panel = document.createElement("details");
-    const candidates = browseAll ? documentData.sources : matchingSources(documentData.sources, [type.name, ...type.aliases,
+    const candidates = browseAll ? state.document.sources : matchingSources(state.document.sources, [type.name, ...type.aliases,
       ...type.fields.filter(field => field.selected).map(field => field.name)]);
     const title = document.createElement("summary");
     title.textContent = type.name + " · подсказок: " + candidates.length;
@@ -258,7 +307,7 @@ function showMatches(profile, browseAll) {
       input.type = "checkbox";
       label.append(input, " Стр. " + source.page + " · " + (source.display_text || source.quote));
       panel.append(label);
-      selection.push({type: type.name, source, input});
+      state.selection.push({type: type.name, source, input});
     }
     if (!candidates.length) panel.append("Проверьте названия и добавьте сокращения из статьи. Тип можно оставить выбранным.");
     matches.append(panel);
@@ -267,11 +316,11 @@ function showMatches(profile, browseAll) {
     : "Отметьте подходящие фрагменты. Подсказки основаны на совпадении слов.";
 }
 
-byId("addEntity").onclick = () => {
+byId("addEntity").addEventListener("click", () => {
   addEntity();
   staleMatches();
   markEdited();
-};
+});
 form.addEventListener("input", event => {
   if (matches.contains(event.target)) return;
   refreshTypes();
@@ -279,15 +328,15 @@ form.addEventListener("input", event => {
   markEdited();
 });
 function scan(browseAll) {
-  if (!documentData || !form.reportValidity()) return;
+  if (!state.document || !form.reportValidity()) return;
   try {
     showMatches(readProfile(), browseAll);
   } catch (error) {
     showError(error.message);
   }
 }
-byId("scanProfile").onclick = () => scan(false);
-byId("browseProfile").onclick = () => scan(true);
+byId("scanProfile").addEventListener("click", () => scan(false));
+byId("browseProfile").addEventListener("click", () => scan(true));
 
 async function parseResponse(response) {
   const data = await response.json();
@@ -314,8 +363,6 @@ async function readPdf(file) {
   return {pages: result.document.pages, sources: result.sources, warnings: result.warnings || []};
 }
 
-let proposals = [];
-const assistantHistory = [];
 function chatMessage(text, side = "assistant") {
   const bubble = document.createElement("p");
   bubble.className = `chat-bubble ${side === "user" ? "user-bubble" : "assistant-bubble"}`;
@@ -324,10 +371,10 @@ function chatMessage(text, side = "assistant") {
   messages.append(bubble);
   messages.scrollTop = messages.scrollHeight;
 }
-byId("assistantAsk").onclick = async () => {
+byId("assistantAsk").addEventListener("click", async () => {
   const question = byId("assistantQuestion").value.trim();
   const assistantStatus = byId("assistantStatus");
-  if (!question || !documentData) { chatMessage("Сначала загрузите PDF и напишите вопрос по статье."); return; }
+  if (!question || !state.document) { chatMessage("Сначала загрузите PDF и напишите вопрос по статье."); return; }
   const profile = {types: [...entities.children].map(entity => ({
     name: value(entity, "entityName"),
     fields: [...entity.querySelectorAll(".profile-field")].map(field => ({name: value(field, "fieldName")})),
@@ -343,20 +390,20 @@ byId("assistantAsk").onclick = async () => {
   try {
     const response = await authorized(await apiFetch("/api/profile/assist", {method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({question, profile, sources: documentData.sources.slice(0, 24),
-        history: assistantHistory.slice(-4)}),
+      body: JSON.stringify({question, profile, sources: state.document.sources.slice(0, 24),
+        history: state.assistantHistory.slice(-4)}),
     }));
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Помощник не ответил.");
-    proposals = data.suggestions || [];
-    assistantHistory.push({role: "user", content: question},
-      {role: "assistant", content: JSON.stringify({suggestions: proposals})});
-    assistantStatus.textContent = proposals.length ? `Предложено полей: ${proposals.length}. Отметьте нужные.`
+    state.proposals = data.suggestions || [];
+    state.assistantHistory.push({role: "user", content: question},
+      {role: "assistant", content: JSON.stringify({suggestions: state.proposals})});
+    assistantStatus.textContent = state.proposals.length ? `Предложено полей: ${state.proposals.length}. Отметьте нужные.`
       : "По этим фрагментам нет подтверждённых предложений. Уточните вопрос.";
-    chatMessage(proposals.length ? `Нашёл ${proposals.length} полей. Отметьте подходящие карточки ниже.`
+    chatMessage(state.proposals.length ? `Нашёл ${state.proposals.length} полей. Отметьте подходящие карточки ниже.`
       : "В доступных фрагментах нет подтверждённых полей. Уточните вопрос или проверьте PDF.");
     const list = byId("assistantSuggestions");
-    proposals.forEach((item, index) => {
+    state.proposals.forEach((item, index) => {
       const label = document.createElement("label");
       label.className = "assistant-suggestion";
       const checkbox = document.createElement("input");
@@ -367,16 +414,16 @@ byId("assistantAsk").onclick = async () => {
       if (item.quote) label.append(Object.assign(document.createElement("small"), {textContent: `Стр. ${item.page}: ${item.quote}`}));
       list.append(label);
     });
-    byId("assistantApply").hidden = !proposals.length;
+    byId("assistantApply").hidden = !state.proposals.length;
   } catch (error) {
     assistantStatus.textContent = error.message;
     chatMessage(error.message);
   } finally { button.disabled = false; }
-};
+});
 
-byId("assistantApply").onclick = () => {
+byId("assistantApply").addEventListener("click", () => {
   const selected = [...byId("assistantSuggestions").querySelectorAll('input:checked')]
-    .map(input => proposals[Number(input.value)]);
+    .map(input => state.proposals[Number(input.value)]);
   let added = 0;
   for (const item of selected) {
     let entity = [...entities.children].find(row => normalize(value(row, "entityName")) === normalize(item.entity));
@@ -393,29 +440,28 @@ byId("assistantApply").onclick = () => {
   chatMessage(byId("assistantStatus").textContent);
   byId("assistantApply").hidden = true;
   byId("assistantSuggestions").replaceChildren();
-  proposals = [];
-};
+  state.proposals = [];
+});
 
-let loading = false;
 async function loadFile(file) {
-  if (!file || loading) return;
+  if (!file || state.loading) return;
   if (!(await sessionReady)) return;
-  assistantHistory.length = 0;
+  state.assistantHistory.length = 0;
   byId("assistantMessages").replaceChildren();
   byId("assistantSuggestions").replaceChildren();
   byId("assistantApply").hidden = true;
   byId("assistantStatus").hidden = true;
-  loading = true;
+  state.loading = true;
   upload.disabled = true;
   form.hidden = true;
-  documentData = undefined;
+  state.document = undefined;
   clearError();
   clearMatches();
   byId("profilePanel").hidden = false;
   status.textContent = "Docling распознаёт структуру, текст и формулы. Это может занять несколько минут…";
   try {
     const data = await readPdf(file);
-    documentData = {...data, filename: file.name};
+    state.document = {...data, filename: file.name};
     const sourceLine = byId("profileSource");
     if (sourceLine) {
       sourceLine.textContent = file.name + " · страниц: " + data.pages + " · фрагментов: " + data.sources.length
@@ -433,14 +479,14 @@ async function loadFile(file) {
   } finally {
     upload.value = "";
     upload.disabled = false;
-    loading = false;
+    state.loading = false;
   }
 }
 
-upload.onchange = () => {
+upload.addEventListener("change", () => {
   const file = upload.files[0];
   if (file) loadFile(file);
-};
+});
 
 takeProfilePDF().then(file => {
   if (file) loadFile(file);
@@ -449,15 +495,15 @@ takeProfilePDF().then(file => {
   console.warn("Не удалось забрать PDF из мастер-потока:", error.message);
 });
 
-form.onsubmit = event => {
+form.addEventListener("submit", event => {
   event.preventDefault();
-  if (!documentData) return;
+  if (!state.document) return;
   try {
     const profile = readProfile();
-    const evidence = (selection ?? []).filter(item => item.input.checked)
+    const evidence = (state.selection ?? []).filter(item => item.input.checked)
       .map(({type, source}) => ({type, source}));
-    const payload = {schema_version: 1, document: {filename: documentData.filename,
-      pages: documentData.pages, warnings: documentData.warnings}, profile, evidence};
+    const payload = {schema_version: 1, document: {filename: state.document.filename,
+      pages: state.document.pages, warnings: state.document.warnings}, profile, evidence};
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"}));
     const link = document.createElement("a");
     link.href = url;
@@ -469,6 +515,6 @@ form.onsubmit = event => {
   } catch (error) {
     showError(error.message);
   }
-};
+});
 
 document.body.dataset.profile = "ready";

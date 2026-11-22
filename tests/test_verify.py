@@ -1,6 +1,6 @@
 import unittest
 
-import verify
+from viniti import verify
 
 
 class VerificationBoundaryTest(unittest.TestCase):

@@ -14,9 +14,9 @@ import unittest
 
 from reportlab.pdfgen import canvas
 
-import db as storage
-import solar_offline
-from solar_schema import TABLES
+from viniti import db as storage
+from viniti import solar_offline
+from viniti.solar_schema import TABLES
 
 
 def make_pdf(lines, table=False, rows=None):

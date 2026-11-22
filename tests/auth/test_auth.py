@@ -11,10 +11,10 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import HTTPPasswordMgr, Request, build_opener, urlopen
 
-import auth
-from library import Library
-from rag_api import RagStore, demo_pdf
-from server import Handler, ThreadingHTTPServer
+from viniti import auth
+from viniti.library import Library
+from viniti.rag_api import RagStore, demo_pdf
+from viniti.server import Handler, ThreadingHTTPServer
 
 
 def tiny_pdf():
@@ -175,7 +175,7 @@ class AuthApiTest(unittest.TestCase):
         self.server.data = self.server.auth.path
         status, _, body = self.call("/api/stats")
         self.assertEqual(status, 503, body)
-        self.assertIn("db.py --init", body["error"])
+        self.assertIn("viniti db --init", body["error"])
 
     def upload(self, path, data, csrf, client=None):
         request = Request(self.base + path, data=data, headers={

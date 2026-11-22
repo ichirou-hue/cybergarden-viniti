@@ -13,9 +13,9 @@ import zipfile
 
 from reportlab.pdfgen import canvas
 
-from solar_extract import complete, messages
-from solar_facts import export_bundle, finalize, prepare_pdf
-from solar_schema import KEYS, TABLES, UNITS
+from viniti.solar_extract import complete, messages
+from viniti.solar_facts import export_bundle, finalize, prepare_pdf
+from viniti.solar_schema import KEYS, TABLES, UNITS
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -317,7 +317,7 @@ class SolarTransportTest(unittest.TestCase):
             pdf, output = Path(tmp) / "D001.pdf", Path(tmp) / "prepared"
             pdf.write_bytes(synthetic_pdf())
             run = subprocess.run([
-                sys.executable, str(ROOT / "solar_extract.py"), str(pdf), "-o", str(output), "--prepare",
+                sys.executable, "-m", "viniti.solar_extract", str(pdf), "-o", str(output), "--prepare",
             ], capture_output=True, timeout=30)
             self.assertEqual(run.returncode, 0, run.stderr.decode())
             request = json.loads((output / "request.json").read_text())

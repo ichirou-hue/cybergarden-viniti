@@ -7,8 +7,8 @@ from unittest import TestCase, mock
 from urllib.error import HTTPError
 from urllib.request import Request
 
-from llm_contract import LLMJsonFiller
-from llm_provider import (
+from viniti.llm_contract import LLMJsonFiller
+from viniti.llm_provider import (
     ENDPOINT, NoRedirect, ProviderConfigError, ProviderError,
     ProviderResponseError, complete, json_backend, json_filler, resolve_config,
 )
@@ -98,7 +98,7 @@ class ProviderSuccessTest(TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_complete_seam_matches_profile_assistant(self):
-        from profile_assistant import suggest
+        from viniti.profile_assistant import suggest
 
         response = {"suggestions": [{"entity": "Устройство", "field": "КПД",
                                      "type": "number", "value": "", "page": None,
@@ -113,7 +113,7 @@ class ProviderSuccessTest(TestCase):
         payload = {"question": "Какие поля?", "sources": [], "profile": {"types": []}}
         with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "k",
                                           "OPENROUTER_MODEL": "m"}):
-            with mock.patch("llm_provider.urlopen", opener):
+            with mock.patch("viniti.llm_provider.urlopen", opener):
                 result = suggest(payload, complete_fn=complete)
         self.assertEqual(result["suggestions"][0]["field"], "КПД")
 

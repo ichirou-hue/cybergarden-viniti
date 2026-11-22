@@ -26,10 +26,11 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import norm  # noqa: E402  (path setup must come first)
+from viniti import norm  # noqa: E402  (path setup must come first)
 
 DEFAULT_DB = ROOT / "data" / "viniti.sqlite3"
-INIT_HINT = ("python -X utf8 db.py --init; python -X utf8 import_gold.py --area all")
+INIT_HINT = ("python -X utf8 -m viniti db --init; "
+             "python -X utf8 -m viniti import-gold --area all")
 
 
 def open_readonly(path):

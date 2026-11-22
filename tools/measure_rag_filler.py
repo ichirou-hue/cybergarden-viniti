@@ -29,9 +29,9 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import db as storage  # noqa: E402
-import extract  # noqa: E402
-from filler_rag import RagTableFiller  # noqa: E402
+from viniti import db as storage  # noqa: E402
+from viniti import extract  # noqa: E402
+from viniti.filler_rag import RagTableFiller  # noqa: E402
 
 KIT = ROOT / "_corpus" / "rag" / "RAG_ВИНИТИ_участникам_2026-11-20"
 DEFAULT_DEV = KIT / "dev"

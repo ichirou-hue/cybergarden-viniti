@@ -8,7 +8,7 @@ from unittest import mock
 
 import pdfplumber
 
-import pdf_source
+from viniti import pdf_source
 
 
 def ruled_pdf(rule_positions, page_size=(612, 792), texts=(), columns=None):

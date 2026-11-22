@@ -15,7 +15,7 @@ import sqlite3
 import tempfile
 import unittest
 
-import db as storage
+from viniti import db as storage
 
 SOLAR_RESULTS_COLUMNS = [
     "publication_id",

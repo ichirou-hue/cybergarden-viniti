@@ -8,8 +8,8 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from evaluate_extraction import evaluate, write_report
-from solar_schema import TABLES
+from viniti.evaluate_extraction import evaluate, write_report
+from viniti.solar_schema import TABLES
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -291,7 +291,7 @@ class EvaluateExtractionTest(unittest.TestCase):
     def test_cli_and_no_overwrite_or_partial_output_on_validation_error(self):
         self.run_evaluation()
         output = self.root / "report.json"
-        command = [sys.executable, str(ROOT / "evaluate_extraction.py"),
+        command = [sys.executable, "-m", "viniti.evaluate_extraction",
                    str(self.pred), str(self.gold), "--publication", "D001",
                    "-o", str(output)]
         result = subprocess.run(command, capture_output=True, text=True)

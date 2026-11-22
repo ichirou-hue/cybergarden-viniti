@@ -13,14 +13,14 @@ exporter or in the storage layer is a silent data-loss bug waiting to happen.
         additionally print, per module, every missed line range with the actual
         source lines, so a human can see which behaviour is untested.
 
-    python -X utf8 tools/coverage_report.py --gaps --module db.py,export_csv.py
+    python -X utf8 tools/coverage_report.py --gaps --module src/viniti/db.py,src/viniti/export_csv.py
         restrict the report to the named modules (table still lists everything).
 
     python -X utf8 tools/coverage_report.py --threshold 70
         exit 1 when any measured module is below 70 percent. Opt-in gate.
 
-Modules are discovered by globbing the repo root for ``*.py`` and each package
-(``viniti/``, ``rag/``) for ``**/*.py``. Excluded: ``test_*.py`` and ``tests/``
+Modules are discovered in ``src/``. The root ``main.py`` is only a CLI entry point.
+Excluded: ``test_*.py`` and ``tests/``
 (they are the suite),
 ``__init__.py`` (package markers), ``demo.py`` and ``passport.py``
 (fixtures/generator), ``analyze_pdfs.py`` (runs in a subprocess, so in-process
@@ -47,26 +47,25 @@ EXCLUDE_DIRS = {".venv", "_refs", "_corpus", "tools", "tests", ".slim", "__pycac
 
 # Written by other agents right now. Reported as "absent" when missing, never fatal.
 WATCHLIST = (
-    "norm.py", "extract.py", "verify.py",
+    "src/viniti/norm.py", "src/viniti/extract.py", "src/viniti/verify.py",
 )
 
-# Packages beside the root modules. A new package must be added here, or its
-# modules are measured as "never imported" without ever appearing in the table.
-PACKAGE_DIRS = ("rag", "viniti")
+# Source roots. A new source tree must be added here to be measured.
+SOURCE_DIRS = ("src",)
 
 
 def discover_modules():
-    """Production modules: root-level *.py plus the packages, in path order.
+    """Production modules under src/, in path order.
 
     ``tests/`` is not measured: those files are the suite itself, and
     ``run_suite`` already discovers them through the ``tests`` package.
     """
-    found = []
-    candidates = sorted(ROOT.glob("*.py"))
-    for package in PACKAGE_DIRS:
-        directory = ROOT / package
+    candidates = []
+    for source_root in SOURCE_DIRS:
+        directory = ROOT / source_root
         if directory.is_dir():
-            candidates += sorted(directory.rglob("*.py"))
+            candidates.extend(sorted(directory.rglob("*.py")))
+    found = []
     for path in candidates:
         if path.name.startswith("test_") or path.name == "__init__.py":
             continue

@@ -9,11 +9,11 @@ import unittest
 from urllib.request import Request, urlopen
 from urllib.request import build_opener
 from http.cookiejar import CookieJar
-import auth
+from viniti import auth
 
-from demo import demo_pdf
-from library import Library
-from server import Handler, ThreadingHTTPServer
+from viniti.demo import demo_pdf
+from viniti.library import Library
+from viniti.server import Handler, ThreadingHTTPServer
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,7 +61,7 @@ class SmokeTest(unittest.TestCase):
             pdf.write_bytes(demo_pdf())
             bad.write_bytes(b"invalid")
             run = subprocess.run(
-                [sys.executable, str(ROOT / "analyze_pdfs.py"), bad, pdf, "-o", output],
+                [sys.executable, "-m", "viniti.analyze_pdfs", bad, pdf, "-o", output],
                 capture_output=True, timeout=30,
             )
             self.assertEqual(run.returncode, 1)

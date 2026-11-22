@@ -156,7 +156,7 @@ class Sources:
 def load_sources(root):
     sources = []
     paths = sorted(root.glob("*.py")) + sorted((root / "tools").glob("*.py"))
-    for extra in ("tests", "viniti", "rag"):
+    for extra in ("tests", "src"):
         directory = root / extra
         if directory.is_dir():
             paths += sorted(directory.rglob("*.py"))

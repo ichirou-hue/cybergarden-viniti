@@ -11,7 +11,7 @@ import sqlite3
 import tempfile
 import unittest
 
-import score
+from viniti import score
 
 PASSPORT = score.load_passport()
 

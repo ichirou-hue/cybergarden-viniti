@@ -11,8 +11,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-import batch
-import db as storage
+from viniti import batch, db as storage
 
 
 def tiny_pdf():
@@ -46,7 +45,7 @@ class BatchTest(unittest.TestCase):
         (self.kit / "dev").mkdir(parents=True)
         for name in ("D001", "D002", "D003"):
             (self.kit / "dev" / f"{name}.pdf").write_bytes(b"%PDF-1.4")
-        self.database = self.root / "batch.sqlite3"
+        self.database = self.root / "viniti.batch.sqlite3"
         storage.init(self.database)
         # Корень корпуса подменяется: в CI каталога _corpus/ нет.
         self.saved_roots = dict(batch.CORPUS_ROOTS)
@@ -172,16 +171,15 @@ class BatchTest(unittest.TestCase):
         self.assertEqual(results, 1)
 
     def test_default_processor_dispatches_by_area(self):
-        with patch("solar_offline.process", return_value="solar") as solar, \
-                patch("extract.process", return_value="extract") as legacy:
+        with patch("viniti.solar_offline.process", return_value="solar") as solar, \
+                patch("viniti.extract.process", return_value="extract") as legacy:
             self.assertEqual(batch.default_process("solar", "D001", "a.pdf"), "solar")
             self.assertEqual(batch.default_process("rag", "P001", "b.pdf"), "extract")
         solar.assert_called_once_with("solar", "D001", "a.pdf")
         legacy.assert_called_once_with("rag", "P001", "b.pdf")
 
     def test_solar_has_its_own_extractor_revision(self):
-        import extract
-        import solar_offline
+        from viniti import extract, solar_offline
 
         self.assertEqual(batch.default_revision("solar"), solar_offline.PARSER_VERSION)
         self.assertEqual(batch.default_revision("rag"), extract.PARSER_VERSION)

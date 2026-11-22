@@ -345,7 +345,7 @@ def page_pdf(pages=10):
 
 def page_image(page, box):
     """Настоящий PNG: нужная страница и подсветка прямоугольником."""
-    from pdf_source import render
+    from viniti.pdf_source import render
 
     return render(page_pdf(), page, box)
 

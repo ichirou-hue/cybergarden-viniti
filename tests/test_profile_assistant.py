@@ -9,9 +9,9 @@ from unittest import TestCase, mock
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-import auth
-from profile_assistant import suggest
-from server import Handler, ThreadingHTTPServer
+from viniti import auth
+from viniti.profile_assistant import suggest
+from viniti.server import Handler, ThreadingHTTPServer
 
 
 class ProfileAssistantTest(TestCase):

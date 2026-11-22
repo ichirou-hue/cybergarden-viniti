@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from reportlab.pdfgen import canvas
 
 from rag.pdf import Document, Line, Page, Word
-from rag_api import _anchor, _rects_for, render_anchor_png
+from viniti.rag_api import _anchor, _rects_for, render_anchor_png
 
 
 class MultiBBoxTest(unittest.TestCase):

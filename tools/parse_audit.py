@@ -18,8 +18,8 @@ import tempfile
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import extract
-import pdf_source
+from viniti import extract
+from viniti import pdf_source
 
 
 SCHEMA_VERSION = 1

@@ -7,9 +7,9 @@ import unittest
 from io import BytesIO
 from tempfile import TemporaryDirectory
 
-import db as storage
-import extract
-from filler_rag import RagTableFiller
+from viniti import db as storage
+from viniti import extract
+from viniti.filler_rag import RagTableFiller
 
 # A small vocab, independent of the repository file: the tests must not depend
 # on dev_gold having been processed. NDCG@10 and Recall@100 are not in the real

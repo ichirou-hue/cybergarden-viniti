@@ -8,8 +8,8 @@ import pathlib
 from tempfile import TemporaryDirectory
 import unittest
 
-import db as storage
-import import_gold
+from viniti import db as storage
+from viniti import import_gold
 
 
 PASSPORT = {

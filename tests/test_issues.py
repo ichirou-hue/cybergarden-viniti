@@ -7,8 +7,8 @@ import sqlite3
 import tempfile
 import unittest
 
-import db as storage
-import issues
+from viniti import db as storage
+from viniti import issues
 
 
 def insert(connection, area, table, **values):
