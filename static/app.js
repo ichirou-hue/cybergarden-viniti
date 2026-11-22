@@ -393,7 +393,7 @@ function renderWizard() {
   dropZone.hidden = ready;
   profileStep.hidden = !ready;
   document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Профиль" : "Шаг 1 из 2 · Документ";
-  document.getElementById("wizardTitle").textContent = ready ? "Как обработать статью?" : "Начните с PDF";
+  document.getElementById("wizardTitle").textContent = ready ? "Выберите профиль обработки" : "Начните с PDF";
   document.getElementById("wizardHint").textContent = ready
     ? "Готовый профиль или свой вариант для этой статьи. Настройка LLM наследуется из переключателя вверху страницы."
     : "RAG: до 20 МиБ, Solar: до 32 МиБ.";
