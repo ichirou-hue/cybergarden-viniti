@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 from hashlib import sha256
 from http.cookiejar import CookieJar
@@ -147,7 +148,7 @@ class AuthApiTest(unittest.TestCase):
         with self.assertRaises(auth.AuthError) as caught:
             store.login("limit_user", "correct horse")
         self.assertEqual(caught.exception.status, 429)
-        with sqlite3.connect(store.path) as conn:
+        with closing(sqlite3.connect(store.path)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM auth_failures").fetchone()[0], 5)
 
     def test_expired_session_is_rejected_and_deleted(self):
@@ -159,7 +160,7 @@ class AuthApiTest(unittest.TestCase):
         self.assertIsNotNone(store.authenticate(token))
         now[0] += 11
         self.assertIsNone(store.authenticate(token))
-        with sqlite3.connect(store.path) as conn:
+        with closing(sqlite3.connect(store.path)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
 
     def test_cross_origin_post_is_rejected(self):
