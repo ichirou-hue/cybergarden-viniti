@@ -839,14 +839,15 @@ class SolarSemanticTest(unittest.TestCase):
     def test_required_fields_and_their_units_are_enforced(self):
         block = d016_semantic()
         block["records"]["layers"] = [
-            # A layer needs a material.
+            # A layer needs a material: the whole row is rejected.
             {"name": "SnO2 electron transport layer", "role": "electron transport",
              "material": "", "thickness": "30", "thickness_unit": "nm",
              "field_sources": {
                  "name": anchor(1, 1, "SnO2 electron transport layer"),
                  "thickness": anchor(1, 1, "of 30 nm"),
                  "thickness_unit": anchor(1, 1, "of 30 nm")}},
-            # A thickness without its printed unit is not accepted.
+            # A thickness unit that is not printed in its anchor drops the whole
+            # thickness/unit pair, but the material and name still stand.
             {"name": "SnO2 electron transport layer", "material": "SnO2",
              "thickness": "30", "thickness_unit": "mm",
              "field_sources": {
@@ -861,10 +862,407 @@ class SolarSemanticTest(unittest.TestCase):
              "field_sources": {"name": anchor(2, 2, "under AM1.5G")}},
         ]
         semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
-        self.assertEqual(semantic["records"]["layers"], [])
+        # The first layer is unusable; the second keeps name and material.
+        self.assertEqual([layer["material"] for layer in semantic["records"]["layers"]],
+                         ["SnO2"])
+        layer = semantic["records"]["layers"][0]
+        self.assertEqual(layer["name"], "SnO2 electron transport layer")
+        self.assertEqual(layer["thickness"], "")
+        self.assertEqual(layer["thickness_unit"], "")
+        self.assertNotIn("thickness", layer["field_sources"])
+        self.assertNotIn("thickness_unit", layer["field_sources"])
         self.assertEqual(semantic["records"]["conditions"], [])
-        self.assertEqual(len(semantic["errors"]), 3)
+        # The rejected layer reports its empty material and its unsupported
+        # role; the second layer reports both members of the dropped pair; the
+        # condition reports its empty value and its anchorless claimed unit.
+        self.assertEqual(len(semantic["errors"]), 6)
+        self.assertEqual([error.get("field") for error in semantic["errors"][:2]],
+                         ["material", "role"])
         self.assertEqual(semantic["status"], "partial")
+
+    def test_bad_optional_field_is_omitted_without_losing_required_fields(self):
+        block = d016_semantic()
+        block["records"]["layers"] = [{
+            "name": "SnO2 electron transport layer", "role": "electron transport",
+            "material": "SnO2", "thickness": "30", "thickness_unit": "nm",
+            "field_sources": {
+                "name": anchor(1, 1, "SnO2 electron transport layer"),
+                # The role is paraphrased, so its own quote does not print it.
+                "role": {"source_id": 1, "page": 1, "quote": "SnO2"},
+                "material": anchor(1, 1, "SnO2"),
+                "thickness": anchor(1, 1, "of 30 nm"),
+                "thickness_unit": anchor(1, 1, "of 30 nm"),
+            },
+        }]
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        layer = semantic["records"]["layers"][0]
+        self.assertEqual(layer["name"], "SnO2 electron transport layer")
+        self.assertEqual(layer["material"], "SnO2")
+        self.assertEqual(layer["thickness"], "30")
+        self.assertEqual(layer["thickness_unit"], "nm")
+        # The unsupported optional value is empty and its anchor is gone.
+        self.assertEqual(layer["role"], "")
+        self.assertNotIn("role", layer["field_sources"])
+        # The omission is reported as a field-level validation failure, not as
+        # an absence claim.
+        problems = [error for error in semantic["errors"] if error.get("field") == "role"]
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0]["record"], "layers")
+        self.assertEqual(problems[0]["index"], 0)
+        self.assertIn("не напечатано", problems[0]["error"])
+        self.assertNotIn("нет", problems[0]["error"].split("значение")[0])
+
+    def test_optional_field_without_its_own_anchor_is_omitted(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        layer["field_sources"].pop("role")
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        self.assertEqual(len(semantic["records"]["layers"]), 1)
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["role"], "")
+        self.assertEqual(kept["material"], "SnO2")
+        self.assertEqual(kept["thickness"], "30")
+        self.assertNotIn("role", kept["field_sources"])
+        problem = [error for error in semantic["errors"] if error.get("field") == "role"][0]
+        self.assertIn("нет собственной ссылки", problem["error"])
+
+    def test_thickness_without_claimed_unit_is_dropped(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        # The unit was never claimed, but the thickness was. A bare number would
+        # have an unknown scale, so it is omitted instead of kept unitless.
+        layer["thickness_unit"] = ""
+        layer["field_sources"].pop("thickness_unit")
+        original = deepcopy(block)
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["material"], "SnO2")
+        self.assertEqual(kept["thickness"], "")
+        self.assertEqual(kept["thickness_unit"], "")
+        self.assertNotIn("thickness", kept["field_sources"])
+        self.assertNotIn("thickness_unit", kept["field_sources"])
+        problem = [error for error in semantic["errors"] if error.get("field") == "thickness"][0]
+        self.assertIn("нет пары thickness_unit", problem["error"])
+        # No unit is invented, and the model response is untouched.
+        self.assertEqual(block, original)
+
+    def test_unit_without_claimed_thickness_is_dropped(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        # The thickness was never claimed, but its unit was.
+        layer["thickness"] = ""
+        layer["field_sources"].pop("thickness")
+        original = deepcopy(block)
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["material"], "SnO2")
+        self.assertEqual(kept["thickness"], "")
+        self.assertEqual(kept["thickness_unit"], "")
+        self.assertNotIn("thickness_unit", kept["field_sources"])
+        problem = [error for error in semantic["errors"]
+                   if error.get("field") == "thickness_unit"][0]
+        self.assertIn("нет пары thickness", problem["error"])
+        self.assertEqual(block, original)
+
+    def test_thickness_pair_is_dropped_together(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        # The thickness value is not printed in its own anchor, the unit is fine.
+        layer["field_sources"]["thickness"] = anchor(1, 1, "SnO2 electron transport layer")
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["material"], "SnO2")
+        self.assertEqual(kept["thickness"], "")
+        self.assertEqual(kept["thickness_unit"], "")
+        self.assertNotIn("thickness", kept["field_sources"])
+        self.assertNotIn("thickness_unit", kept["field_sources"])
+        fields = {error.get("field") for error in semantic["errors"]}
+        self.assertIn("thickness", fields)
+        self.assertIn("thickness_unit", fields)
+
+    def test_claimed_unit_failure_rejects_condition_and_metric(self):
+        block = d016_semantic()
+        block["records"]["conditions"] = [{
+            "name": "AM1.5G", "value": "100", "unit": "mW/cm2",
+            "field_sources": {
+                "name": anchor(2, 2, "under AM1.5G"),
+                "value": anchor(2, 2, "at 100 mW/cm2"),
+                # A unit that is not printed in its own anchor.
+                "unit": anchor(2, 2, "under AM1.5G"),
+            },
+        }]
+        block["records"]["metrics"] = [{
+            "name": "PCE", "value": "22.4", "unit": "%",
+            "field_sources": {
+                "name": anchor(2, 2, "PCE of 22.4 %"),
+                "value": anchor(2, 2, "PCE of 22.4 %"),
+                "unit": anchor(2, 2, "PCE of 22.4 %"),
+            },
+        }]
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        # A claimed unit that fails the gate cannot leave the value unitless.
+        self.assertEqual(semantic["records"]["conditions"], [])
+        self.assertEqual([metric["name"] for metric in semantic["records"]["metrics"]],
+                         ["PCE"])
+        problem = [error for error in semantic["errors"] if error.get("field") == "unit"][0]
+        self.assertEqual(problem["record"], "conditions")
+        self.assertEqual(problem["index"], 0)
+
+    def test_empty_unit_stays_empty_and_is_not_invented(self):
+        block = d016_semantic()
+        # The unit was never claimed. Both kinds stay accepted unchanged, and no
+        # unit is invented for them.
+        block["records"]["conditions"] = [{
+            "name": "AM1.5G", "value": "100", "unit": "",
+            "field_sources": {
+                "name": anchor(2, 2, "under AM1.5G"),
+                "value": anchor(2, 2, "at 100 mW/cm2"),
+            },
+        }]
+        block["records"]["metrics"] = [{
+            "name": "PCE", "value": "22.4", "unit": "",
+            "field_sources": {
+                "name": anchor(2, 2, "PCE of 22.4 %"),
+                "value": anchor(2, 2, "PCE of 22.4 %"),
+            },
+        }]
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "ok")
+        self.assertEqual(semantic["errors"], [])
+        condition = semantic["records"]["conditions"][0]
+        self.assertEqual(condition["unit"], "")
+        self.assertNotIn("unit", condition["field_sources"])
+        metric = semantic["records"]["metrics"][0]
+        self.assertEqual(metric["unit"], "")
+        self.assertNotIn("unit", metric["field_sources"])
+
+    def test_rejected_row_reports_required_and_optional_problems(self):
+        block = d016_semantic()
+        block["records"]["layers"] = [{
+            # The required material is empty and the optional role is only
+            # paraphrased: both are diagnosed, in required-first order.
+            "name": "SnO2 electron transport layer", "role": "electron transport",
+            "material": "", "thickness": "30", "thickness_unit": "nm",
+            "field_sources": {
+                "name": anchor(1, 1, "SnO2 electron transport layer"),
+                "role": anchor(1, 1, "SnO2"),
+                "thickness": anchor(1, 1, "of 30 nm"),
+                "thickness_unit": anchor(1, 1, "of 30 nm"),
+            },
+        }]
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        self.assertEqual(semantic["records"]["layers"], [])
+        fields = [error.get("field") for error in semantic["errors"]]
+        self.assertEqual(fields, ["material", "role"])
+        self.assertIn("нужно непустое поле material", semantic["errors"][0]["error"])
+        self.assertIn("не напечатано", semantic["errors"][1]["error"])
+        # The valid pair of the rejected row is not reported as a problem.
+        self.assertNotIn("thickness", fields)
+        self.assertNotIn("thickness_unit", fields)
+
+    def test_rejected_row_reports_missing_thickness_counterpart(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        layer["material"] = ""
+        layer["field_sources"].pop("material")
+        # The unit was never claimed, so the claimed thickness has no pair.
+        layer["thickness_unit"] = ""
+        layer["field_sources"].pop("thickness_unit")
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        self.assertEqual(semantic["records"]["layers"], [])
+        fields = [error.get("field") for error in semantic["errors"]]
+        self.assertEqual(fields, ["material", "thickness"])
+        self.assertIn("нет пары thickness_unit", semantic["errors"][1]["error"])
+
+    def test_rejected_row_reports_required_and_optional_quote_failures(self):
+        block = d016_semantic()
+        block["records"]["layers"] = [{
+            "name": "SnO2 electron transport layer", "role": "electron transport",
+            "material": "SnO2", "thickness": "30", "thickness_unit": "nm",
+            "field_sources": {
+                "name": anchor(1, 1, "SnO2 electron transport layer"),
+                # Neither quote prints its own value.
+                "role": anchor(1, 1, "SnO2"),
+                "material": anchor(1, 1, "electron transport layer"),
+                "thickness": anchor(1, 1, "of 30 nm"),
+                "thickness_unit": anchor(1, 1, "of 30 nm"),
+            },
+        }]
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        self.assertEqual(semantic["records"]["layers"], [])
+        fields = [error.get("field") for error in semantic["errors"]]
+        self.assertEqual(fields, ["material", "role"])
+        for error in semantic["errors"]:
+            self.assertIn("не напечатано", error["error"])
+
+    def test_optional_invalid_type_is_omitted_and_row_kept(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        layer["role"] = 5
+        original = deepcopy(block)
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        # No coercion: the malformed optional value is dropped, required fields
+        # and the valid pair survive.
+        self.assertEqual(kept["role"], "")
+        self.assertEqual(kept["name"], "SnO2 electron transport layer")
+        self.assertEqual(kept["material"], "SnO2")
+        self.assertEqual(kept["thickness"], "30")
+        self.assertEqual(kept["thickness_unit"], "nm")
+        self.assertNotIn("role", kept["field_sources"])
+        problems = [error for error in semantic["errors"] if error.get("field") == "role"]
+        self.assertEqual(len(problems), 1)
+        self.assertIn("должен быть строкой", problems[0]["error"])
+        self.assertEqual(block, original)
+
+    def test_optional_oversize_value_is_omitted_with_its_own_error(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        layer["role"] = "x" * (llm_shell.MAX_TEXT + 1)
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["role"], "")
+        self.assertEqual(kept["thickness"], "30")
+        self.assertEqual(kept["thickness_unit"], "nm")
+        self.assertNotIn("role", kept["field_sources"])
+        problems = [error for error in semantic["errors"] if error.get("field") == "role"]
+        self.assertEqual(len(problems), 1)
+        self.assertIn(f"длиннее {llm_shell.MAX_TEXT}", problems[0]["error"])
+        # Oversize is a distinct failure from a non-string value.
+        self.assertNotIn("должен быть строкой", problems[0]["error"])
+
+    def test_required_malformed_value_rejects_the_row(self):
+        block = d016_semantic()
+        block["records"]["conditions"] = [{
+            "name": "AM1.5G", "value": 100, "unit": "mW/cm2",
+            "field_sources": {
+                "name": anchor(2, 2, "under AM1.5G"),
+                "value": anchor(2, 2, "at 100 mW/cm2"),
+                "unit": anchor(2, 2, "at 100 mW/cm2"),
+            },
+        }]
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        self.assertEqual(semantic["records"]["conditions"], [])
+        self.assertEqual(len(semantic["errors"]), 1)
+        problem = semantic["errors"][0]
+        self.assertEqual(problem["record"], "conditions")
+        self.assertEqual(problem["field"], "value")
+        self.assertIn("должен быть строкой", problem["error"])
+
+    def test_required_oversize_value_rejects_with_distinct_error(self):
+        block = d016_semantic()
+        block["records"]["metrics"][0]["name"] = "x" * (llm_shell.MAX_TEXT + 1)
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        self.assertEqual(semantic["records"]["metrics"], [])
+        problem = semantic["errors"][0]
+        self.assertEqual(problem["field"], "name")
+        self.assertIn(f"длиннее {llm_shell.MAX_TEXT}", problem["error"])
+        self.assertNotIn("должен быть строкой", problem["error"])
+
+    def test_invalid_unit_type_rejects_condition_and_metric(self):
+        block = d016_semantic()
+        block["records"]["conditions"] = [{
+            "name": "AM1.5G", "value": "100", "unit": 5,
+            "field_sources": {
+                "name": anchor(2, 2, "under AM1.5G"),
+                "value": anchor(2, 2, "at 100 mW/cm2"),
+            },
+        }]
+        block["records"]["metrics"] = [{
+            "name": "PCE", "value": "22.4", "unit": 5,
+            "field_sources": {
+                "name": anchor(2, 2, "PCE of 22.4 %"),
+                "value": anchor(2, 2, "PCE of 22.4 %"),
+            },
+        }]
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        # A malformed claimed unit is not treated as an originally empty unit.
+        self.assertEqual(semantic["records"]["conditions"], [])
+        self.assertEqual(semantic["records"]["metrics"], [])
+        unit_problems = [error for error in semantic["errors"] if error.get("field") == "unit"]
+        self.assertEqual({error["record"] for error in unit_problems},
+                         {"conditions", "metrics"})
+        for error in unit_problems:
+            self.assertIn("должен быть строкой", error["error"])
+
+    def test_malformed_claimed_thickness_drops_the_pair(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        layer["thickness"] = 30
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["name"], "SnO2 electron transport layer")
+        self.assertEqual(kept["material"], "SnO2")
+        # A malformed claimed thickness still removes the unit with it.
+        self.assertEqual(kept["thickness"], "")
+        self.assertEqual(kept["thickness_unit"], "")
+        self.assertNotIn("thickness", kept["field_sources"])
+        self.assertNotIn("thickness_unit", kept["field_sources"])
+        fields = [error.get("field") for error in semantic["errors"]]
+        self.assertEqual(fields, ["thickness", "thickness_unit"])
+        self.assertIn("должен быть строкой", semantic["errors"][0]["error"])
+        self.assertIn("парой толщина/единица", semantic["errors"][1]["error"])
+
+    def test_malformed_claimed_unit_drops_the_pair(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        layer["thickness_unit"] = 5
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["material"], "SnO2")
+        self.assertEqual(kept["thickness"], "")
+        self.assertEqual(kept["thickness_unit"], "")
+        self.assertNotIn("thickness", kept["field_sources"])
+        self.assertNotIn("thickness_unit", kept["field_sources"])
+        fields = [error.get("field") for error in semantic["errors"]]
+        self.assertEqual(fields, ["thickness", "thickness_unit"])
+        self.assertIn("парой толщина/единица", semantic["errors"][0]["error"])
+        self.assertIn("должен быть строкой", semantic["errors"][1]["error"])
+
+    def test_both_valid_pair_is_preserved(self):
+        block = d016_semantic()
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "ok")
+        layer = semantic["records"]["layers"][0]
+        self.assertEqual(layer["thickness"], "30")
+        self.assertEqual(layer["thickness_unit"], "nm")
+        self.assertIn("thickness", layer["field_sources"])
+        self.assertIn("thickness_unit", layer["field_sources"])
+
+    def test_stray_anchor_for_empty_field_does_not_kill_the_row(self):
+        block = d016_semantic()
+        layer = block["records"]["layers"][0]
+        # role is empty, but a broken anchor is left behind for it.
+        layer["role"] = ""
+        layer["field_sources"]["role"] = {"source_id": 99, "page": 1, "quote": "x"}
+        semantic = llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["material"], "SnO2")
+        self.assertEqual(kept["role"], "")
+        self.assertNotIn("role", kept["field_sources"])
+        problem = [error for error in semantic["errors"] if error.get("field") == "role"][0]
+        self.assertIn("отброшена", problem["error"])
+
+    def test_response_input_is_not_mutated_by_validation(self):
+        block = d016_semantic()
+        original = deepcopy(block)
+        llm_shell.validate_solar_semantic({"semantic": block}, d016_document())
+        self.assertEqual(block, original)
 
     def test_claims_without_metadata_evidence_are_unknown(self):
         block = d016_semantic()
@@ -1015,6 +1413,45 @@ class SolarSemanticBundleTest(unittest.TestCase):
         self.assertEqual(found["solar"]["semantic_counts"],
                          {"layers": 0, "conditions": 0, "metrics": 0, "errors": 0})
         self.assertEqual(stages(found)["interpret"], "ok")
+
+    def test_response_artifact_keeps_bad_optional_while_semantic_omits_it(self):
+        output, candidate = solar_bundle(
+            self.root, name="solar_semantic_optional",
+            extra_sources=[SIMULATION_SOURCE])
+        candidate = deepcopy(candidate)
+        semantic_block = self.bundle_semantic()
+        layer = semantic_block["records"]["layers"][0]
+        # The model claims a role its own quote does not print.
+        layer["role"] = "electron transport"
+        layer["field_sources"]["role"] = anchor(1, 1, "perovskite Eg 1.5 eV")
+        candidate["semantic"] = semantic_block
+        found = llm_shell.run_bundle(
+            output, mode="api", allow_network=True,
+            backend=StagedBackend(candidate, {"findings": []}))
+        self.assertEqual(stages(found)["interpret"], "ok")
+
+        # response.json is the parsed model response, so it keeps the bad claim.
+        response = json.loads(
+            (output / "llm" / "response.json").read_text(encoding="utf-8"))
+        raw_layer = response["response"]["semantic"]["records"]["layers"][0]
+        self.assertEqual(raw_layer["role"], "electron transport")
+        self.assertEqual(raw_layer["field_sources"]["role"]["quote"],
+                         "perovskite Eg 1.5 eV")
+
+        # semantic.json omits the unsupported value and reports a partial gate.
+        semantic = json.loads((output / "llm" / "semantic.json").read_text(encoding="utf-8"))
+        self.assertEqual(semantic["status"], "partial")
+        kept = semantic["records"]["layers"][0]
+        self.assertEqual(kept["role"], "")
+        self.assertNotIn("role", kept["field_sources"])
+        self.assertEqual(kept["material"], "perovskite")
+        self.assertEqual(kept["thickness"], "0.5")
+        self.assertEqual(kept["thickness_unit"], "um")
+        problems = [error for error in semantic["errors"] if error.get("field") == "role"]
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(found["solar"]["semantic_status"], "partial")
+        self.assertEqual(found["solar"]["semantic_counts"],
+                         {"layers": 1, "conditions": 0, "metrics": 1, "errors": 1})
 
     def test_prompt_requests_optional_semantic_block(self):
         output, candidate = solar_bundle(self.root, name="solar_prompt")

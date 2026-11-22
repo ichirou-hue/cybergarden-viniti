@@ -467,12 +467,14 @@ def _semantic_prompt(prompt, max_input_chars):
     return prompt
 
 
-def _semantic_error(kind, index, error):
+def _semantic_error(kind, index, error, field=None):
     item = {"error": _bounded_text(error, 200)}
     if kind is not None:
         item["record"] = kind
     if index is not None:
         item["index"] = index
+    if field is not None:
+        item["field"] = field
     return item
 
 
@@ -511,57 +513,156 @@ def _semantic_confirmed(field, value, anchor):
     return has_value(value, anchor["quote"])
 
 
-def _semantic_record(kind, row, sources):
-    """One validated semantic record, or ``(None, reason)`` to quarantine it.
+def _semantic_problem_list(required, fields, problems):
+    """Diagnosed fields as ``(field, reason)``: required first, no duplicates."""
+    ordered = [field for field in required if field in problems]
+    ordered += [field for field in fields if field in problems and field not in required]
+    return [(field, problems[field]) for field in ordered]
 
-    Every nonempty field needs its own anchor in ``field_sources``, and that
-    anchor must literally print the field value. A record without its required
-    fields, with a field that has no anchor, or with an anchor that does not
-    print the value is quarantined instead of being partly accepted.
+
+def _semantic_record(kind, row, sources):
+    """One semantic record and its per-field diagnostics.
+
+    Returns ``(record, problems)``, where ``problems`` is a list of
+    ``(field, reason)`` pairs and ``field`` is ``None`` for a whole-row
+    rejection.
+
+    A row that is not an object, carries unknown keys, or has a missing or
+    malformed ``field_sources`` map is quarantined (``record is None``) with the
+    structural reason. Every other diagnosis is collected before the verdict, so
+    a rejected row still reports all of its field problems, ordered required
+    fields first and without duplicates.
+
+    A malformed value is never coerced. A non-string value or a string longer
+    than ``MAX_TEXT`` is its own field problem: for a required field it rejects
+    the row, for an optional field it is omitted and the row survives. The
+    oversize reason is distinct from the non-string reason.
+
+    A usable row keeps every independently supported field. An optional field
+    whose own anchor is missing, malformed or does not literally print its value
+    is omitted: the value becomes empty, its anchor is dropped, and the failure
+    is reported as that field's own problem. Omission says only that this value
+    did not pass the literal gate; it never asserts the paper lacks the field,
+    and it never borrows another field's evidence, repairs or re-anchors a value.
+    Required fields stay strict.
+
+    A printed thickness and its unit form one quantity: when either of them is
+    omitted, both are dropped, and a response that claims only one member of the
+    pair loses that member too, so a record never carries a unitless number or a
+    bare unit. The missing counterpart is never invented. A malformed claimed
+    member also removes the pair. For conditions and metrics a claimed unit that
+    is malformed or fails the gate rejects the record, because the required value
+    would otherwise appear in an unknown scale. A unit that was empty in the
+    response stays empty and is never invented.
     """
     if not isinstance(row, dict):
-        return None, "запись должна быть объектом."
-    allowed = set(SEMANTIC_RECORD_FIELDS[kind])
+        return None, [(None, "запись должна быть объектом.")]
+    fields = SEMANTIC_RECORD_FIELDS[kind]
+    allowed = set(fields)
     unknown = set(row) - allowed - {"field_sources", "page", "carrier"}
     if unknown:
-        return None, f"неизвестные поля {sorted(unknown)}."
-    values = {}
-    for field in SEMANTIC_RECORD_FIELDS[kind]:
-        value = row.get(field, "")
-        if not isinstance(value, str) or len(value) > MAX_TEXT:
-            return None, f"{field} должен быть строкой."
-        values[field] = value.strip()
-    for field in SEMANTIC_REQUIRED_FIELDS[kind]:
-        if not values[field]:
-            return None, f"нужно непустое поле {field}."
+        return None, [(None, f"неизвестные поля {sorted(unknown)}.")]
     raw_sources = row.get("field_sources")
     if not isinstance(raw_sources, dict):
-        return None, "нужен field_sources с отдельной ссылкой на каждое поле."
+        return None, [(None, "нужен field_sources с отдельной ссылкой на каждое поле.")]
     unknown = set(raw_sources) - allowed
     if unknown:
-        return None, f"field_sources: неизвестные поля {sorted(unknown)}."
-    field_sources = {}
+        return None, [(None, f"field_sources: неизвестные поля {sorted(unknown)}.")]
+
+    # A value counts as claimed when the response supplied something for it.
+    # An absent key and a blank string stay originally empty: they are never
+    # repaired, and a malformed non-string still counts as claimed so the pair
+    # and unit rules see it.
+    problems = {}
+    values = {}
+    claimed = set()
+    for field in fields:
+        raw = row.get(field, "")
+        if not isinstance(raw, str):
+            claimed.add(field)
+            values[field] = ""
+            problems[field] = f"{field} должен быть строкой."
+        elif len(raw) > MAX_TEXT:
+            claimed.add(field)
+            values[field] = ""
+            problems[field] = f"{field}: значение длиннее {MAX_TEXT} символов."
+        else:
+            value = raw.strip()
+            values[field] = value
+            if value:
+                claimed.add(field)
+    required = SEMANTIC_REQUIRED_FIELDS[kind]
+    for field in required:
+        if field not in claimed and field not in problems:
+            problems[field] = f"нужно непустое поле {field}."
+
+    anchors = {}
+    anchor_errors = {}
     for field, item in raw_sources.items():
         anchor, error = _semantic_anchor(item, sources)
         if anchor is None:
-            return None, f"field_sources.{field}: {error}"
-        field_sources[field] = anchor
-    # Each accepted field and unit needs its own literal support.
-    for field in SEMANTIC_RECORD_FIELDS[kind]:
-        if not values[field]:
+            anchor_errors[field] = error
+            if field not in claimed:
+                # An anchor that supports no value is discarded and reported; it
+                # must not quarantine independent fields of the same row.
+                problems.setdefault(
+                    field, f"field_sources.{field}: {error} Ссылка отброшена: поле пустое.")
+        elif field in claimed:
+            anchors[field] = anchor
+
+    omitted = set()
+    for field in fields:
+        if field not in claimed:
             continue
-        anchor = field_sources.get(field)
+        if field in problems:
+            # Malformed values never reach the literal gate.
+            omitted.add(field)
+            continue
+        anchor = anchors.get(field)
         if anchor is None:
-            return None, f"{field}: нет собственной ссылки в field_sources."
-        if not _semantic_confirmed(field, values[field], anchor):
-            return None, f"{field}: значение не напечатано в собственной цитате."
+            reason = anchor_errors.get(field, "нет собственной ссылки в field_sources.")
+            problems[field] = f"{field}: {reason}"
+            omitted.add(field)
+        elif not _semantic_confirmed(field, values[field], anchor):
+            problems[field] = f"{field}: значение не напечатано в собственной цитате."
+            omitted.add(field)
+
+    # The thickness/unit pair is resolved before the verdict so a rejected row
+    # still reports the pair removal it caused.
+    if kind == "layers":
+        pair = ("thickness", "thickness_unit")
+        claimed_pair = [field for field in pair if field in claimed]
+        if len(claimed_pair) == 1:
+            only = claimed_pair[0]
+            counterpart = pair[1] if only == pair[0] else pair[0]
+            if only not in omitted:
+                problems[only] = f"{only}: снято: в ответе нет пары {counterpart}."
+                omitted.add(only)
+        elif len(claimed_pair) == 2 and (pair[0] in omitted or pair[1] in omitted):
+            for field in pair:
+                if field not in omitted:
+                    problems[field] = (
+                        f"{field}: снято вместе с неподтверждённой парой толщина/единица.")
+                    omitted.add(field)
+
+    unit_strict = kind != "layers" and "unit" in omitted
+    if any(field in problems for field in required) or unit_strict:
+        # A rejected row still reports every diagnosed field, required first.
+        return None, _semantic_problem_list(required, fields, problems)
+
+    field_sources = {
+        field: anchor for field, anchor in anchors.items() if field not in omitted
+    }
+    values = {
+        field: ("" if field in omitted else value) for field, value in values.items()
+    }
     # ``carrier`` and ``page`` are code-owned: a model value is ignored. The
     # record page comes from the first required field anchor, not from the model.
-    first = SEMANTIC_REQUIRED_FIELDS[kind][0]
+    first = required[0]
     return {
         "kind": kind, **values, "field_sources": field_sources,
         "carrier": "semantic_only", "page": field_sources[first]["page"],
-    }, None
+    }, _semantic_problem_list(required, fields, problems)
 
 
 def _semantic_claim(field, value, anchor):
@@ -607,6 +708,15 @@ def validate_solar_semantic(candidate, document):
     and a claim without one becomes ``unknown``. Every output record carries
     ``carrier="semantic_only"`` and a ``page`` assigned by code; a model-supplied
     ``carrier`` or ``page`` is ignored.
+
+    A row is not all-or-nothing: an optional field that fails the literal gate is
+    omitted from the record (empty value, dropped anchor, its own error entry
+    with ``record``, ``index`` and ``field``), while the required fields and
+    every independently supported field stay. A malformed optional value is
+    omitted the same way and never coerced, while a malformed required value
+    rejects the row. Required fields remain strict, and no value is guessed,
+    repaired or re-anchored. An omission is a validation failure, not a
+    statement that the document lacks the field.
     """
     sources = _source_index(document)
     pid = document["publication_id"]
@@ -699,10 +809,10 @@ def validate_solar_semantic(candidate, document):
                 kind, None, f"список обрезан до {MAX_SEMANTIC_RECORDS} записей."))
             rows = rows[:MAX_SEMANTIC_RECORDS]
         for index, row in enumerate(rows):
-            record, error = _semantic_record(kind, row, sources)
-            if record is None:
-                errors.append(_semantic_error(kind, index, error))
-            else:
+            record, problems = _semantic_record(kind, row, sources)
+            for field, problem in problems:
+                errors.append(_semantic_error(kind, index, problem, field))
+            if record is not None:
                 result["records"][kind].append(record)
 
     result["errors"] = errors[:MAX_SEMANTIC_ERRORS]
