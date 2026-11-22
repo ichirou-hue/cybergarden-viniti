@@ -417,9 +417,11 @@ async function awaitJob(job) {
 }
 
 async function startJob(file) {
+  // Ручной профиль не привязан к области: серверу нужен только текст PDF,
+  // страницы и фрагменты, поэтому разбор идёт по универсальному профилю.
   const job = await parseResponse(await authorized(await apiFetch("/api/parse", {
     method: "POST",
-    headers: {"Content-Type": "application/pdf", "X-Parser": "pdfplumber", "X-Profile": "solar",
+    headers: {"Content-Type": "application/pdf", "X-Parser": "pdfplumber", "X-Profile": "universal",
       "X-Filename": encodeURIComponent(file.name)},
     body: file,
   })));

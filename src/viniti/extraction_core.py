@@ -15,7 +15,10 @@ from time import monotonic
 
 from .prompt_rules import DOCUMENT_RULES
 from .atomic_output import publish_directory
-from .solar_facts import clean, decimal, finalize, has_unit, has_value, number_text, prepare_pdf, unit_name
+from .solar_facts import (
+    clean, decimal, dotted, finalize, has_unit, has_value, number_text, plain_number,
+    prepare_pdf, unit_name,
+)
 from viniti import paths
 
 
@@ -467,6 +470,33 @@ def boolean_evidence(raw, quote):
     return None
 
 
+def _text_has_value(raw, quote):
+    """Literal phrase evidence where sentence punctuation is not part of it.
+
+    A text value is printed prose: ``GW150914.`` ends the sentence and
+    ``65 solar masses,`` continues a list, so a trailing period or comma is a
+    boundary rather than a longer token. The phrase still has to be printed
+    whole and cannot be cut out of a longer word on either side. Numeric text
+    keeps the scalar rules of :func:`has_value`, including sign and range
+    rejection.
+    """
+    normalized_raw = dotted(plain_number(raw))
+    normalized_quote = dotted(plain_number(quote))
+    if not normalized_raw:
+        return False
+    if NUMBER.fullmatch(normalized_raw):
+        return has_value(raw, quote)
+    for match in re.finditer(re.escape(normalized_raw), normalized_quote):
+        before = normalized_quote[match.start() - 1] if match.start() else ""
+        after = normalized_quote[match.end()] if match.end() < len(normalized_quote) else ""
+        if before and re.match(r"\w", before) and re.match(r"\w", normalized_raw[0]):
+            continue
+        if after and re.match(r"\w", after) and re.match(r"\w", normalized_raw[-1]):
+            continue
+        return True
+    return False
+
+
 def validate_fields(candidate, document, profile):
     if not isinstance(candidate, dict) or set(candidate) != set(profile["tables"]):
         raise ValueError("Ответ не соответствует таблицам профиля.")
@@ -511,9 +541,13 @@ def validate_fields(candidate, document, profile):
                         raise ValueError("Цитата поля не найдена в PDF.")
                     observation["evidence_refs"] = [deepcopy(source)]
                     observation["source_fragment"] = quote
-                    if field["type"] in {"text", "number"} and not (
-                        has_value(raw, quote) and has_value(raw, source["quote"])
-                    ):
+                    if field["type"] == "text":
+                        confirmed = _text_has_value(raw, quote) and _text_has_value(raw, source["quote"])
+                    elif field["type"] == "number":
+                        confirmed = has_value(raw, quote) and has_value(raw, source["quote"])
+                    else:
+                        confirmed = True
+                    if not confirmed:
                         raise ValueError(f"{table}.{name}: значение не подтверждено полным токеном источника.")
                     if field["type"] == "boolean" and raw not in {"true", "false"}:
                         raise ValueError("boolean: ожидались true/false.")

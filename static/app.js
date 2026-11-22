@@ -26,6 +26,12 @@ const profileStep = document.getElementById("profileStep");
 let selectedPDF = null;
 let wizardTrack = null;
 
+// Предел серверного /api/parse (PARSE_MAX_BYTES). Это верхняя граница выбора
+// файла; лимиты областей без модели проверяются при отправке.
+const MAX_PDF_BYTES = 40 * 1024 * 1024;
+// Лимиты загрузки в каталог без модели: они относятся к каталогу, не к модели.
+const CATALOG_LIMITS = {rag: 20 * 1024 * 1024, solar: 32 * 1024 * 1024};
+
 const authScreen = mountAuthScreen(document.getElementById("authScreen"), {
   onEnter: enterApp,
 });
@@ -381,7 +387,7 @@ function syncLLMNote() {
     return;
   }
   note.textContent = on
-    ? "Сервер дополнительно разберёт фрагменты моделью и покажет проверенную интерпретацию. Доступно для области Solar."
+    ? "Модель разберёт статью по универсальному профилю: объект, метод, результаты и выводы."
     : "Текст, таблицы и цитаты извлекаются без модели. Так результат воспроизводим.";
 }
 
@@ -392,7 +398,6 @@ function setLLMMode(mode) {
 
 document.getElementById("wizardLLM")?.addEventListener("change", event => {
   setLLMMode(event.target.checked ? "api" : "off");
-  if (app.llm === "api" && wizardTrack === "rag") wizardTrack = "solar";
   renderWizard();
 });
 
@@ -428,22 +433,21 @@ function renderWizard() {
   document.getElementById("wizardStep").textContent = ready ? "Шаг 2 из 2 · Область" : "Шаг 1 из 2 · Документ";
   document.getElementById("wizardTitle").textContent = ready ? "Как разобрать статью?" : "Начните с PDF";
   document.getElementById("wizardHint").textContent = ready
-    ? "Область задаёт поля и шаблон CSV. Модель можно включить ниже."
-    : "RAG: до 20 МиБ, Solar: до 32 МиБ.";
+    ? (llmOn
+      ? "Область нужна только для загрузки в каталог без модели. С моделью статья разбирается отдельно."
+      : "Область задаёт поля и шаблон CSV. Модель можно включить ниже.")
+    : "До 40 МиБ. Без модели: RAG до 20 МиБ, Solar до 32 МиБ.";
   document.getElementById("selectedFile").textContent = ready ? selectedPDF.name : "";
   syncLLMNote();
-  let preferred = wizardTrack === "rag" || wizardTrack === "solar" ? wizardTrack : app.track;
-  if (llmOn) preferred = "solar";
+  const preferred = wizardTrack === "rag" || wizardTrack === "solar" ? wizardTrack : app.track;
   fill(document.getElementById("profileChoices"), ...["solar", "rag"].map(track => {
     const available = app.descriptors.some(item => item.track === track);
-    const blockedByLLM = llmOn && track !== "solar";
     return el("label", {class: "profile-choice"},
       el("input", {type: "radio", name: "wizardProfile", value: track,
-        disabled: !available || blockedByLLM,
-        checked: available && !blockedByLLM && track === preferred}),
+        disabled: !available,
+        checked: available && track === preferred}),
       el("span", {},
-        el("strong", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`}),
-        blockedByLLM ? el("small", {text: "Только без модели"}) : null));
+        el("strong", {text: `${track === "solar" ? "Solar" : "RAG"}${available ? "" : " · скоро"}`})));
   }));
   const checked = document.querySelector('input[name="wizardProfile"]:checked');
   if (checked) wizardTrack = checked.value;
@@ -457,14 +461,23 @@ function selectPDF(file) {
   const error = document.getElementById("wizardError");
   error.hidden = true;
   openWizard();
-  if (!file || !(file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf")) {
-    error.textContent = "Выберите файл PDF.";
+  // Прежний файл не должен остаться выбранным после неудачной замены:
+  // иначе кнопка разбора отправила бы его вместо отклонённого.
+  const reject = text => {
+    selectedPDF = null;
+    fileInput.value = "";
+    error.textContent = text;
     error.hidden = false;
+    renderWizard();
+  };
+  if (!file || !(file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf")) {
+    reject("Выберите файл PDF.");
     return;
   }
-  if (file.size > 32 * 1024 * 1024) {
-    error.textContent = "Файл больше 32 МиБ. Выберите PDF меньшего размера.";
-    error.hidden = false;
+  // Верхняя граница мастера - предел серверного /api/parse (40 МиБ).
+  // Предметные лимиты 20 и 32 МиБ проверяются при отправке без модели.
+  if (file.size > MAX_PDF_BYTES) {
+    reject("Файл больше 40 МиБ. Выберите PDF меньшего размера.");
     return;
   }
   selectedPDF = file;
@@ -546,15 +559,17 @@ document.getElementById("createProfile").addEventListener("click", async event =
 document.getElementById("wizardSubmit").addEventListener("click", async () => {
   const track = wizardTrack;
   const llm = app.llm;
-  if (!selectedPDF || !track) return;
+  if (!selectedPDF) return;
   const error = document.getElementById("wizardError");
-  if (llm === "api" && track !== "solar") {
-    error.textContent = "С моделью разбирается только область Solar. Выберите Solar или выключите модель.";
-    error.hidden = false;
-    return;
-  }
-  if (track === "rag" && selectedPDF.size > 20 * 1024 * 1024) {
-    error.textContent = "Для RAG нужен PDF размером до 20 МиБ. Выберите Solar или другой PDF.";
+  // С моделью область каталога не нужна: разбор идёт по универсальному профилю.
+  if (llm !== "api" && !track) return;
+  // Лимиты каталога действуют только без модели: с моделью файл идёт в
+  // /api/parse, где предел 40 МиБ уже проверен при выборе.
+  const limit = llm === "api" ? MAX_PDF_BYTES : (CATALOG_LIMITS[track] || MAX_PDF_BYTES);
+  if (selectedPDF.size > limit) {
+    error.textContent = track === "rag"
+      ? "Для RAG без модели нужен PDF до 20 МиБ. Включите модель или выберите Solar."
+      : "Для Solar без модели нужен PDF до 32 МиБ. Включите модель или выберите другой PDF.";
     error.hidden = false;
     return;
   }
@@ -569,13 +584,13 @@ document.getElementById("wizardSubmit").addEventListener("click", async () => {
   progress.hidden = true;
   let result;
   if (llm === "api") {
-    // LLM-разбор идёт через /api/parse: ключ остаётся на сервере, а результат
-    // открывается на экране задания.
+    // LLM-разбор идёт через /api/parse по универсальному профилю: ключ
+    // остаётся на сервере, а результат открывается на экране задания.
     progress.hidden = false;
     bar.removeAttribute("value");
     progressLabel.textContent = "Запускаем разбор с моделью…";
     progressCount.textContent = "Обработка идёт на сервере";
-    result = await busy("Разбор с моделью…", () => startParse(selectedPDF, {profile: "solar", llm}));
+    result = await busy("Разбор с моделью…", () => startParse(selectedPDF, {profile: "universal", llm}));
     if (result && !result.id) {
       error.textContent = "Сервер не вернул идентификатор задания разбора.";
       error.hidden = false;

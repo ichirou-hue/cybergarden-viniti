@@ -486,6 +486,9 @@ function interpretationResult(job, manifest, interpretation, interpretationError
 function areaLabel(value) {
   if (value === "solar") return "Solar";
   if (value === "rag") return "RAG";
+  // Универсальный профиль не является областью каталога, поэтому в подписи
+  // стоит его собственное название, а не латинский идентификатор.
+  if (value === "universal") return "универсальный профиль";
   return value || "Не указана";
 }
 
