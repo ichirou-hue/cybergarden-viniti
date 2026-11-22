@@ -1,0 +1,19 @@
+{
+  "name": "viniti-uitest",
+  "private": true,
+  "type": "module",
+  "description": "jsdom- и e2e-проверки каталога RAG и паспорта (dev only)",
+  "scripts": {
+    "test": "node harness.mjs",
+    "e2e": "node e2e.mjs",
+    "passport": "node passport.mjs",
+    "auth": "node auth.mjs",
+    "profile": "node manual-profile.mjs"
+  },
+  "dependencies": {
+    "jsdom": "^31.0.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0"
+  }
+}

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поля извлечения · ВИНИТИ РАН</title>
+<link rel="stylesheet" href="/solar.css">
+<script type="module" src="/profile.mjs"></script>
+</head>
+<body class="manual-profile-page">
+<header class="top"><div class="shell masthead">
+  <div class="masthead-left">
+    <a class="back" href="/" aria-label="Назад на главную" title="На главную">←</a>
+    <a class="brand" href="/"><span class="mark" aria-hidden="true">✳</span> ВИНИТИ РАН</a>
+  </div>
+  <span class="context">Ручной профиль извлечения</span>
+</div></header>
+<main class="shell">
+<section class="screen-head">
+  <div>
+    <h1 class="screen-title">Поля извлечения</h1>
+    <p class="lede">Опишите, какие сущности и поля нужно извлечь из статьи, отметьте фрагменты-подсказки и скачайте профиль вместе с доказательствами. Готовый профиль можно открыть на экране паспорта.</p>
+  </div>
+  <div class="actions">
+    <label class="button primary" for="profilePdf">Загрузить PDF</label><input id="profilePdf" class="file" type="file" accept=".pdf,application/pdf">
+  </div>
+</section>
+<p id="assistantEntry" class="assistant-entry">Загрузите PDF: появятся поля, фрагменты-подсказки и помощник по полям.</p>
+<section class="panel profile-library" id="profileLibrary" hidden aria-labelledby="profileLibraryTitle">
+ <header class="panel-head"><div><p class="eyebrow">Профили извлечения</p><h2 id="profileLibraryTitle">Готовый шаблон или мой профиль</h2><p id="profileLibraryStatus" role="status"></p></div></header>
+ <div class="profile-library-body">
+  <label class="field"><span>Профиль</span><select id="profileSelect"><option value="">Черновик в браузере</option></select></label>
+  <div class="profile-summary" id="profileSummary"></div>
+  <label class="field profile-meta" id="profileDescriptionWrap" hidden><span>Описание</span><input id="profileDescription" maxlength="300"></label>
+  <label class="field profile-meta" id="profileInstructionsWrap" hidden><span>Инструкции</span><textarea id="profileInstructions" rows="3" maxlength="2000"></textarea></label>
+  <label class="field profile-meta" id="profileIdWrap" hidden><span>ID профиля</span><input id="profileId" pattern="[A-Za-z][A-Za-z0-9_]{0,63}" placeholder="my_profile"></label>
+  <div class="profile-actions" id="profileLibraryActions">
+    <button type="button" class="button primary" id="profileSave" hidden>Сохранить профиль</button>
+    <button type="button" class="button" id="profileCopy" hidden>Создать копию</button>
+    <button type="button" class="button" id="profileDelete" hidden>Удалить мой профиль</button>
+    <button type="button" class="button" id="profileNew">Новый профиль</button>
+  </div>
+ </div>
+</section>
+<section class="panel profile" id="profilePanel" hidden aria-labelledby="profileTitle">
+ <header class="panel-head"><div><h2 id="profileTitle">Профиль извлечения</h2><p id="profileStatus" role="status"></p><p id="profileContext" class="profile-help"></p></div></header>
+ <form id="profileForm">
+  <div class="profile-layout">
+   <div class="profile-editor">
+  <p id="profileSource" class="profile-help"></p>
+  <h3>Что искать в статье</h3>
+  <div class="profile-presets" role="group" aria-label="Готовые сценарии">
+    <span class="presets-label">Готовые наборы</span>
+    <button class="button" type="button" data-preset="solar">Солнечные элементы</button>
+    <button class="button" type="button" data-preset="rag">RAG-системы</button>
+    <button class="button" type="button" data-preset="basic">Универсальный</button>
+  </div>
+  <label class="field"><span>Название профиля</span><input name="title" required placeholder="Например, Результаты статьи"></label>
+  <datalist id="profileTypes"></datalist>
+  <p class="profile-help">Выберите готовый набор или опишите поля сами. Всё, что осталось в списке, будет извлечено; удалённые поля не попадут в профиль.</p>
+  <div id="profileEntities" class="profile-entities"></div>
+  <div class="profile-actions">
+    <button class="button" type="button" id="addEntity">Добавить тип сущности</button>
+  </div>
+  <h3>Проверка и сохранение</h3>
+  <div class="profile-actions">
+    <button class="button primary" type="button" id="scanProfile">Найти фрагменты</button>
+    <button class="button" type="button" id="browseProfile">Показать все фрагменты</button>
+    <button class="button" type="button" id="checkProfile">Проверить профиль</button>
+  </div>
+  <div id="profileChecks" class="profile-checks" hidden></div>
+  <div id="profileMatches"></div>
+  <p id="profileError" class="profile-error" role="alert" tabindex="-1" hidden></p>
+  <div class="profile-submit">
+    <button class="button primary" type="submit" id="profileDownload">Скачать профиль и выбранные фрагменты</button>
+  </div>
+   </div>
+   <aside class="assistant-panel" aria-labelledby="assistantTitle">
+    <div class="assistant-head"><span class="assistant-avatar" aria-hidden="true">✳</span><div><h3 id="assistantTitle">Помощник по полям</h3><p id="assistantContext">Контекст: черновик профиля</p></div></div>
+    <div id="assistantMessages" class="assistant-messages" role="log" aria-label="Сообщения помощника" aria-live="polite"></div>
+    <p id="assistantLock" class="assistant-lock" hidden>Встроенный профиль нельзя изменить. Создайте копию, чтобы применить предложения.</p>
+    <div id="assistantSuggestions" class="assistant-suggestions"></div>
+    <button class="button primary" type="button" id="assistantApply" hidden>Применить выбранные</button>
+    <p id="assistantStatus" role="status" hidden></p>
+    <div class="assistant-quick" role="group" aria-label="Быстрые действия помощника">
+      <button class="button" type="button" data-assistant-prompt="Предложи профиль по этой статье">Предложить профиль</button>
+      <button class="button" type="button" id="assistantCheck">Проверить дубли</button>
+      <button class="button" type="button" data-assistant-prompt="Каких полей не хватает и что стоит уточнить в профиле?">Что не хватает?</button>
+    </div>
+    <div class="assistant-compose">
+      <label for="assistantQuestion" class="sr-only">Вопрос по статье</label>
+      <textarea id="assistantQuestion" rows="2" maxlength="600" placeholder="Спросите о поле в этой статье"></textarea>
+      <button class="button primary" type="button" id="assistantAsk">Отправить</button>
+    </div>
+   </aside>
+  </div>
+ </form>
+</section>
+<p id="bootError" class="boot-error shell" role="alert" hidden>
+  Не удалось загрузить интерфейс профиля. Обновите страницу; если ошибка повторяется, проверьте, что сервер отдаёт `/profile.mjs` и `/pending.js`.
+</p>
+<noscript><p class="boot-error shell">Для работы интерфейса нужен JavaScript.</p></noscript>
+</main>
+<script>
+  setTimeout(function () {
+    var error = document.getElementById("bootError");
+    if (error && document.body.dataset.profile !== "ready") error.hidden = false;
+  }, 4000);
+</script>
+</body>
+</html>

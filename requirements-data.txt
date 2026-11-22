@@ -1,0 +1,3 @@
+# Необязательная зависимость: Datasette для serve_data.py.
+# Не включать в requirements.txt: CI работает без неё и на Python 3.12.
+datasette>=0.65

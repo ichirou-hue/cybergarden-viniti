@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Прототипы · Аутентификация · ВИНИТИ РАН</title>
+<style>
+  :root{
+    --bg:#0e1518; --bg-deep:#0a1113; --panel:#152024; --panel-2:#111b1e;
+    --line:#324248; --line-soft:#2b393e; --line-strong:#405358;
+    --ink:#e7eded; --muted:#adbec1; --muted-soft:#b6cacc;
+    --accent:#d5ff83; --accent-ink:#1e2716;
+    --danger:#ffb3a6; --warn:#ffd1a6; --good:#bfe86e;
+    --radius:14px;
+    --font:Inter,"Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:
+      radial-gradient(900px 600px at 92% -10%,rgba(213,255,131,.08),transparent 60%),
+      radial-gradient(700px 600px at 0% 100%,rgba(58,126,112,.14),transparent 62%),
+      var(--bg);
+    color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,p{margin:0}
+  a{color:var(--accent)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+  .wrap{width:min(1180px,calc(100% - 48px));margin-inline:auto}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+  .topbar{border-bottom:1px solid var(--line-soft);background:rgba(10,17,19,.6)}
+  .topbar .wrap{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .brand{display:inline-flex;align-items:center;gap:10px;color:#f0f6f5;text-decoration:none;font-weight:750;font-size:18px;letter-spacing:-.01em}
+  .brand .mark{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:var(--accent);color:#172018;font-size:16px;box-shadow:0 0 24px rgba(213,255,131,.18)}
+  .brand em{font-style:normal;color:var(--muted);font-weight:500;font-size:12px;margin-left:2px}
+  .badge{display:inline-block;padding:3px 9px;border:1px solid #3a5c3f;border-radius:999px;color:var(--accent);font-size:.64rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:#1b2a1d}
+
+  header.page{padding:48px 0 8px}
+  .eyebrow{margin:0 0 12px;color:var(--accent);font-size:.7rem;font-weight:750;letter-spacing:.14em;text-transform:uppercase}
+  header.page h1{font-size:clamp(2.4rem,5vw,4.2rem);line-height:.98;letter-spacing:-.055em;max-width:17ch;text-wrap:balance}
+  .lead{margin-top:18px;max-width:74ch;color:var(--muted);font-size:1.02rem}
+  .facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;list-style:none;margin:26px 0 0;padding:0}
+  .facts li{padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+  .facts b{display:block;color:var(--muted);font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;font-weight:700;margin-bottom:4px}
+  .facts span{font-size:.86rem;color:var(--ink)}
+
+  .variants{margin:42px 0 0}
+  .section-head{display:flex;align-items:end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+  .section-head h2{font-size:1.5rem;letter-spacing:-.03em}
+  .section-head p{color:var(--muted);font-size:.86rem;margin-top:3px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+
+  article.card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;min-width:0}
+  .thumb{position:relative;height:178px;overflow:hidden;border-bottom:1px solid var(--line);background:var(--bg-deep)}
+  .thumb .cap{position:absolute;left:12px;bottom:10px;z-index:3;font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:rgba(6,12,14,.72);border:1px solid #33454b;border-radius:4px;padding:2px 6px}
+  /* миниатюра A: сплит */
+  .thumb-a{background:
+    radial-gradient(300px 200px at 8% 0%,rgba(213,255,131,.16),transparent 60%),
+    linear-gradient(120deg,#0a1114,#0e1518 55%,#0a1215)}
+  .thumb-a::before{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(173,190,193,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(173,190,193,.07) 1px,transparent 1px);background-size:34px 34px;mask-image:linear-gradient(90deg,#000,transparent 70%)}
+  .thumb-a .bar{position:absolute;left:18px;height:8px;border-radius:3px;background:#8fa3a6;opacity:.55}
+  .thumb-a .b1{top:44px;width:130px;height:14px;background:var(--accent);opacity:.9}
+  .thumb-a .b2{top:70px;width:110px}
+  .thumb-a .b3{top:86px;width:90px;opacity:.4}
+  .thumb-a .b4{top:112px;width:120px;opacity:.35}
+  .thumb-a .form{position:absolute;right:22px;top:28px;bottom:26px;width:150px;border:1px solid #44575d;border-radius:8px;background:#152024;box-shadow:0 14px 34px rgba(0,0,0,.45)}
+  .thumb-a .form::before{content:"";position:absolute;left:10px;right:10px;top:10px;height:16px;border-radius:4px;background:var(--accent);opacity:.9}
+  .thumb-a .form::after{content:"";position:absolute;left:10px;right:10px;top:38px;bottom:12px;background:repeating-linear-gradient(180deg,#283a40 0 12px,transparent 12px 22px);border-radius:3px}
+  /* миниатюра B: светлое стекло */
+  .thumb-b{background:
+    radial-gradient(240px 180px at 90% 0%,rgba(213,255,131,.9),transparent 65%),
+    radial-gradient(220px 180px at 0% 100%,rgba(126,168,142,.55),transparent 70%),
+    linear-gradient(160deg,#f8f9f1,#e3e9dc)}
+  .thumb-b::before{content:"";position:absolute;inset:0;background-image:url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSczMDAnIGhlaWdodD0nMzAwJz48ZyBmaWxsPSdub25lJyBzdHJva2U9JyMzZjVjNDgnIHN0cm9rZS1vcGFjaXR5PScuMjInPjxwYXRoIGQ9J00tMjAgMTEwQzQwIDcwIDkwIDE0MCAxNTAgMTAwUzI2MCAzMCAzMjAgODAnLz48cGF0aCBkPSdNLTIwIDE0MEM0MCAxMDAgOTAgMTcwIDE1MCAxMzBTMjYwIDYwIDMyMCAxMTAnLz48cGF0aCBkPSdNLTIwIDE3MEM0MCAxMzAgOTAgMjAwIDE1MCAxNjBTMjYwIDkwIDMyMCAxNDAnLz48L2c+PC9zdmc+")}
+  .thumb-b .head{position:absolute;left:50%;top:26px;transform:translateX(-50%);width:190px;height:18px;border-radius:4px;background:#1a2a21}
+  .thumb-b .head.second{top:50px;width:130px;background:#1f5b3d;opacity:.85}
+  .thumb-b .glass{position:absolute;left:50%;top:84px;transform:translateX(-50%);width:200px;height:78px;border:1px solid rgba(255,255,255,.9);border-radius:12px;background:rgba(255,255,255,.62);box-shadow:0 18px 44px rgba(24,44,31,.18);backdrop-filter:blur(8px)}
+  .thumb-b .glass::before{content:"";position:absolute;left:12px;right:12px;top:12px;height:8px;border-radius:3px;background:#31513f;opacity:.5}
+  .thumb-b .glass::after{content:"";position:absolute;left:12px;right:12px;top:30px;bottom:12px;background:repeating-linear-gradient(180deg,rgba(20,32,24,.22) 0 8px,transparent 8px 16px);border-radius:3px}
+  /* миниатюра C: свечение и сетка */
+  .thumb-c{background:radial-gradient(320px 240px at 50% 8%,rgba(213,255,131,.22),transparent 62%),#05090b}
+  .thumb-c::before{content:"";position:absolute;left:-20%;right:-20%;bottom:-30%;height:120px;background-image:linear-gradient(rgba(213,255,131,.25) 1px,transparent 1px),linear-gradient(90deg,rgba(213,255,131,.25) 1px,transparent 1px);background-size:26px 26px;transform:perspective(160px) rotateX(58deg);transform-origin:50% 100%;mask-image:linear-gradient(to top,#000,transparent)}
+  .thumb-c .console{position:absolute;left:50%;top:22px;transform:translateX(-50%);width:160px;height:130px;border:1px solid rgba(213,255,131,.4);border-radius:8px;background:rgba(12,21,24,.94);box-shadow:0 0 38px rgba(213,255,131,.14),0 18px 40px rgba(0,0,0,.6)}
+  .thumb-c .console::before{content:"✳";position:absolute;left:10px;top:8px;color:var(--accent);font-size:12px}
+  .thumb-c .console::after{content:"";position:absolute;left:10px;right:10px;top:34px;bottom:12px;background:repeating-linear-gradient(180deg,rgba(213,255,131,.22) 0 7px,transparent 7px 16px)}
+  .thumb-c .halo{position:absolute;left:50%;top:50%;width:300px;height:300px;transform:translate(-50%,-50%);border:1px solid rgba(213,255,131,.13);border-radius:50%;box-shadow:0 0 70px rgba(213,255,131,.08) inset}
+  /* миниатюра D: типографика */
+  .thumb-d{background:#0a0f11}
+  .thumb-d::before{content:"";position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,transparent 0 44px,rgba(231,237,237,.06) 44px 45px),linear-gradient(90deg,transparent 0 24%,rgba(231,237,237,.06) 24% calc(24% + 1px),transparent calc(24% + 1px) 100%)}
+  .thumb-d .word{position:absolute;left:-6px;top:34px;font-size:64px;line-height:.8;font-weight:800;letter-spacing:-.08em;color:transparent;-webkit-text-stroke:1px rgba(231,237,237,.24)}
+  .thumb-d .word small{display:block;font-size:46px;color:rgba(213,255,131,.06);-webkit-text-stroke:1px rgba(213,255,131,.5);padding-left:16px}
+  .thumb-d .dock{position:absolute;right:0;top:0;bottom:0;width:150px;background:#0c1416;border-left:1px solid #33454b;padding:22px 12px}
+  .thumb-d .dock::before{content:"";display:block;width:16px;height:16px;border-radius:4px;background:var(--accent);margin-bottom:14px}
+  .thumb-d .dock::after{content:"";display:block;height:62px;background:repeating-linear-gradient(180deg,rgba(231,237,237,.25) 0 7px,transparent 7px 17px);border-radius:2px}
+  .thumb-d .star{position:absolute;right:158px;top:16px;font-size:40px;line-height:1;color:transparent;-webkit-text-stroke:1px rgba(213,255,131,.25);transform:rotate(12deg)}
+
+  .card-body{padding:18px 20px 20px;display:flex;flex-direction:column;gap:12px;flex:1}
+  .card-head{display:flex;align-items:flex-start;gap:12px}
+  .letter{flex:none;display:grid;place-items:center;width:38px;height:38px;border-radius:10px;background:#22312a;border:1px solid #3c5b32;color:var(--accent);font-weight:800;font-size:1rem}
+  .card-head h3{font-size:1.18rem;letter-spacing:-.02em;line-height:1.2}
+  .kind{margin-top:3px;color:var(--muted);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;font-weight:650}
+  .idea{color:var(--muted-soft);font-size:.88rem}
+  .plusminus{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:4px}
+  .plusminus div{min-width:0}
+  .plusminus dt{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;font-weight:750;margin-bottom:3px}
+  .plusminus dd{margin:0;font-size:.79rem;color:var(--muted);line-height:1.45}
+  .plus dt{color:var(--good)} .minus dt{color:var(--danger)}
+  .when{margin-top:auto;padding:9px 11px;border-left:2px solid var(--accent);border-radius:0 8px 8px 0;background:#111b1e;color:var(--muted-soft);font-size:.79rem}
+  .when b{display:block;color:var(--muted);font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;margin-bottom:2px}
+  .open{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:9px 14px;
+    border:1px solid var(--accent);border-radius:9px;background:var(--accent);color:var(--accent-ink);
+    font-weight:700;text-decoration:none;font-size:.86rem;
+  }
+  .open:hover{background:#e2ffab;border-color:#e2ffab}
+  .open .arr{font-size:1rem;line-height:1}
+  .card-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .card-meta small{color:var(--muted);font-size:.7rem}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px}
+  .recommend{margin:34px 0 0;border-color:#3c5b32;background:linear-gradient(135deg,rgba(213,255,131,.08),transparent 55%),var(--panel)}
+  .recommend h2{font-size:1.3rem;letter-spacing:-.025em;margin-bottom:10px}
+  .recommend h2 span{color:var(--accent)}
+  .recommend p{color:var(--muted-soft);font-size:.9rem;max-width:88ch}
+  .recommend p + p{margin-top:8px}
+  .recommend strong{color:var(--accent)}
+  .recommend .runners{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:18px}
+  .runners div{padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#111b1e}
+  .runners b{display:block;font-size:.82rem;margin-bottom:3px}
+  .runners p{font-size:.76rem;color:var(--muted);margin:0}
+  .runners span{display:inline-block;color:var(--accent);font-size:.62rem;font-weight:750;letter-spacing:.09em;text-transform:uppercase;margin-bottom:4px}
+
+  .columns{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+  .panel h2{font-size:1.05rem;letter-spacing:-.02em;margin-bottom:8px}
+  .panel h3{font-size:.9rem;margin:12px 0 4px}
+  .panel p{color:var(--muted);font-size:.85rem;max-width:80ch}
+  .panel ul{margin:8px 0 0;padding-left:19px;color:var(--muted);font-size:.85rem;display:grid;gap:6px}
+  .panel li::marker{color:var(--accent)}
+  kbd{font:inherit;font-size:.78em;padding:1px 6px;border:1px solid var(--line-strong);border-radius:4px;background:#0f1a1d;color:var(--ink)}
+  code{font-family:"Cascadia Mono",Consolas,monospace;font-size:.82em;color:#d9e6e3;background:#0f1a1d;border:1px solid var(--line);padding:1px 5px;border-radius:4px}
+  .checklist{list-style:none;padding:0;margin:10px 0 0;display:grid;gap:7px}
+  .checklist li{display:grid;grid-template-columns:18px 1fr;gap:8px;font-size:.84rem;color:var(--muted)}
+  .checklist li::before{content:"✓";color:var(--accent);font-weight:700}
+
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:.82rem}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  th{font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;background:#111b1e}
+  td{color:var(--muted-soft)}
+  td:first-child{color:var(--ink);font-weight:600}
+  .table-wrap{overflow-x:auto}
+  footer{padding:26px 0 46px;color:var(--muted);font-size:.78rem}
+  footer p + p{margin-top:4px}
+
+  @media (max-width:980px){
+    .grid,.columns{grid-template-columns:1fr}
+    .facts{grid-template-columns:1fr 1fr}
+    .recommend .runners{grid-template-columns:1fr}
+  }
+  @media (max-width:640px){
+    .wrap{width:calc(100% - 28px)}
+    header.page{padding-top:30px}
+    .topbar .badge{display:none}
+    .facts{grid-template-columns:1fr 1fr;gap:8px}
+    .thumb{height:160px}
+    .card-body{padding:16px}
+    .plusminus{grid-template-columns:1fr}
+    .panel{padding:18px}
+    .brand em{display:none}
+    .thumb-a .form{right:12px;width:130px}
+    .table-wrap table{min-width:560px}
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand"><span class="mark" aria-hidden="true">✳</span><span>ВИНИТИ РАН <em>CyberGarden</em></span></div>
+    <span class="badge">Прототипы · не продакшен</span>
+  </div>
+</header>
+
+<main class="wrap">
+  <header class="page">
+    <p class="eyebrow">Аутентификация · UI-прототипы</p>
+    <h1>Четыре входа в один каталог</h1>
+    <p class="lead">Три поверхности одного сценария: регистрация при первом входе, сайт с шапкой и поповером профиля, отдельный фрейм профиля. В каждом варианте все три экрана живут в одном HTML-файле, состояние хранится в localStorage, бэкенда нет.</p>
+    <ul class="facts">
+      <li><b>Поверхности</b><span>регистрация, сайт, профиль</span></li>
+      <li><b>Варианты</b><span>4 разных компоновки</span></li>
+      <li><b>Технически</b><span>один файл, без сборки и сети</span></li>
+      <li><b>Состояние</b><span>localStorage + фейковый пользователь</span></li>
+    </ul>
+  </header>
+
+  <section class="variants" aria-labelledby="variantsTitle">
+    <div class="section-head">
+      <div>
+        <h2 id="variantsTitle">Варианты</h2>
+        <p>Отличаются композицией входа и формой профиля, а не цветом кнопки. B и C держат карточку по центру, A ставит её справа от тезиса, D уводит в док у края.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <article class="card" aria-labelledby="v-a">
+        <div class="thumb thumb-a" aria-hidden="true">
+          <span class="bar b1"></span><span class="bar b2"></span><span class="bar b3"></span><span class="bar b4"></span>
+          <span class="form"></span>
+          <span class="cap">A · Сплит</span>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <span class="letter" aria-hidden="true">A</span>
+            <div>
+              <h3 id="v-a">Корпоративный сплит</h3>
+              <p class="kind">Тёмный · тезис слева, форма справа</p>
+            </div>
+          </div>
+          <p class="idea">Слева крупный тезис каталога и три факта о продукте, справа карточка регистрации. Пользователь одновременно понимает, куда попал и что делать. Профиль собран как дашборд: боковая карточка личности, статистика, активность и настройки.</p>
+          <dl class="plusminus">
+            <div class="plus"><dt>Сильные</dt><dd>Один экран показывает ценность продукта и форму. Узнаваемая продуктовая палитра, спокойная типографика, хорошо читается на проекторе. Самый предсказуемый сценарий для демо.</dd></div>
+            <div class="minus"><dt>Слабые</dt><dd>Композиция привычная, без сюрприза. Сторителлинг занимает половину экрана, на мобильном он сжимается до заголовка.</dd></div>
+          </dl>
+          <p class="when"><b>Когда уместен</b>Хакатонное демо и пилот для научной организации: нужно быстро объяснить продукт и показать рабочий кабинет.</p>
+          <div class="card-meta">
+            <a class="open" href="a-corporate-split.html">Открыть прототип <span class="arr" aria-hidden="true">→</span></a>
+            <small>проверено: 1440 / 375</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="card" aria-labelledby="v-b">
+        <div class="thumb thumb-b" aria-hidden="true">
+          <span class="head"></span><span class="head second"></span>
+          <span class="glass"></span>
+          <span class="cap" style="color:#3f5749;background:rgba(255,255,255,.8);border-color:rgba(31,91,61,.2)">B · Стекло</span>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <span class="letter" aria-hidden="true">B</span>
+            <div>
+              <h3 id="v-b">Светлая типографика и стекло</h3>
+              <p class="kind">Светлая · крупный заголовок, стеклянная карточка</p>
+            </div>
+          </div>
+          <p class="idea">Светлая бумажная тема, контурный фон и огромный заголовок. Форма лежит в полупрозрачной карточке с мягкой тенью, поля идут в две колонки. Профиль похож на журнальный разворот: имя, метрики крупными цифрами, лента и настройки.</p>
+          <dl class="plusminus">
+            <div class="plus"><dt>Сильные</dt><dd>Самый «продуктовый» и публичный вид. Хорошо смотрится на светлом проекторе и в записи. Мягкий контраст и крупная типографика.</dd></div>
+            <div class="minus"><dt>Слабые</dt><dd>Уходит от тёмного дефолта продукта. На ноутбуке 900 px карточка целиком не помещается, CTA виден, а гостевой вход уходит ниже сгиба.</dd></div>
+          </dl>
+          <p class="when"><b>Когда уместен</b>Публичная посадочная страница каталога или демонстрация в светлом помещении, где важна презентабельность.</p>
+          <div class="card-meta">
+            <a class="open" href="b-light-glass.html">Открыть прототип <span class="arr" aria-hidden="true">→</span></a>
+            <small>проверено: 1440 / 375</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="card" aria-labelledby="v-c">
+        <div class="thumb thumb-c" aria-hidden="true">
+          <span class="halo"></span>
+          <span class="console"></span>
+          <span class="cap">C · Свечение</span>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <span class="letter" aria-hidden="true">C</span>
+            <div>
+              <h3 id="v-c">Глубокий тёмный с консолью</h3>
+              <p class="kind">Тёмный · свечение, перспективная сетка, моно-подписи</p>
+            </div>
+          </div>
+          <p class="idea">Почти чёрный фон, ореол вокруг карточки, пол-сетка в перспективе и моноширинные статусы. Регистрация выглядит как доступ к локальному узлу каталога. Профиль собран как досье: кольцо аватара, метки секций, readout-метрики и журнал.</p>
+          <dl class="plusminus">
+            <div class="plus"><dt>Сильные</dt><dd>Самый выразительный и «свой» для данных: свечение, сетка и консоль дают ощущение системы, а не лендинга. Компактная карточка целиком влезает в 900 px.</dd></div>
+            <div class="minus"><dt>Слабые</dt><dd>Мелкие моно-подписи хуже читаются с расстояния. Тёмный фон и свечение могут «поплыть» на слабом проекторе.</dd></div>
+          </dl>
+          <p class="when"><b>Когда уместен</b>Финальная защита на большом экране для технической аудитории: нужен вау-эффект и ощущение инструмента.</p>
+          <div class="card-meta">
+            <a class="open" href="c-deep-glow.html">Открыть прототип <span class="arr" aria-hidden="true">→</span></a>
+            <small>проверено: 1440 / 375</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="card" aria-labelledby="v-d">
+        <div class="thumb thumb-d" aria-hidden="true">
+          <span class="word">ВИНИТИ<small>РАН</small></span>
+          <span class="star">✳</span>
+          <span class="dock"></span>
+          <span class="cap">D · Типографика</span>
+        </div>
+        <div class="card-body">
+          <div class="card-head">
+            <span class="letter" aria-hidden="true">D</span>
+            <div>
+              <h3 id="v-d">Суперкрупный логотип</h3>
+              <p class="kind">Тёмный · постер слева, док регистрации справа</p>
+            </div>
+          </div>
+          <p class="idea">Гигантское контурное «ВИНИТИ РАН» как фоновая графика, манифест внизу и узкий док регистрации у правого края. Поля без рамок, только нижние линии. Сайт и профиль продолжают ту же редакционную сетку: крупные имена, тонкие линейки, никаких карточек.</p>
+          <dl class="plusminus">
+            <div class="plus"><dt>Сильные</dt><dd>Самый запоминающийся бренд-момент. Сильная типографика и ясная иерархия. Профиль выглядит как разворот отчёта, а не как админка.</dd></div>
+            <div class="minus"><dt>Слабые</dt><dd>Гигантский логотип перетягивает внимание с формы. На телефоне постер и док складываются в длинную страницу, а поля без рамок менее очевидны как поля.</dd></div>
+          </dl>
+          <p class="when"><b>Когда уместен</b>Имиджевая презентация проекта, обложка кейса и защита, где важна узнаваемость, а не конверсия формы.</p>
+          <div class="card-meta">
+            <a class="open" href="d-editorial.html">Открыть прототип <span class="arr" aria-hidden="true">→</span></a>
+            <small>проверено: 1440 / 375</small>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel recommend" aria-labelledby="recTitle">
+    <h2 id="recTitle">Рекомендация: <span>вариант A</span></h2>
+    <p><strong>Для хакатонного демо я бы взял A.</strong> Он единственный, где на первом экране одновременно видны ценность каталога и форма, а не только форма или только постер. Палитра совпадает с текущим продуктом, типографика спокойная и предсказуемая, на проекторе читается и заголовок, и подписи полей. Профиль-дашборд ближе всего к тому, как продукт будет выглядеть дальше, поэтому демонстрация не обрывается на красивом входе.</p>
+    <p>Главный риск A - он выглядит как аккуратный корпоративный сайт, а не как открытие. Если сцена позволяет, покажите <strong>C</strong> вторым: он даёт самый сильный «вау» и при этом остаётся в тёмной палитре продукта. B уместен, если каталог показывают в светлом помещении или как публичную страницу. D - если нужен имиджевый кадр для обложки или питча, а не рабочий сценарий.</p>
+    <div class="runners">
+      <div><span>Второй выбор</span><b>C · Консоль</b><p>Если демо идёт на большом экране и аудитория техническая. Больше характера, чем у A, при той же палитре.</p></div>
+      <div><span>Светлый контекст</span><b>B · Стекло</b><p>Публичная страница или яркий проектор. Самый дружелюбный и «журнальный» вход.</p></div>
+      <div><span>Имидж</span><b>D · Постер</b><p>Обложка кейса и питч. Не лучший выбор для длинной регистрации на телефоне.</p></div>
+    </div>
+  </section>
+
+  <div class="columns">
+    <section class="panel" aria-labelledby="howTitle">
+      <h2 id="howTitle">Как смотреть</h2>
+      <p>Откройте любой файл двойным щелчком: сборка и сервер не нужны. При пустом localStorage показывается регистрация.</p>
+      <ul class="checklist">
+        <li>Заполните поля и нажмите «Создать аккаунт»: откроется каталог с шапкой.</li>
+        <li>Нажмите на аватар: откроется поповер. <kbd>Esc</kbd> закрывает его и возвращает фокус на кнопку.</li>
+        <li>В поповере выберите «Профиль» или «Настройки»: произойдёт переход на <code>#/profile</code>.</li>
+        <li>Кнопка <strong>«Демо»</strong> открывает переключатель экранов и сброс localStorage: на телефоне она в правом верхнем углу, на широком экране в левом нижнем.</li>
+      </ul>
+      <h3>Что проверено</h3>
+      <p>Клавиатурная навигация по вкладкам и меню, возврат фокуса, aria-expanded, ошибки полей с aria-invalid, отсутствие горизонтального скролла на 375 и 768 px.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="sameTitle">
+      <h2 id="sameTitle">Что общего у всех вариантов</h2>
+      <ul>
+        <li>Один самодостаточный HTML: инлайн CSS и JS, без CDN, Google Fonts и внешних картинок.</li>
+        <li>Фон собран из CSS-градиентов, SVG-паттернов в data-URI, шума и сеток; вариант D добавляет контурную типографику.</li>
+        <li>Палитра продукта: <code>#0e1518</code>, <code>#152024</code>, <code>#324248</code>, акцент <code>#d5ff83</code>, опасность <code>#ffb3a6</code>.</li>
+        <li>Регистрация и вход с клиентской валидацией, гость и демо-аккаунт, выход с очисткой localStorage.</li>
+        <li>Поповер с закрытием по <kbd>Esc</kbd>, клику вне и возвратом фокуса на аватар.</li>
+        <li>Мобильная раскладка 375 px, тач-цели не меньше 40 px, видимые focus-состояния.</li>
+      </ul>
+      <h3>Ключи localStorage</h3>
+      <p><code>viniti.auth.a.v1</code>, <code>viniti.auth.b.v1</code>, <code>viniti.auth.c.v1</code>, <code>viniti.auth.d.v1</code>. Варианты не мешают друг другу и не трогают данные приложения.</p>
+    </section>
+  </div>
+
+  <section class="panel" style="margin-top:18px" aria-labelledby="tableTitle">
+    <h2 id="tableTitle">Сравнение</h2>
+    <div class="table-wrap">
+      <table>
+        <caption class="sr-only">Сравнение четырёх прототипов по композиции и сценарию</caption>
+        <thead>
+          <tr><th scope="col">Вариант</th><th scope="col">Вход</th><th scope="col">Профиль</th><th scope="col">Фон</th><th scope="col">Лучше всего</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>A · Сплит</td><td>Тезис + карточка справа</td><td>Дашборд с боковой карточкой</td><td>Тёмный, сетка, кольца</td><td>Демо и пилот</td></tr>
+          <tr><td>B · Стекло</td><td>Крупный заголовок + стекло</td><td>Журнальный разворот</td><td>Светлый, контуры, меши</td><td>Публичная страница</td></tr>
+          <tr><td>C · Консоль</td><td>Центральная карточка-узел</td><td>Досье с кольцом</td><td>Тёмный, свечение, пол-сетка</td><td>Финальная защита</td></tr>
+          <tr><td>D · Постер</td><td>Док справа, поля-линии</td><td>Редакционная сетка</td><td>Контурная типографика</td><td>Имидж и обложка</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p>Прототипы живут только в <code>prototypes/auth/</code>. Продакшен-код, <code>static/</code> и <code>server.py</code> не изменялись, коммитов нет.</p>
+    <p>Данные демонстрационные. Пользователь, статистика и активность вымышлены; пароли никуда не отправляются.</p>
+  </footer>
+</main>
+</body>
+</html>

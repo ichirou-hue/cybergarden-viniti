@@ -1,5 +1,61 @@
 .venv/
+.venv-*/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .env
 data/
+docs/materials/
+_refs/
+_corpus/
+# Local unpacked hackathon archives; use _corpus/ for tracked tooling inputs.
+Кейс5_область1_участникам/
+RAG_ВИНИТИ_участникам_*/
+*.zip
+.slim/deepwork/
+out/
+out_test/
+
+# Локальный лаунчер: в нём машинно-зависимые пути, в репозиторий не кладём
+run_server.bat
+run_server.ps1
+
+# Локальные настройки и секреты. Шаблон .env.example остаётся отслеживаемым.
+.env.*
+!.env.example
+*.env
+/env
+*.log
+*.log.*
+
+# Локальные базы, дампы и резервные копии.
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.bak
+*.backup
+*.tmp
+
+# Ключи и сертификаты никогда не должны попадать в рабочий diff.
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+credentials*.json
+service-account*.json
+
+# Мусор macOS: .DS_Store и AppleDouble-файлы рядом с настоящими
+.DS_Store
+._*
+node_modules/
+
+# Local case archives and oversized source material
+archive/
+
+# BEGIN oh-my-opencode-slim worktrees
+.slim/worktrees/
+.slim/worktrees.json
+# END oh-my-opencode-slim worktrees

@@ -3,45 +3,215 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ВИНИТИ · Разбор публикаций</title>
+  <title>ВИНИТИ · Каталог результатов</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/auth.css">
+  <script>
+    // Серверную сессию проверяет app.js через /api/auth/me. Пока ответа нет,
+    // каталог не показываем, чтобы не мелькали пустые таблицы.
+    document.documentElement.classList.add("auth-locked");
+  </script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
-<header class="top"><div class="wrap">ВИНИТИ РАН <span>CyberGarden / RAG</span></div></header>
-<main class="wrap">
-  <section class="intro">
-    <div><h1>Разбор публикаций</h1><p>Метрики RAG с привязкой к исходной странице.</p></div>
-    <form id="upload">
-      <label>Загрузить статью <input id="file" type="file" accept=".pdf,application/pdf" required></label>
-      <button type="submit">Разобрать PDF</button>
-      <button type="button" id="demo" class="secondary">Открыть демо</button>
-    </form>
-  </section>
-  <p id="status" role="status"></p>
-  <section id="workspace" hidden>
-    <div class="bar">
-      <label>Публикация <select id="papers"></select></label>
-      <div class="links"><a id="pdf">Исходный PDF</a><a id="json">Экспорт JSON</a></div>
+<a class="skip" href="#view" onclick="event.preventDefault(); document.getElementById('view').focus()">К содержанию</a>
+
+<main class="auth" id="authScreen" aria-labelledby="authTitle">
+  <a class="auth-skip" href="#authCard">К форме входа</a>
+  <div class="auth-bg" aria-hidden="true">
+    <span class="auth-ring one"></span>
+    <span class="auth-ring two"></span>
+  </div>
+  <div class="auth-noise" aria-hidden="true"></div>
+
+  <div class="auth-top">
+    <div class="auth-brand">
+      <span class="mark" aria-hidden="true">✳</span>
+      <span>ВИНИТИ РАН <em>ЮФУ</em></span>
     </div>
-    <p id="summary"></p>
-    <ul id="warnings"></ul>
-    <div class="bar filters">
-      <label>Поиск <input id="query" type="search" placeholder="Метрика, набор данных, цитата"></label>
-      <label>Раздел <select id="view"><option value="facts">Метрики</option><option value="sources">Фрагменты PDF</option></select></label>
-      <label id="categoryLabel">Тип <select id="category"></select></label>
-      <label id="issueFilter" class="check"><input id="issues" type="checkbox"> С замечаниями</label>
+  </div>
+
+  <div class="auth-shell">
+    <div class="auth-story">
+      <p class="auth-eyebrow">Каталог проверяемых результатов</p>
+      <h1 id="authTitle">Научный результат, у которого <span>видно источник</span>.</h1>
+      <p class="auth-lede">PDF превращается в связанные CSV: таблицы, значения, цитаты и находки о несогласованности. Один вход, и каталог собран.</p>
+      <p class="auth-story-foot">Две области: тонкоплёночные солнечные элементы и системы RAG</p>
     </div>
-    <p id="count" aria-live="polite"></p>
-    <div class="results"><table><thead id="head"></thead><tbody id="rows"></tbody></table></div>
-    <nav class="bar pager" aria-label="Страницы результатов"><button id="prev" class="secondary">Назад</button><span id="page"></span><button id="next" class="secondary">Далее</button></nav>
-  </section>
+
+    <div class="auth-side">
+      <div class="auth-card" id="authCard" tabindex="-1">
+        <div class="auth-card-head">
+          <p class="auth-eyebrow">Аккаунт исследователя</p>
+          <h2>Начните работу</h2>
+          <p class="muted">Регистрация занимает минуту.</p>
+        </div>
+
+        <div class="auth-tabs" role="tablist" aria-label="Регистрация или вход" data-tabs>
+          <button type="button" role="tab" id="tabReg" aria-selected="true" aria-controls="panelReg" tabindex="0">Регистрация</button>
+          <button type="button" role="tab" id="tabLogin" aria-selected="false" aria-controls="panelLogin" tabindex="-1">Вход</button>
+        </div>
+
+        <p class="auth-status" id="authStatus" role="status" aria-live="polite"></p>
+
+        <div id="panelReg" role="tabpanel" aria-labelledby="tabReg">
+          <form id="registerForm" novalidate>
+            <div class="auth-field">
+              <label for="regLogin">Логин</label>
+              <input type="text" id="regLogin" name="login" autocomplete="username" placeholder="safonov" aria-describedby="regLogin-error">
+              <p class="auth-error" id="regLogin-error" hidden></p>
+            </div>
+            <div class="auth-field">
+              <label for="regEmail">Email <span class="auth-optional">необязательно</span></label>
+              <input type="email" id="regEmail" name="email" autocomplete="email" placeholder="name@example.com" aria-describedby="regEmail-error">
+              <p class="auth-error" id="regEmail-error" hidden></p>
+            </div>
+            <div class="auth-field auth-password">
+              <label for="regPassword">Пароль</label>
+              <div class="auth-input-wrap">
+                <input type="password" id="regPassword" name="password" autocomplete="new-password" placeholder="От 8 до 256 символов" aria-describedby="regPassword-error">
+                <button type="button" class="auth-reveal" id="regPassBtn" data-toggle-pass="regPassword" aria-pressed="false" aria-label="Показать пароль">Показать</button>
+              </div>
+              <p class="auth-error" id="regPassword-error" hidden></p>
+            </div>
+            <button type="submit" class="auth-btn primary block">Создать аккаунт</button>
+          </form>
+        </div>
+
+        <div id="panelLogin" role="tabpanel" aria-labelledby="tabLogin" hidden>
+          <form id="loginForm" novalidate>
+            <div class="auth-field">
+              <label for="loginUser">Логин</label>
+              <input type="text" id="loginUser" name="login" autocomplete="username" placeholder="Логин или email" aria-describedby="loginUser-error">
+              <p class="auth-error" id="loginUser-error" hidden></p>
+            </div>
+            <div class="auth-field auth-password">
+              <label for="loginPassword">Пароль</label>
+              <div class="auth-input-wrap">
+                <input type="password" id="loginPassword" name="password" autocomplete="current-password" placeholder="Ваш пароль" aria-describedby="loginPassword-error">
+                <button type="button" class="auth-reveal" id="loginPassBtn" data-toggle-pass="loginPassword" aria-pressed="false" aria-label="Показать пароль">Показать</button>
+              </div>
+              <p class="auth-error" id="loginPassword-error" hidden></p>
+            </div>
+            <button type="submit" class="auth-btn primary block">Войти</button>
+            <p class="auth-hint" style="margin-top:10px"><button type="button" class="auth-linklike" id="forgotBtn">Забыли пароль?</button></p>
+          </form>
+        </div>
+
+        <p class="auth-note is-warn" id="authStorageNote" hidden><strong>Хранение недоступно.</strong> Браузер запрещает localStorage: вход работает, но описание профиля не сохранится до перезагрузки.</p>
+      </div>
+    </div>
+  </div>
 </main>
-<dialog id="evidence">
-  <div class="bar"><strong id="evidenceTitle"></strong><button id="close" class="secondary">Закрыть</button></div>
-  <p id="quote"></p>
+
+<header class="top">
+  <div class="wrap masthead">
+    <a class="brand" href="#/"><span class="mark" aria-hidden="true">✳</span>ВИНИТИ РАН<span>ЮФУ</span></a>
+    <div class="account" id="account" hidden>
+      <button type="button" class="account-button" id="accountButton" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu" aria-label="Меню профиля">
+        <span class="account-avatar" id="accountAvatar" aria-hidden="true">Г</span>
+        <span class="account-name" id="accountName">Профиль</span>
+        <span class="account-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="account-popover" id="accountMenu" role="menu" aria-labelledby="accountMenuName" hidden>
+        <div class="account-head" role="presentation">
+          <span class="account-avatar" id="accountMenuAvatar" aria-hidden="true">Г</span>
+          <div>
+            <strong id="accountMenuName">Профиль</strong>
+            <span id="accountMenuEmail">Email не указан</span>
+          </div>
+        </div>
+        <a role="menuitem" tabindex="-1" href="#/catalog" id="accountCatalog">Каталог</a>
+        <a role="menuitem" tabindex="-1" href="#/profile" id="accountProfileLink">Профиль</a>
+        <button role="menuitem" tabindex="-1" type="button" id="accountSettings">Настройки</button>
+        <div class="account-sep" role="separator"></div>
+        <button role="menuitem" tabindex="-1" type="button" id="accountLogout" class="danger">Выйти из аккаунта</button>
+      </div>
+    </div>
+  </div>
+</header>
+<div class="wrap toolbar">
+  <div class="track-switch" role="group" aria-label="Разделы">
+    <a class="track" id="passportLink" href="#/passport" title="Открыть паспорт публикации: таблицы, значения и цитаты">Паспорт</a>
+    <a class="track" id="chatLink" href="#/chat" title="Чат по одной статье, выбранным статьям или всей библиотеке">Чат</a>
+    <a class="track" href="/manual-profile" title="Создать или изменить профиль извлечения">Профиль извлечения</a>
+  </div>
+  <form id="upload" class="upload">
+    <input id="file" type="file" accept=".pdf,application/pdf" hidden>
+    <button type="button" id="startWizard" class="primary">Разобрать PDF</button>
+    <button type="button" id="demo" class="secondary">Демо</button>
+    <label class="file" title="Открыть готовый паспорт публикации из файла JSON">Открыть паспорт (JSON)
+      <input id="passport" type="file" accept=".json,application/json">
+    </label>
+    <span id="uploadState" class="upload-state" role="status"></span>
+  </form>
+</div>
+
+<section id="wizard" class="wizard" aria-labelledby="wizardTitle" hidden>
+  <div class="wizard-inner">
+    <p id="wizardStep" class="wizard-step">Шаг 1 из 2 · Документ</p>
+    <h1 id="wizardTitle" tabindex="-1">Начните с PDF</h1>
+    <p id="wizardHint">RAG: до 20 МиБ, Solar: до 32 МиБ.</p>
+    <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Выбрать PDF">
+      <span class="drop-icon" aria-hidden="true">↑</span>
+      <strong>Выберите PDF</strong>
+      <span class="drop-hint">или перетащите файл в это окно</span>
+    </div>
+    <div id="profileStep" hidden>
+      <p id="selectedFile"></p>
+      <h2>Выберите область</h2>
+      <div id="profileChoices" class="profile-choices"></div>
+      <div class="wizard-actions">
+        <a href="/manual-profile" id="createProfile" class="button secondary" title="Откроется отдельная страница: здесь задаются поля, которые нужно искать в статье">Настроить поля извлечения</a>
+        <button id="wizardBack" type="button" class="secondary">Другой PDF</button>
+        <button id="wizardCancel" type="button" class="secondary">Закрыть</button>
+        <button id="wizardSubmit" type="button" class="primary">Разобрать PDF</button>
+      </div>
+      <div id="processingProgress" class="processing-progress" hidden role="status" aria-live="polite">
+        <div class="processing-progress-head">
+          <span id="progressLabel">Подготовка PDF…</span>
+          <span id="progressCount">0 из 4 этапов</span>
+        </div>
+        <progress id="progressBar" max="4" value="0"></progress>
+      </div>
+    </div>
+    <p id="wizardError" class="wizard-error" role="alert" hidden></p>
+  </div>
+</section>
+<main class="wrap" id="view" tabindex="-1"></main>
+<p id="status" class="status" role="status"></p>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<noscript><p class="notice bad wrap">Для работы интерфейса нужен JavaScript.</p></noscript>
+<p id="bootError" class="notice bad wrap" hidden>
+  Не удалось загрузить интерфейс. Обновите страницу; если ошибка повторяется,
+  проверьте, что сервер запущен.
+</p>
+
+<dialog id="evidence" aria-labelledby="evidenceTitle">
+  <div class="bar">
+    <h2 id="evidenceTitle"></h2>
+    <a id="evidencePdf" href="#" target="_blank" rel="noopener">Открыть PDF</a>
+    <button type="button" id="evidenceClose" class="secondary">Закрыть</button>
+  </div>
+  <p id="evidenceQuote"></p>
   <p id="imageError" hidden>Превью недоступно. Номер страницы и цитата указаны выше.</p>
   <img id="preview" alt="Страница PDF с подсветкой источника">
+  <iframe id="pdfFallback" title="Страница PDF" hidden></iframe>
 </dialog>
+<script>
+  setTimeout(function () {
+    var view = document.getElementById("view");
+    if (document.documentElement.classList.contains("auth-locked")) return;
+    // Маршруты каталога, документа, профиля и разбора сами сообщают об ошибке.
+    // Таймер нужен только для случая, когда приложение вообще не поднялось:
+    // открытый мастер и успешный boot снимают его без вывода сообщения.
+    if (window.__vinitiBooted) return;
+    if (document.body.dataset.view) return;
+    if (document.body.classList.contains("wizard-active")) return;
+    if (!document.getElementById("wizard").hidden) return;
+    if (view && !view.children.length) document.getElementById("bootError").hidden = false;
+  }, 4000);
+</script>
 </body>
 </html>

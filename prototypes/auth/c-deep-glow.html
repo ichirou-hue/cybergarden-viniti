@@ -1,0 +1,1308 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Доступ · ВИНИТИ РАН</title>
+<style>
+  :root{
+    --bg:#05090b; --bg-2:#070d0f; --panel:#0f1a1d; --panel-2:#0b1417;
+    --line:#324248; --line-soft:#243338; --line-strong:#405358;
+    --ink:#e7eded; --muted:#adbec1; --muted-soft:#b6cacc;
+    --accent:#d5ff83; --accent-ink:#1e2716;
+    --teal:#6fe0c4;
+    --danger:#ffb3a6; --warn:#ffd1a6;
+    --radius:14px;
+    --mono:"JetBrains Mono","Cascadia Mono","SFMono-Regular",Consolas,monospace;
+    --font:Inter,"Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html{color-scheme:dark}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased}
+  h1,h2,h3,p,dl,dd{margin:0}
+  a{color:var(--accent)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .skip{position:absolute;left:-9999px;top:8px;z-index:200;background:var(--accent);color:var(--accent-ink);padding:10px 14px;border-radius:8px;font-weight:700;text-decoration:none}
+  .skip:focus{left:12px}
+  .mono{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase}
+
+  /* ---------------------------------------------------------- фон */
+  .auth{position:relative;min-height:100dvh;isolation:isolate;overflow:hidden;background:radial-gradient(1300px 900px at 50% 20%,#0b1719 0%,#05090b 62%,#04080a 100%)}
+  .halo{
+    position:absolute;left:50%;top:2%;width:820px;height:820px;transform:translateX(-50%);
+    border-radius:50%;pointer-events:none;z-index:-2;
+    background:conic-gradient(from 130deg,rgba(213,255,131,.18),transparent 26%,rgba(111,224,196,.14) 52%,transparent 72%,rgba(213,255,131,.16));
+    filter:blur(52px);opacity:.62;
+  }
+  .halo::after{
+    content:"";position:absolute;inset:170px;border-radius:50%;
+    border:1px solid rgba(213,255,131,.08);
+  }
+  .floor{
+    position:absolute;left:-25%;right:-25%;bottom:-16%;height:64vh;pointer-events:none;z-index:-2;
+    background-image:
+      linear-gradient(rgba(213,255,131,.16) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(213,255,131,.16) 1px,transparent 1px);
+    background-size:70px 70px;
+    transform:perspective(520px) rotateX(63deg);
+    transform-origin:50% 100%;
+    -webkit-mask-image:linear-gradient(to top,#000 6%,transparent 82%);
+    mask-image:linear-gradient(to top,#000 6%,transparent 82%);
+    opacity:.6;
+  }
+  .stars{
+    position:absolute;inset:0;pointer-events:none;z-index:-2;opacity:.4;
+    background-image:radial-gradient(rgba(213,255,131,.7) 1px,transparent 1.4px);
+    background-size:210px 170px;
+    -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 30%,#000 10%,transparent 74%);
+    mask-image:radial-gradient(ellipse 80% 70% at 50% 30%,#000 10%,transparent 74%);
+  }
+  .scan{
+    position:absolute;inset:0;pointer-events:none;z-index:-1;opacity:.3;
+    background-image:repeating-linear-gradient(0deg,rgba(231,237,237,.045) 0 1px,transparent 1px 3px);
+  }
+  .grain{
+    position:absolute;inset:0;pointer-events:none;z-index:-1;opacity:.35;mix-blend-mode:soft-light;
+    background-image:url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxNDAnIGhlaWdodD0nMTQwJz48ZmlsdGVyIGlkPSduJz48ZmVUdXJidWxlbmNlIHR5cGU9J2ZyYWN0YWxOb2lzZScgYmFzZUZyZXF1ZW5jeT0nLjgyJyBudW1PY3RhdmVzPScyJyBzdGl0Y2hUaWxlcz0nc3RpdGNoJy8+PGZlQ29sb3JNYXRyaXggdHlwZT0nc2F0dXJhdGUnIHZhbHVlcz0nMCcvPjwvZmlsdGVyPjxyZWN0IHdpZHRoPScxNDAnIGhlaWdodD0nMTQwJyBmaWx0ZXI9J3VybCgjbiknIG9wYWNpdHk9Jy42Jy8+PC9zdmc+");
+  }
+  .edge-label{
+    position:absolute;left:22px;top:50%;transform:translateY(-50%) rotate(180deg);writing-mode:vertical-rl;
+    font-family:var(--mono);font-size:.62rem;letter-spacing:.24em;text-transform:uppercase;color:#5f7579;
+  }
+  .edge-right{
+    position:absolute;right:22px;top:28px;text-align:right;font-family:var(--mono);
+    font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:#5f7579;line-height:1.9;
+  }
+  .edge-right strong{display:block;color:var(--accent);font-weight:600}
+
+  .auth-top{
+    position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:16px;
+    width:min(1180px,calc(100% - 48px));margin:0 auto;padding:22px 0;
+  }
+  .auth-top .context{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  .auth-top .context .dot-mark{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--accent);color:#172018;font-family:var(--font);font-size:14px}
+  .auth-top .clock{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;color:#6f8589;text-transform:uppercase}
+
+  .auth-stage{
+    position:relative;z-index:1;min-height:calc(100dvh - 70px);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:12px;
+    padding:6px 20px 98px;
+  }
+  .console{
+    position:relative;width:min(504px,100%);
+    background:linear-gradient(180deg,rgba(16,27,30,.95) 0%,rgba(8,15,17,.97) 100%);
+    border:1px solid rgba(213,255,131,.26);border-radius:16px;
+    box-shadow:0 0 0 1px rgba(0,0,0,.65),0 34px 90px rgba(0,0,0,.66),0 0 80px rgba(213,255,131,.07);
+    -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    padding:22px;
+  }
+  .corner{position:absolute;width:15px;height:15px;border:0 solid rgba(213,255,131,.65);pointer-events:none}
+  .corner.tl{left:-1px;top:-1px;border-left-width:2px;border-top-width:2px;border-radius:5px 0 0 0}
+  .corner.tr{right:-1px;top:-1px;border-right-width:2px;border-top-width:2px;border-radius:0 5px 0 0}
+  .corner.bl{left:-1px;bottom:-1px;border-left-width:2px;border-bottom-width:2px;border-radius:0 0 0 5px}
+  .corner.br{right:-1px;bottom:-1px;border-right-width:2px;border-bottom-width:2px;border-radius:0 0 5px 0}
+
+  .console-brand{display:flex;align-items:center;gap:11px}
+  .console-brand .mark{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:var(--accent);color:#172018;font-size:18px;line-height:1;box-shadow:0 0 26px rgba(213,255,131,.35);flex:none}
+  .console-brand strong{display:block;font-size:1rem;letter-spacing:-.01em}
+  .console-brand span{display:block;color:var(--muted);font-size:.72rem;margin-top:1px}
+  .console-status{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 11px;padding:6px 10px;
+    border:1px solid var(--line-soft);border-radius:7px;background:rgba(5,12,14,.65);
+    font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:#8fa3a6;
+  }
+  .console-status span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .console-status span + span{padding-left:10px;border-left:1px solid var(--line-soft)}
+  .led{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px rgba(213,255,131,.85);display:inline-block}
+  .console h1{font-size:1.72rem;line-height:1.05;letter-spacing:-.045em;margin-bottom:5px}
+  .console h1 span{color:var(--accent)}
+  .console-lede{color:var(--muted);font-size:.8rem;margin-bottom:13px;max-width:42ch}
+
+  .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line-soft);margin-bottom:12px}
+  .tabs [role=tab]{
+    position:relative;min-height:40px;padding:7px 1px 11px;border:0;background:none;
+    color:#8fa3a6;font-family:var(--mono);font-size:.68rem;font-weight:600;letter-spacing:.1em;
+    text-transform:uppercase;cursor:pointer;
+  }
+  .tabs [role=tab] .idx{color:#5f7579;margin-right:6px}
+  .tabs [role=tab]:hover{color:var(--ink)}
+  .tabs [role=tab][aria-selected=true]{color:var(--accent)}
+  .tabs [role=tab][aria-selected=true] .idx{color:var(--accent)}
+  .tabs [role=tab][aria-selected=true]::after{
+    content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--accent);
+    box-shadow:0 0 10px rgba(213,255,131,.8);
+  }
+  .form-status{margin:0 0 10px;font-size:.8rem;color:var(--muted-soft);font-weight:600}
+  .form-status.is-error{color:var(--danger)}
+  .form-status:empty{display:none}
+
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .field{display:grid;gap:4px;min-width:0;margin-bottom:9px}
+  .field label{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:#93a7aa;font-weight:500}
+  .input-wrap{position:relative}
+  input[type=text],input[type=email],input[type=password]{
+    width:100%;min-height:44px;padding:10px 12px;font:inherit;font-size:.9rem;
+    color:#eff5f6;background:#081113;border:1px solid var(--line-strong);border-radius:8px;
+    transition:border-color .15s,box-shadow .15s,background .15s;
+  }
+  input::placeholder{color:#667b80}
+  input:hover{border-color:#53696e}
+  input:focus{outline:none;background:#0b171a;border-color:var(--accent);box-shadow:0 0 0 3px rgba(213,255,131,.12),0 0 22px rgba(213,255,131,.12)}
+  input.is-invalid{border-color:#ff9d8d;box-shadow:0 0 0 3px rgba(255,179,166,.11)}
+  .password input{padding-right:80px}
+  .reveal{
+    position:absolute;right:4px;top:0;bottom:0;min-width:68px;padding:0 8px;
+    border:1px solid transparent;border-radius:5px;background:transparent;color:#8fa3a6;
+    font-family:var(--mono);font-size:.58rem;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
+  }
+  .reveal:hover{background:#142226;color:var(--accent)}
+  .error{margin:0;font-size:.74rem;color:var(--danger)}
+  .hint{margin:0;font-size:.72rem;color:#7f9498}
+
+  .consent{display:flex;gap:9px;align-items:flex-start;margin:0 0 5px;font-size:.76rem;color:var(--muted);line-height:1.45;cursor:pointer}
+  .consent input{margin:2px 0 0;width:16px;height:16px;flex:none;accent-color:var(--accent)}
+  .consent a{color:var(--accent)}
+  .consent-error{margin:0 0 9px;font-size:.74rem;color:var(--danger)}
+  .linklike{background:none;border:0;padding:0;color:var(--accent);font:inherit;font-size:.76rem;font-weight:600;text-decoration:underline;cursor:pointer}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;
+    padding:10px 16px;border-radius:8px;border:1px solid var(--line-strong);
+    background:#132125;color:var(--ink);font:inherit;font-weight:650;
+    text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s,color .15s;
+  }
+  .btn:hover{background:#18292e;border-color:#5b7378}
+  .btn.primary{
+    background:var(--accent);border-color:var(--accent);color:var(--accent-ink);
+    box-shadow:0 0 0 1px rgba(213,255,131,.2),0 10px 34px rgba(213,255,131,.2);
+  }
+  .btn.primary:hover{background:#e2ffab;border-color:#e2ffab;box-shadow:0 0 0 1px rgba(213,255,131,.35),0 12px 40px rgba(213,255,131,.28)}
+  .btn.block{width:100%;min-height:48px;font-size:.93rem}
+  .btn.quiet{background:transparent;border-color:#2e4147;color:var(--ink)}
+  .btn.quiet:hover{background:#101d20;border-color:#466067}
+  .auth-alt{margin-top:11px;padding-top:10px;border-top:1px dashed #263639}
+  .auth-alt .btn{width:100%}
+  .auth-alt p{margin:7px 0 0;text-align:center;font-size:.71rem;color:#7f9498}
+  .console-note{margin-top:9px;padding:7px 10px;border:1px solid #243338;border-radius:7px;background:#081113;color:#7f9498;font-size:.7rem;line-height:1.45}
+  .console-note strong{color:var(--accent);font-weight:650}
+
+  .readouts{
+    display:grid;grid-template-columns:repeat(3,1fr);width:min(504px,100%);
+    border-top:1px solid #263639;border-bottom:1px solid #263639;
+  }
+  .readouts div{padding:10px 12px;border-left:1px solid #263639}
+  .readouts div:first-child{border-left:0;padding-left:0}
+  .readouts dd{font-family:var(--mono);font-size:1.02rem;font-weight:600;color:var(--accent);letter-spacing:.02em}
+  .readouts dt{margin-top:2px;font-size:.66rem;color:#7f9498;letter-spacing:.03em}
+
+  /* ---------------------------------------------------------- шапка */
+  .shell{width:min(1200px,calc(100% - 48px));margin-inline:auto}
+  #siteTitle,#profileTitle,#settingsTitle,#activityTitle{scroll-margin-top:88px}
+  .top{position:sticky;top:0;z-index:40;background:rgba(5,10,12,.9);backdrop-filter:blur(14px);border-bottom:1px solid #223237}
+  .top::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,rgba(213,255,131,.5),transparent)}
+  .masthead{min-height:66px;display:flex;align-items:center;gap:20px}
+  .brand{display:inline-flex;align-items:center;gap:10px;color:#f0f6f5;text-decoration:none;font-weight:700;font-size:17px;letter-spacing:-.01em}
+  .brand .mark{display:grid;place-items:center;width:31px;height:31px;border-radius:8px;background:var(--accent);color:#172018;font-size:15px;box-shadow:0 0 20px rgba(213,255,131,.25)}
+  .brand em{font-style:normal;color:var(--muted);font-weight:500;font-size:12px;margin-left:2px}
+  .mainnav{display:flex;gap:2px}
+  .mainnav a{display:inline-flex;align-items:center;min-height:40px;padding:0 12px;border-radius:7px;color:var(--muted);text-decoration:none;font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;text-transform:uppercase}
+  .mainnav a:hover{background:#101d20;color:var(--ink)}
+  .mainnav a[aria-current=page]{background:#1b2c24;color:var(--accent);box-shadow:inset 0 0 0 1px #33503a}
+  .search{margin-left:auto;min-width:0}
+  .search input{width:250px;min-height:40px;padding:8px 12px;background:#0a1315;border:1px solid #2b3b40;border-radius:8px;font:inherit;font-size:.82rem;color:var(--ink)}
+  .search input::placeholder{color:#71868a}
+  .search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(213,255,131,.1)}
+  .top-right{position:relative;flex:none}
+  .avatar-btn{
+    display:inline-flex;align-items:center;gap:9px;min-height:44px;padding:4px 6px 4px 4px;
+    border-radius:999px;border:1px solid #33454b;background:#0d181b;color:var(--ink);font:inherit;cursor:pointer;
+  }
+  .avatar-btn:hover{border-color:#577077;background:#122024}
+  .avatar{
+    position:relative;display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;
+    background:linear-gradient(145deg,#e2ffab,#a9d95f);color:#1e2716;font-weight:800;font-size:.74rem;flex:none;
+  }
+  .avatar::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid rgba(213,255,131,.35)}
+  .avatar-btn .who{font-size:.8rem;font-weight:650;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .avatar-btn .chev{color:#7f9498;font-size:.66rem;padding:0 4px}
+
+  .menu{position:absolute;right:0;top:calc(100% + 10px);width:290px;z-index:60;background:#0e1a1d;border:1px solid #35474d;border-radius:14px;box-shadow:0 28px 70px rgba(0,0,0,.7),0 0 40px rgba(213,255,131,.05);padding:6px}
+  .menu-head{display:flex;gap:10px;padding:10px 10px 12px;border-bottom:1px solid #243338;margin-bottom:6px}
+  .menu-head .avatar{width:38px;height:38px}
+  .menu-head strong{display:block;font-size:.87rem;overflow-wrap:anywhere}
+  .menu-head span{display:block;font-size:.74rem;color:var(--muted);overflow-wrap:anywhere}
+  .menu-head .chip{display:inline-block;width:max-content;margin-top:5px;padding:1px 6px;border-radius:4px;background:#1e3325;color:var(--accent);font-family:var(--mono);font-size:.58rem;letter-spacing:.08em;text-transform:uppercase}
+  .menu [role=menuitem]{display:flex;align-items:center;gap:9px;width:100%;min-height:42px;padding:9px 10px;border:0;border-radius:7px;background:transparent;color:var(--ink);font:inherit;font-size:.85rem;font-weight:600;text-align:left;text-decoration:none;cursor:pointer}
+  .menu [role=menuitem]:hover{background:#152529}
+  .menu [role=menuitem]:focus-visible{background:#152529;outline:2px solid var(--accent);outline-offset:-2px}
+  .menu [role=menuitem].danger{color:var(--danger)}
+  .menu-sep{height:1px;background:#243338;margin:6px 4px}
+
+  /* ---------------------------------------------------------- сайт */
+  .app-main{padding-top:28px;padding-bottom:116px}
+  .hero-console{
+    position:relative;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(320px,.6fr);gap:32px;align-items:end;
+    padding:clamp(22px,3.4vw,38px);border:1px solid #2b3c41;border-radius:18px;overflow:hidden;
+    background:
+      radial-gradient(800px 420px at 88% -20%,rgba(111,224,196,.14),transparent 62%),
+      radial-gradient(600px 380px at 0% 110%,rgba(213,255,131,.09),transparent 65%),
+      linear-gradient(180deg,#0d181b,#0a1315);
+  }
+  .hero-console::before{
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background-image:linear-gradient(rgba(213,255,131,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(213,255,131,.055) 1px,transparent 1px);
+    background-size:54px 54px;
+    -webkit-mask-image:radial-gradient(ellipse at 20% 0%,#000,transparent 72%);
+    mask-image:radial-gradient(ellipse at 20% 0%,#000,transparent 72%);
+  }
+  .hero-console > *{position:relative}
+  .hero-console h1{font-size:clamp(2.4rem,4.4vw,3.8rem);line-height:.98;letter-spacing:-.055em;margin:8px 0 14px;max-width:19ch;text-wrap:balance}
+  .hero-console h1 span{color:var(--accent);text-shadow:0 0 36px rgba(213,255,131,.28)}
+  .hero-console .lede{color:var(--muted);max-width:60ch;margin-bottom:20px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap}
+  .readout-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .readout{border:1px solid #2b3c41;border-radius:10px;padding:12px 14px;background:rgba(5,12,14,.55)}
+  .readout .label{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;color:#7f9498}
+  .readout strong{display:block;font-family:var(--mono);font-size:1.35rem;font-weight:600;margin-top:4px;color:#eff5f6;font-variant-numeric:tabular-nums}
+  .readout strong.accent{color:var(--accent)}
+
+  .console-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,.45fr);gap:16px;margin-top:16px;align-items:start}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);min-width:0}
+  .panel-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .panel-head h2{font-size:.92rem;letter-spacing:.01em}
+  .panel-head .tag{margin-left:auto;font-family:var(--mono);font-size:.62rem;color:#7f9498;letter-spacing:.08em}
+  .stream{list-style:none;margin:0;padding:0}
+  .stream li{display:grid;grid-template-columns:62px minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:14px 18px;border-top:1px solid #223237}
+  .stream li:first-child{border-top:0}
+  .stream li:hover{background:#132024}
+  .stream .pid{font-family:var(--mono);font-size:.72rem;color:var(--accent);letter-spacing:.06em}
+  .stream .title{display:block;font-size:.9rem;font-weight:650;overflow-wrap:anywhere}
+  .stream .meta{display:block;font-size:.73rem;color:var(--muted);margin-top:2px}
+  .stream .num{font-family:var(--mono);font-size:.76rem;color:var(--muted-soft);text-align:right;white-space:nowrap}
+  .status{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.58rem;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;color:#9fb3b6}
+  .status i{width:6px;height:6px;border-radius:50%;background:#7f9498;display:inline-block}
+  .status.ok{color:var(--accent)} .status.ok i{background:var(--accent);box-shadow:0 0 7px rgba(213,255,131,.8)}
+  .status.warn{color:var(--warn)} .status.warn i{background:var(--warn)}
+  .status.bad{color:var(--danger)} .status.bad i{background:var(--danger)}
+  .rail{display:grid;gap:16px}
+  .rail .panel{padding:16px}
+  .rail h2{font-size:.8rem;font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#9fb3b6;margin-bottom:12px}
+  .meter{display:grid;gap:6px;margin-bottom:12px}
+  .meter:last-child{margin-bottom:0}
+  .meter .line{display:flex;justify-content:space-between;gap:8px;font-size:.74rem}
+  .meter .line span{color:var(--muted)} .meter .line b{font-family:var(--mono);font-weight:500}
+  .meter .track{height:5px;background:#1a282c;border-radius:3px;overflow:hidden}
+  .meter .track i{display:block;height:100%;background:var(--accent);border-radius:3px;box-shadow:0 0 10px rgba(213,255,131,.4)}
+  .rail .btn{width:100%;margin-top:8px}
+  .foot{margin:18px 0 0;color:#7f9498;font-size:.74rem}
+
+  /* ---------------------------------------------------------- профиль */
+  .dossier{display:grid;grid-template-columns:330px minmax(0,1fr);gap:30px;align-items:start;margin-top:4px}
+  .dossier-id{position:sticky;top:88px}
+  .ring-avatar{position:relative;display:grid;place-items:center;width:110px;height:110px;border-radius:50%;background:#0b1518;margin-bottom:20px}
+  .ring-avatar::before{
+    content:"";position:absolute;inset:-7px;border-radius:50%;
+    background:conic-gradient(from 210deg,var(--accent) 0 20%,transparent 20% 32%,var(--teal) 32% 50%,transparent 50% 78%,rgba(213,255,131,.5) 78% 100%);
+    -webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 calc(100% - 2px));
+    mask:radial-gradient(farthest-side,transparent calc(100% - 2px),#000 calc(100% - 2px));
+  }
+  .ring-avatar span{font-size:2rem;font-weight:800;color:var(--accent);letter-spacing:-.03em}
+  .dossier-id h1{font-size:1.7rem;line-height:1.08;letter-spacing:-.035em;margin:4px 0 6px;overflow-wrap:anywhere}
+  .dossier-id .role{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:18px}
+  .id-list{display:grid;gap:10px;border-top:1px solid #243338;padding-top:14px;margin:0 0 16px}
+  .id-list dt{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;color:#7f9498}
+  .id-list dd{margin:2px 0 0;font-size:.84rem;overflow-wrap:anywhere}
+  .dossier-id .chip{display:inline-block;padding:2px 7px;border-radius:4px;background:#1e3325;color:var(--accent);font-family:var(--mono);font-size:.58rem;letter-spacing:.08em;text-transform:uppercase;margin-bottom:16px}
+  .dossier-id .btn{width:100%}
+  .dossier-id .btn + .btn{margin-top:8px}
+  .dossier-main{display:grid;gap:22px;min-width:0}
+  .dossier-section{border-top:1px solid #243338;padding-top:16px;min-width:0}
+  .dossier-section:first-child{border-top:0;padding-top:0}
+  .dossier-section .sec-label{display:flex;justify-content:space-between;gap:12px;margin-bottom:10px;font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:#7f9498}
+  .dossier-section .sec-label b{color:#9fb3b6;font-weight:500}
+  .dossier-section h2{font-size:1.35rem;letter-spacing:-.03em;margin-bottom:8px}
+  .dossier-section .bio{color:var(--muted-soft);font-size:.94rem;max-width:68ch}
+  .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .metric{border:1px solid #2b3c41;border-radius:10px;padding:12px 14px;background:#0d181b;min-width:0}
+  .metric .label{font-family:var(--mono);font-size:.56rem;letter-spacing:.08em;text-transform:uppercase;color:#7f9498}
+  .metric strong{display:block;font-family:var(--mono);font-size:1.5rem;font-weight:600;margin-top:5px;font-variant-numeric:tabular-nums}
+  .feed{list-style:none;margin:0;padding:0}
+  .feed li{display:grid;grid-template-columns:110px minmax(0,1fr);gap:14px;padding:11px 0;border-top:1px solid #223237;font-size:.86rem}
+  .feed li:first-child{border-top:0;padding-top:0}
+  .feed .when{font-family:var(--mono);font-size:.63rem;color:#7f9498;padding-top:3px;letter-spacing:.04em}
+  .feed strong{display:block;font-weight:650}
+  .feed p{margin:2px 0 0;color:var(--muted);font-size:.79rem}
+  .settings-card{border:1px solid #2b3c41;border-radius:12px;padding:16px;background:#0b1417}
+  .setting{display:flex;align-items:center;gap:16px;padding:12px 0;border-top:1px solid #223237}
+  .setting:first-of-type{border-top:0;padding-top:0}
+  .setting strong{display:block;font-size:.87rem}
+  .setting p{margin:2px 0 0;color:var(--muted);font-size:.77rem;max-width:58ch}
+  .switch{position:relative;flex:none;margin-left:auto;display:inline-flex;width:48px;height:44px;align-items:center;justify-content:center;cursor:pointer}
+  .switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+  .switch input:focus-visible{outline:none}
+  .switch-track{display:block;width:42px;height:24px;border-radius:999px;background:#233337;border:1px solid #3a4e54;position:relative;transition:background .15s,border-color .15s}
+  .switch-track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#8fa3a6;transition:transform .15s,background .15s}
+  .switch input:checked + .switch-track{background:var(--accent);border-color:var(--accent);box-shadow:0 0 16px rgba(213,255,131,.3)}
+  .switch input:checked + .switch-track::after{transform:translateX(18px);background:var(--accent-ink)}
+  .switch input:focus-visible + .switch-track{outline:2px solid var(--accent);outline-offset:3px}
+  .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+  .settings-grid .field{margin:0}
+  .settings-grid select{width:100%;min-height:42px;padding:8px 10px;color:var(--ink);background:#081113;border:1px solid var(--line-strong);border-radius:8px;font:inherit;font-size:.84rem}
+  .settings-grid select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(213,255,131,.1)}
+  .empty{padding:16px;border:1px dashed #34474d;border-radius:10px;color:var(--muted);font-size:.83rem}
+  .empty p{margin:0 0 10px}
+  .danger-zone{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:space-between;margin-top:14px;padding:13px 14px;border:1px solid #63352c;border-radius:10px;background:#1b100d}
+  .danger-zone p{margin:0;font-size:.78rem;color:var(--danger)}
+  .danger-zone .btn{background:transparent;border-color:#63352c;color:var(--danger)}
+  .danger-zone .btn:hover{background:#2a1713}
+
+  .demo{
+    position:fixed;left:16px;bottom:16px;z-index:90;
+    display:flex;flex-direction:column;align-items:flex-start;gap:8px;max-width:calc(100% - 32px);
+  }
+  .demo-panel{
+    width:min(318px,calc(100vw - 32px));padding:8px;background:rgba(7,14,16,.97);
+    border:1px solid #2e4147;border-radius:10px;
+    box-shadow:0 18px 46px rgba(0,0,0,.7),0 0 30px rgba(213,255,131,.05);backdrop-filter:blur(10px);
+  }
+  .demo-label{display:block;padding:2px 6px 6px;font-family:var(--mono);font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:#7f9498}
+  .demo-actions{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+  .demo-actions button{min-height:40px;padding:0 10px;border:1px solid transparent;border-radius:6px;background:#101d20;color:#9fb3b6;font:inherit;font-size:.73rem;font-weight:650;cursor:pointer;white-space:nowrap}
+  .demo-actions button:hover{background:#142226;color:var(--ink)}
+  .demo-actions button[aria-pressed=true]{background:#1e3325;border-color:#3a5c3f;color:var(--accent);box-shadow:inset 0 0 0 1px rgba(213,255,131,.12)}
+  .demo-actions button.danger{color:#7f9498}
+  .demo-actions button.danger:hover{color:var(--danger)}
+  .demo-toggle{
+    display:inline-flex;align-items:center;gap:8px;min-height:42px;padding:0 14px;
+    border:1px solid #2e4147;border-radius:999px;background:rgba(7,14,16,.95);
+    color:var(--ink);font:inherit;font-size:.7rem;font-weight:750;letter-spacing:.1em;text-transform:uppercase;
+    cursor:pointer;box-shadow:0 12px 30px rgba(0,0,0,.6);backdrop-filter:blur(8px);
+  }
+    .demo-toggle:hover{border-color:#4b6a71;color:var(--accent)}
+  .demo-glyph{font-size:.95rem;line-height:1;color:var(--accent)}
+  .demo-word{font-size:.7rem;font-weight:750;letter-spacing:.1em;text-transform:uppercase}
+  .toast{
+    position:fixed;left:50%;bottom:86px;transform:translateX(-50%);z-index:95;max-width:min(460px,calc(100% - 32px));
+    padding:10px 16px;background:#101d20;border:1px solid #3a5c3f;border-radius:9px;color:var(--ink);
+    font-size:.8rem;box-shadow:0 18px 50px rgba(0,0,0,.65),0 0 30px rgba(213,255,131,.08);
+  }
+
+  @media (max-width:1000px){
+    .dossier{grid-template-columns:1fr;gap:24px}
+    .dossier-id{position:static;display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 20px;align-items:center}
+    .dossier-id .ring-avatar{grid-row:1 / span 3;margin:0}
+    .dossier-id h1{margin-top:0}
+    .dossier-id .role{margin-bottom:0}
+    .dossier-id .id-list,.dossier-id .chip,.dossier-id .btn{grid-column:1 / -1}
+    .dossier-id .btn{width:auto;justify-self:start}
+    .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media (max-width:900px){
+    .avatar-btn .who{display:none}
+    .search input{width:190px}
+    .console-grid{grid-template-columns:1fr}
+    .rail{grid-template-columns:1fr 1fr;display:grid}
+  }
+  @media (max-width:800px){
+    .edge-label,.edge-right{display:none}
+    .hero-console{grid-template-columns:1fr;gap:22px;padding:22px;border-radius:14px}
+    .hero-console h1{font-size:clamp(2rem,8vw,2.8rem)}
+  }
+  @media (max-width:760px){
+    .auth-top{width:calc(100% - 32px);padding:14px 0}
+    .auth-top .clock{display:none}
+    .auth-stage{padding:6px 14px 104px;gap:14px;min-height:calc(100dvh - 60px)}
+    .console{padding:18px;border-radius:14px}
+    .console h1{font-size:1.6rem}
+    .console-status{gap:7px;font-size:.54rem}
+    .console-status span + span{padding-left:7px}
+    .row{grid-template-columns:1fr;gap:0}
+    .readouts{grid-template-columns:1fr 1fr}
+    .readouts div:nth-child(3){display:none}
+    .readouts div{padding:8px 10px}
+    .readouts div:nth-child(2){border-left:1px solid #263639}
+    .readouts dd{font-size:.9rem}
+    .auth-alt p{display:none}
+    .shell{width:calc(100% - 28px)}
+    .mainnav{display:none}
+    .search{display:none}
+    .masthead{min-height:58px;gap:10px}
+    .top-right{margin-left:auto}
+    body.app-mode .brand em{display:none}
+    .app-main{padding-top:18px}
+    .readout-grid{grid-template-columns:1fr 1fr}
+    .stream li{position:relative;grid-template-columns:42px minmax(0,1fr);gap:10px;padding:12px 30px 12px 14px}
+    .stream .num{display:none}
+    .stream .title{font-size:.86rem}
+    .stream li .status{position:absolute;right:10px;top:15px;font-size:0;gap:0}
+    .stream li .status i{width:8px;height:8px}
+    .rail{grid-template-columns:1fr}
+    .feed li{grid-template-columns:1fr;gap:2px}
+    .settings-grid{grid-template-columns:1fr}
+    .demo{top:10px;right:12px;left:auto;bottom:auto;display:block}
+    body.app-mode .demo{right:70px}
+    .demo-panel{position:absolute;right:0;top:50px;width:min(300px,calc(100vw - 16px))}
+    .demo-toggle{width:auto;min-width:58px;min-height:40px;padding:0 10px;border-radius:999px;justify-content:center}
+    .demo-glyph{display:none}
+    .demo-word{display:inline;font-size:.56rem;letter-spacing:.08em}
+    .menu{width:min(300px,calc(100vw - 28px))}
+    .toast{bottom:72px}
+  }
+  @media (max-width:420px){
+    .console-status span:nth-child(3){display:none}
+    .metric-grid{grid-template-columns:1fr 1fr}
+    .dossier-id{grid-template-columns:1fr}
+    .dossier-id .ring-avatar{grid-row:auto;margin-bottom:14px}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .console{animation:console-in .5s ease-out both}
+    @keyframes console-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+    .halo{animation:halo-turn 48s linear infinite}
+    @keyframes halo-turn{to{transform:translateX(-50%) rotate(360deg)}}
+    .menu:not([hidden]){animation:menu-in .14s ease-out both}
+    @keyframes menu-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ ДОСТУП -->
+<main class="auth" id="authScreen" aria-labelledby="authTitle">
+  <div class="halo" aria-hidden="true"></div>
+  <div class="floor" aria-hidden="true"></div>
+  <div class="stars" aria-hidden="true"></div>
+  <div class="scan" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+  <p class="edge-label" aria-hidden="true">VINITI RAN · CYBERGARDEN · 2026</p>
+  <div class="edge-right" aria-hidden="true"><strong>УЗЕЛ 02</strong>ЛОКАЛЬНЫЙ КОНТУР<br>ТОЛЬКО ЧТЕНИЕ</div>
+
+  <header class="auth-top">
+    <p class="context"><span class="dot-mark" aria-hidden="true">✳</span> Каталог проверяемых результатов</p>
+    <p class="clock">55.7 N · 37.6 E</p>
+  </header>
+
+  <div class="auth-stage">
+    <div class="console">
+      <span class="corner tl" aria-hidden="true"></span>
+      <span class="corner tr" aria-hidden="true"></span>
+      <span class="corner bl" aria-hidden="true"></span>
+      <span class="corner br" aria-hidden="true"></span>
+
+      <div class="console-brand">
+        <span class="mark" aria-hidden="true">✳</span>
+        <div>
+          <strong>ВИНИТИ РАН</strong>
+          <span>CyberGarden · каталог результатов</span>
+        </div>
+      </div>
+
+      <div class="console-status" aria-hidden="true">
+        <span><i class="led"></i>локальный контур</span>
+        <span>ред. 02</span>
+        <span>solar · rag</span>
+      </div>
+
+      <h1 id="authTitle">Доступ к <span>каталогу</span></h1>
+      <p class="console-lede">Создайте аккаунт, чтобы собирать карточки публикаций и проверять цитаты по тексту PDF.</p>
+
+      <div class="tabs" role="tablist" aria-label="Регистрация или вход" data-tabs>
+        <button type="button" role="tab" id="tabReg" aria-selected="true" aria-controls="panelReg" tabindex="0"><span class="idx">01</span>Регистрация</button>
+        <button type="button" role="tab" id="tabLogin" aria-selected="false" aria-controls="panelLogin" tabindex="-1"><span class="idx">02</span>Вход</button>
+      </div>
+
+      <p class="form-status" id="authStatus" role="status" aria-live="polite"></p>
+
+      <div id="panelReg" role="tabpanel" aria-labelledby="tabReg">
+        <form id="registerForm" novalidate>
+          <div class="row">
+            <div class="field">
+              <label for="regName">Имя и фамилия</label>
+              <input type="text" id="regName" name="name" autocomplete="name" placeholder="Илья Сафонов" aria-describedby="regName-error">
+              <p class="error" id="regName-error" hidden></p>
+            </div>
+            <div class="field">
+              <label for="regOrg">Организация</label>
+              <input type="text" id="regOrg" name="organization" autocomplete="organization" placeholder="ЮФУ, ИКТ" aria-describedby="regOrg-error">
+              <p class="error" id="regOrg-error" hidden></p>
+            </div>
+          </div>
+          <div class="field">
+            <label for="regEmail">Рабочий email</label>
+            <input type="email" id="regEmail" name="email" autocomplete="email" placeholder="name@viniti.ru" aria-describedby="regEmail-error">
+            <p class="error" id="regEmail-error" hidden></p>
+          </div>
+          <div class="field password">
+            <label for="regPassword">Пароль</label>
+            <div class="input-wrap">
+              <input type="password" id="regPassword" name="password" autocomplete="new-password" placeholder="Минимум 8 символов" aria-describedby="regPassword-hint regPassword-error">
+              <button type="button" class="reveal" id="regPassBtn" data-toggle-pass="regPassword" aria-pressed="false" aria-label="Показать пароль">Показать</button>
+            </div>
+            <p class="hint" id="regPassword-hint">Пароль остаётся в браузере и никуда не отправляется.</p>
+            <p class="error" id="regPassword-error" hidden></p>
+          </div>
+          <label class="consent" for="regConsent">
+            <input type="checkbox" id="regConsent" aria-describedby="regConsent-error">
+            <span>Согласен с <a href="#/terms" data-stub="Условия использования">условиями</a> и <a href="#/privacy" data-stub="Политика данных">политикой данных</a> прототипа.</span>
+          </label>
+          <p class="consent-error" id="regConsent-error" hidden></p>
+          <button type="submit" class="btn primary block">Создать аккаунт →</button>
+        </form>
+      </div>
+
+      <div id="panelLogin" role="tabpanel" aria-labelledby="tabLogin" hidden>
+        <form id="loginForm" novalidate>
+          <div class="field">
+            <label for="loginEmail">Email</label>
+            <input type="email" id="loginEmail" name="email" autocomplete="email" placeholder="name@viniti.ru" aria-describedby="loginEmail-error">
+            <p class="error" id="loginEmail-error" hidden></p>
+          </div>
+          <div class="field password">
+            <label for="loginPassword">Пароль</label>
+            <div class="input-wrap">
+              <input type="password" id="loginPassword" name="password" autocomplete="current-password" placeholder="Ваш пароль" aria-describedby="loginPassword-error">
+              <button type="button" class="reveal" id="loginPassBtn" data-toggle-pass="loginPassword" aria-pressed="false" aria-label="Показать пароль">Показать</button>
+            </div>
+            <p class="error" id="loginPassword-error" hidden></p>
+          </div>
+          <button type="submit" class="btn primary block">Войти в каталог →</button>
+          <p class="hint" style="margin-top:10px"><button type="button" class="linklike" id="forgotBtn">Забыли пароль?</button></p>
+        </form>
+      </div>
+
+      <div class="auth-alt">
+        <button type="button" class="btn quiet" id="guestBtn">Продолжить без аккаунта</button>
+        <p>Гостевой доступ: просмотр каталога без сохранения</p>
+      </div>
+      <p class="console-note"><strong>Прототип.</strong> Аккаунт ненастоящий: localStorage, без запросов на сервер.</p>
+    </div>
+
+    <dl class="readouts" aria-label="Сводка каталога">
+      <div><dd>111</dd><dt>публикаций</dt></div>
+      <div><dd>1 187</dd><dt>цитат на проверке</dt></div>
+      <div><dd>2</dd><dt>области: solar, rag</dt></div>
+    </dl>
+  </div>
+</main>
+
+<!-- ============================================================ ПРИЛОЖЕНИЕ -->
+<div id="appScreen" hidden>
+  <a class="skip" href="#appMain">К содержанию</a>
+
+  <header class="top">
+    <div class="shell masthead">
+      <a class="brand" href="#/">
+        <span class="mark" aria-hidden="true">✳</span>
+        <span>ВИНИТИ РАН <em>CyberGarden</em></span>
+      </a>
+      <nav class="mainnav" aria-label="Основная навигация">
+        <a href="#/" id="navCatalog" aria-current="page">Каталог</a>
+        <a href="#/profile" id="navProfile">Профиль</a>
+      </nav>
+      <div class="search">
+        <label class="sr-only" for="globalSearch">Поиск по каталогу</label>
+        <input type="search" id="globalSearch" placeholder="Публикация, метрика, автор">
+      </div>
+      <div class="top-right">
+        <button type="button" class="avatar-btn" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="userMenu" aria-label="Меню профиля">
+          <span class="avatar" id="avatarInitials" aria-hidden="true">ИС</span>
+          <span class="who" id="avatarName">Профиль</span>
+          <span class="chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="menu" id="userMenu" role="menu" aria-labelledby="menuName" hidden>
+          <div class="menu-head" role="presentation">
+            <span class="avatar" id="menuAvatar" aria-hidden="true">ИС</span>
+            <div>
+              <strong id="menuName">Илья Сафонов</strong>
+              <span id="menuEmail">i.safonov@viniti.ru</span>
+              <span class="chip" id="menuMode">Демо-аккаунт</span>
+            </div>
+          </div>
+          <a role="menuitem" tabindex="-1" href="#/profile" id="menuProfile">Профиль</a>
+          <button role="menuitem" tabindex="-1" type="button" id="menuSettings">Настройки</button>
+          <div class="menu-sep" role="separator"></div>
+          <button role="menuitem" tabindex="-1" type="button" id="menuLogout" class="danger">Выйти из аккаунта</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell app-main" id="appMain" tabindex="-1">
+    <section id="siteView" aria-labelledby="siteTitle">
+      <div class="hero-console">
+        <div>
+          <p class="eyebrow mono" style="color:var(--accent);margin-bottom:6px">Система · каталог результатов</p>
+          <h1 id="siteTitle" tabindex="-1">Каждый результат оставляет <span>след</span>.</h1>
+          <p class="lede">Детерминированный разбор PDF: таблицы, значения, цитаты и находки. Каталог показывает не только число, но и страницу, на которой оно напечатано.</p>
+          <div class="actions">
+            <button type="button" class="btn primary" data-stub="Загрузка PDF">Загрузить PDF</button>
+            <button type="button" class="btn" data-stub="Экспорт CSV">Экспорт CSV</button>
+          </div>
+        </div>
+        <div class="readout-grid">
+          <div class="readout"><span class="label">Публикаций</span><strong>111</strong></div>
+          <div class="readout"><span class="label">Значений</span><strong>37 616</strong></div>
+          <div class="readout"><span class="label">Цитат</span><strong class="accent">1 187</strong></div>
+          <div class="readout"><span class="label">Baseline F1</span><strong>0.37</strong></div>
+        </div>
+      </div>
+
+      <div class="console-grid">
+        <section class="panel" aria-labelledby="streamTitle">
+          <div class="panel-head">
+            <h2 id="streamTitle">Поток публикаций</h2>
+            <span class="tag">5 / 111</span>
+          </div>
+          <ul class="stream">
+            <li>
+              <span class="pid">D001</span>
+              <span><span class="title"><a href="#/profile" data-stub="Карточка D001" style="color:inherit;text-decoration:none">CIGS на гибкой подложке: 19.2 %</a></span><span class="meta">solar · 7 таблиц · 42 результата</span></span>
+              <span class="num">2025</span>
+              <span class="status ok"><i></i>проверено</span>
+            </li>
+            <li>
+              <span class="pid">D014</span>
+              <span><span class="title"><a href="#/profile" data-stub="Карточка D014" style="color:inherit;text-decoration:none">Перенос обучения для RAG-поиска</a></span><span class="meta">rag · 5 таблиц · 128 результатов</span></span>
+              <span class="num">2025</span>
+              <span class="status warn"><i></i>на проверке</span>
+            </li>
+            <li>
+              <span class="pid">D021</span>
+              <span><span class="title"><a href="#/profile" data-stub="Карточка D021" style="color:inherit;text-decoration:none">Перовскит: стабильность 1000 часов</a></span><span class="meta">solar · 6 таблиц · 37 результатов</span></span>
+              <span class="num">2024</span>
+              <span class="status ok"><i></i>проверено</span>
+            </li>
+            <li>
+              <span class="pid">P058</span>
+              <span><span class="title"><a href="#/profile" data-stub="Карточка P058" style="color:inherit;text-decoration:none">Гибридный ретривер для русского языка</a></span><span class="meta">rag · 4 таблицы · 212 результатов</span></span>
+              <span class="num">2026</span>
+              <span class="status bad"><i></i>цитата не сходится</span>
+            </li>
+            <li>
+              <span class="pid">D040</span>
+              <span><span class="title"><a href="#/profile" data-stub="Карточка D040" style="color:inherit;text-decoration:none">Тандем Si/CIGS: 27.1 %</a></span><span class="meta">solar · 7 таблиц · 51 результат</span></span>
+              <span class="num">2026</span>
+              <span class="status ok"><i></i>проверено</span>
+            </li>
+          </ul>
+        </section>
+
+        <aside class="rail" aria-label="Состояние каталога">
+          <section class="panel">
+            <h2>Состояние</h2>
+            <div class="meter"><div class="line"><span>Цитаты подтверждены</span><b>91 %</b></div><div class="track"><i style="width:91%"></i></div></div>
+            <div class="meter"><div class="line"><span>Таблицы собраны</span><b>86 %</b></div><div class="track"><i style="width:86%"></i></div></div>
+            <div class="meter"><div class="line"><span>Находки разобраны</span><b>64 %</b></div><div class="track"><i style="width:64%"></i></div></div>
+            <div class="meter"><div class="line"><span>Нужна ручная проверка</span><b>12</b></div><div class="track"><i style="width:24%"></i></div></div>
+          </section>
+          <section class="panel">
+            <h2>Действия</h2>
+            <button type="button" class="btn" data-stub="Новый разбор">Новый разбор PDF</button>
+            <button type="button" class="btn" data-stub="Открыть паспорт">Открыть паспорт</button>
+            <button type="button" class="btn" data-stub="Выгрузить CSV">Выгрузить CSV</button>
+          </section>
+        </aside>
+      </div>
+      <p class="foot">Демонстрационные данные. Прототип интерфейса, не рабочая выгрузка.</p>
+    </section>
+
+    <section id="profileView" hidden aria-labelledby="profileTitle">
+      <div class="dossier">
+        <aside class="dossier-id" aria-label="Учётная запись">
+          <div class="ring-avatar"><span id="profileAvatar" aria-hidden="true">ИС</span></div>
+          <p class="mono" style="color:#7f9498;margin-bottom:4px">Исследователь / профиль</p>
+          <h1 id="profileTitle" tabindex="-1"><span id="profileName">Илья Сафонов</span></h1>
+          <p class="role" id="profileRole">Исследователь</p>
+          <dl class="id-list">
+            <div><dt>Email</dt><dd id="profileEmail">i.safonov@viniti.ru</dd></div>
+            <div><dt>Организация</dt><dd id="profileOrg">ЮФУ, Институт компьютерных технологий</dd></div>
+            <div><dt>В каталоге с</dt><dd id="profileSince">ноября 2026</dd></div>
+          </dl>
+          <span class="chip" id="profileChip">демо-аккаунт</span>
+          <button type="button" class="btn" id="sideSettings">Настройки профиля</button>
+          <button type="button" class="btn" id="sideLogout">Выйти из аккаунта</button>
+        </aside>
+
+        <div class="dossier-main">
+          <section class="dossier-section" aria-labelledby="aboutTitle">
+            <div class="sec-label"><span><b>01</b> / о себе</span><span id="profileMode">Демо-аккаунт</span></div>
+            <h2 id="aboutTitle" tabindex="-1">Чем занимаюсь</h2>
+            <p class="bio" id="profileBio">Собираю проверяемые результаты из PDF: тонкоплёночные солнечные элементы и RAG-системы. Отвечаю за качество цитат, находки и выгрузку CSV.</p>
+          </section>
+
+          <section class="dossier-section" aria-labelledby="metricsTitle">
+            <div class="sec-label"><span><b>02</b> / метрики</span><span>обновлено сегодня</span></div>
+            <h2 id="metricsTitle">Активность в цифрах</h2>
+            <div class="metric-grid">
+              <div class="metric"><span class="label">Документы</span><strong data-stat="docs">24</strong></div>
+              <div class="metric"><span class="label">Профили</span><strong data-stat="profiles">6</strong></div>
+              <div class="metric"><span class="label">Результаты</span><strong data-stat="results">962</strong></div>
+              <div class="metric"><span class="label">Находки</span><strong data-stat="issues">18</strong></div>
+            </div>
+          </section>
+
+          <section class="dossier-section" aria-labelledby="activityTitle">
+            <div class="sec-label"><span><b>03</b> / журнал</span><span>последние действия</span></div>
+            <h2 id="activityTitle" tabindex="-1">Журнал активности</h2>
+            <ol class="feed" id="feedFilled">
+              <li><span class="when">СЕГОДНЯ 14:20</span><div><strong>Загрузил D021.pdf</strong><p>Собрана карточка: 6 таблиц, 37 результатов, 2 находки.</p></div></li>
+              <li><span class="when">ВЧЕРА 18:05</span><div><strong>Проверил 6 цитат в D014</strong><p>Все фрагменты найдены на указанных страницах.</p></div></li>
+              <li><span class="when">18 НОЯБРЯ</span><div><strong>Сохранил профиль «CIGS: таблицы и проза»</strong><p>Профиль извлечения применён к 4 публикациям.</p></div></li>
+            </ol>
+            <div class="empty" id="feedEmpty" hidden>
+              <p>Пока нет действий. Загрузите первый PDF, чтобы собрать карточку публикации и проверить цитаты.</p>
+              <button type="button" class="btn" data-stub="Загрузка PDF">Загрузить PDF</button>
+            </div>
+          </section>
+
+          <section class="dossier-section" id="settingsPanel" aria-labelledby="settingsTitle">
+            <div class="sec-label"><span><b>04</b> / настройки</span><span>заглушки</span></div>
+            <h2 id="settingsTitle" tabindex="-1">Настройки</h2>
+            <div class="settings-card">
+              <div class="setting">
+                <div><strong>Уведомления о находках</strong><p>Сообщать, когда в моих публикациях появляется новая находка.</p></div>
+                <label class="switch"><input type="checkbox" checked aria-label="Уведомления о находках"><span class="switch-track" aria-hidden="true"></span></label>
+              </div>
+              <div class="setting">
+                <div><strong>Только проверенные цитаты</strong><p>Скрывать строки, у которых цитата ещё не подтверждена.</p></div>
+                <label class="switch"><input type="checkbox" checked aria-label="Показывать только проверенные цитаты"><span class="switch-track" aria-hidden="true"></span></label>
+              </div>
+              <div class="setting">
+                <div><strong>Компактные таблицы</strong><p>Показывать больше строк на экране ноутбука.</p></div>
+                <label class="switch"><input type="checkbox" aria-label="Компактные таблицы"><span class="switch-track" aria-hidden="true"></span></label>
+              </div>
+              <div class="settings-grid">
+                <div class="field">
+                  <label for="profileLang">Язык интерфейса</label>
+                  <select id="profileLang" data-stub-select="Язык интерфейса">
+                    <option>Русский</option>
+                    <option>English (демо)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="profileArea">Область по умолчанию</label>
+                  <select id="profileArea" data-stub-select="Область по умолчанию">
+                    <option>solar</option>
+                    <option>rag</option>
+                  </select>
+                </div>
+              </div>
+              <div class="danger-zone">
+                <p>Выход завершает демо-сессию в этом браузере. Данные аккаунта будут удалены.</p>
+                <button type="button" class="btn" id="settingsLogout">Выйти из аккаунта</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<p class="sr-only" id="routeStatus" role="status" aria-live="polite"></p>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<div class="demo" id="demoBar">
+  <div class="demo-panel" id="demoPanel" role="group" aria-label="Демо-переключатель экранов" hidden>
+    <span class="demo-label" aria-hidden="true">Экраны прототипа</span>
+    <div class="demo-actions">
+      <button type="button" data-demo="auth">Регистрация</button>
+      <button type="button" data-demo="site">Каталог</button>
+      <button type="button" data-demo="profile">Профиль</button>
+      <button type="button" data-demo="reset" class="danger">Сброс</button>
+    </div>
+  </div>
+  <button type="button" class="demo-toggle" id="demoToggle" aria-expanded="false" aria-controls="demoPanel" aria-label="Демо-переключатель экранов"><span class="demo-glyph" aria-hidden="true">✳</span><span class="demo-word">Демо</span></button>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var KEY = "viniti.auth.c.v1";
+  var SAMPLE = {
+    name: "Илья Сафонов",
+    email: "i.safonov@viniti.ru",
+    org: "ЮФУ, Институт компьютерных технологий",
+    role: "Исследователь",
+    since: "ноября 2026",
+    bio: "Собираю проверяемые результаты из PDF: тонкоплёночные солнечные элементы и RAG-системы. Отвечаю за качество цитат, находки и выгрузку CSV.",
+    guest: false,
+    demo: true,
+    stats: {docs: 24, profiles: 6, results: 962, issues: 18}
+  };
+  var EMPTY_STATS = {docs: 0, profiles: 0, results: 0, issues: 0};
+  var user = null;
+  var pendingFocus = null;
+  var menuOpen = false;
+  var toastTimer = null;
+
+  function byId(id) { return document.getElementById(id); }
+  function setText(id, text) { var node = byId(id); if (node) node.textContent = text; }
+  function readUser() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) { return null; }
+  }
+  function saveUser(value) { try { localStorage.setItem(KEY, JSON.stringify(value)); } catch (err) { /* приватный режим */ } }
+  function dropUser() { try { localStorage.removeItem(KEY); } catch (err) { /* ничего */ } }
+  function initials(name) {
+    var parts = String(name || "Гость").trim().split(/\s+/).slice(0, 2);
+    return parts.map(function (part) { return part.charAt(0).toUpperCase(); }).join("");
+  }
+  function firstName(name) { return String(name || "Профиль").trim().split(/\s+/)[0]; }
+  function statsOf(current) { return Object.assign({}, EMPTY_STATS, current && current.stats ? current.stats : {}); }
+  function modeLabel(current) {
+    if (!current) return "";
+    if (current.guest) return "Гостевой доступ";
+    if (current.demo) return "Демо-аккаунт";
+    return "Аккаунт";
+  }
+  function modeChip(current) {
+    if (!current) return "";
+    if (current.guest) return "гостевой доступ";
+    if (current.demo) return "демо-аккаунт";
+    return "аккаунт";
+  }
+  function showToast(message) {
+    var toast = byId("toast");
+    toast.textContent = message;
+    toast.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.hidden = true; }, 2800);
+  }
+  function announce(message) { byId("routeStatus").textContent = message; }
+  function setAuthStatus(message, isError) {
+    var node = byId("authStatus");
+    node.textContent = message;
+    node.classList.toggle("is-error", !!isError);
+  }
+
+  var tabsRoot = document.querySelector("[data-tabs]");
+  var tabButtons = Array.prototype.slice.call(tabsRoot.querySelectorAll("[role=tab]"));
+  function selectTab(index, moveFocus) {
+    tabButtons.forEach(function (tab, i) {
+      var active = i === index;
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      var panel = byId(tab.getAttribute("aria-controls"));
+      if (panel) panel.hidden = !active;
+    });
+    if (moveFocus) tabButtons[index].focus();
+  }
+  tabButtons.forEach(function (tab, index) {
+    tab.addEventListener("click", function () { selectTab(index, false); });
+    tab.addEventListener("keydown", function (event) {
+      var next = null;
+      if (event.key === "ArrowRight") next = (index + 1) % tabButtons.length;
+      if (event.key === "ArrowLeft") next = (index - 1 + tabButtons.length) % tabButtons.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabButtons.length - 1;
+      if (next !== null) { event.preventDefault(); selectTab(next, true); }
+    });
+  });
+
+  var avatarBtn = byId("avatarBtn");
+  var userMenu = byId("userMenu");
+  function openProfileMenu(moveFocus) {
+    userMenu.hidden = false;
+    menuOpen = true;
+    avatarBtn.setAttribute("aria-expanded", "true");
+    if (moveFocus) {
+      var first = userMenu.querySelector("[role=menuitem]");
+      if (first) first.focus();
+    }
+  }
+  function closeProfileMenu(returnFocus) {
+    if (!menuOpen && userMenu.hidden) return;
+    userMenu.hidden = true;
+    menuOpen = false;
+    avatarBtn.setAttribute("aria-expanded", "false");
+    if (returnFocus) avatarBtn.focus();
+  }
+  avatarBtn.addEventListener("click", function (event) {
+    event.stopPropagation();
+    setDemoOpen(false);
+    if (menuOpen) closeProfileMenu(false);
+    else openProfileMenu(true);
+  });
+  document.addEventListener("click", function (event) {
+    if (menuOpen && !userMenu.contains(event.target) && !avatarBtn.contains(event.target)) closeProfileMenu(false);
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && menuOpen) { event.preventDefault(); closeProfileMenu(true); }
+  });
+  userMenu.addEventListener("keydown", function (event) {
+    var items = Array.prototype.slice.call(userMenu.querySelectorAll("[role=menuitem]"));
+    var index = items.indexOf(document.activeElement);
+    var next = null;
+    if (event.key === "ArrowDown") next = (index + 1) % items.length;
+    if (event.key === "ArrowUp") next = (index - 1 + items.length) % items.length;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = items.length - 1;
+    if (next !== null) { event.preventDefault(); items[next].focus(); }
+    if (event.key === "Tab") closeProfileMenu(false);
+  });
+
+  function go(hash, focusId) {
+    if (focusId) pendingFocus = focusId;
+    if (location.hash === hash) render();
+    else location.hash = hash;
+  }
+
+  function render() {
+    var authed = !!user;
+    document.body.classList.toggle("app-mode", authed);
+    byId("authScreen").hidden = authed;
+    byId("appScreen").hidden = !authed;
+    if (!authed) {
+      closeProfileMenu(false);
+      document.title = "Доступ · ВИНИТИ РАН";
+      syncDemoBar();
+      return;
+    }
+    syncUserUI();
+    var onProfile = location.hash === "#/profile";
+    byId("siteView").hidden = onProfile;
+    byId("profileView").hidden = !onProfile;
+    if (!onProfile) {
+      byId("navCatalog").setAttribute("aria-current", "page");
+      byId("navProfile").removeAttribute("aria-current");
+    } else {
+      byId("navProfile").setAttribute("aria-current", "page");
+      byId("navCatalog").removeAttribute("aria-current");
+    }
+    document.title = (onProfile ? "Профиль · " : "Каталог · ") + "ВИНИТИ РАН";
+    syncDemoBar();
+    if (pendingFocus) {
+      var focusId = pendingFocus;
+      var target = byId(focusId);
+      pendingFocus = null;
+      if (target) {
+        if (focusId === "settingsTitle" || focusId === "activityTitle") {
+          target.focus();
+          target.scrollIntoView({block: "start"});
+        } else {
+          target.focus({preventScroll: true});
+          window.scrollTo(0, 0);
+        }
+      }
+    }
+  }
+
+  function syncUserUI() {
+    var name = user.name || "Гость";
+    var stats = statsOf(user);
+    setText("avatarInitials", initials(name));
+    setText("avatarName", firstName(name));
+    setText("menuAvatar", initials(name));
+    setText("menuName", name);
+    setText("menuEmail", user.email || "без email");
+    setText("menuMode", modeLabel(user));
+    avatarBtn.setAttribute("aria-label", "Меню профиля: " + name);
+    setText("profileAvatar", initials(name));
+    setText("profileName", name);
+    setText("profileRole", user.role || "Исследователь");
+    setText("profileEmail", user.email || "не указан");
+    setText("profileOrg", user.org || "не указана");
+    setText("profileSince", user.since || "ноября 2026");
+    setText("profileChip", modeChip(user));
+    setText("profileMode", modeLabel(user));
+    setText("profileBio", user.bio || "Заполните описание в профиле, чтобы коллеги понимали, с какими данными вы работаете.");
+    document.querySelectorAll("[data-stat]").forEach(function (node) {
+      node.textContent = String(stats[node.getAttribute("data-stat")] || 0);
+    });
+    byId("feedFilled").hidden = stats.docs === 0;
+    byId("feedEmpty").hidden = stats.docs !== 0;
+  }
+
+  function syncDemoBar() {
+    var mode = !user ? "auth" : (location.hash === "#/profile" ? "profile" : "site");
+    document.querySelectorAll("[data-demo]").forEach(function (button) {
+      button.setAttribute("aria-pressed", String(button.getAttribute("data-demo") === mode));
+    });
+  }
+  window.addEventListener("hashchange", render);
+
+  function enterApp(message, focusId) {
+    pendingFocus = focusId || null;
+    saveUser(user);
+    selectTab(0, false);
+    if (location.hash !== "#/") location.hash = "#/";
+    else render();
+    if (message) { announce(message); showToast(message); }
+  }
+  function logout() {
+    user = null;
+    dropUser();
+    resetAuthForms();
+    setAuthStatus("Вы вышли из аккаунта.", false);
+    if (location.hash !== "#/") location.hash = "#/";
+    render();
+    announce("Вы вышли из аккаунта.");
+    byId("regName").focus();
+  }
+  function useSample() {
+    user = JSON.parse(JSON.stringify(SAMPLE));
+    saveUser(user);
+  }
+
+  function checkField(id, message) {
+    var input = byId(id);
+    var error = byId(id + "-error");
+    if (!input || !error) return false;
+    if (message) {
+      input.classList.add("is-invalid");
+      input.setAttribute("aria-invalid", "true");
+      error.textContent = message;
+      error.hidden = false;
+      input.setAttribute("aria-describedby", input.id === "regPassword" ? "regPassword-hint regPassword-error" : id + "-error");
+      return true;
+    }
+    input.classList.remove("is-invalid");
+    input.removeAttribute("aria-invalid");
+    error.textContent = "";
+    error.hidden = true;
+    if (input.id === "regPassword") input.setAttribute("aria-describedby", "regPassword-hint");
+    else input.removeAttribute("aria-describedby");
+    return false;
+  }
+  function clearAllErrors() {
+    ["regName", "regEmail", "regOrg", "regPassword", "loginEmail", "loginPassword"].forEach(function (id) {
+      checkField(id, "");
+    });
+    byId("regConsent-error").hidden = true;
+    byId("regConsent").removeAttribute("aria-invalid");
+    setAuthStatus("", false);
+  }
+  function resetAuthForms() {
+    byId("registerForm").reset();
+    byId("loginForm").reset();
+    clearAllErrors();
+    selectTab(0, false);
+    document.querySelectorAll("[data-toggle-pass]").forEach(function (button) {
+      var input = byId(button.getAttribute("data-toggle-pass"));
+      input.type = "password";
+      button.setAttribute("aria-pressed", "false");
+      button.setAttribute("aria-label", "Показать пароль");
+      button.textContent = "Показать";
+    });
+  }
+  var emailOk = function (value) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value); };
+  var validators = {
+    regName: function () { return byId("regName").value.trim().length >= 2 ? "" : "Укажите имя и фамилию."; },
+    regOrg: function () { return byId("regOrg").value.trim().length >= 2 ? "" : "Укажите организацию."; },
+    regEmail: function () { return emailOk(byId("regEmail").value.trim()) ? "" : "Введите email, например name@viniti.ru."; },
+    regPassword: function () { return byId("regPassword").value.length >= 8 ? "" : "Пароль должен быть не короче 8 символов."; },
+    loginEmail: function () { return emailOk(byId("loginEmail").value.trim()) ? "" : "Введите email, например name@viniti.ru."; },
+    loginPassword: function () { return byId("loginPassword").value.length >= 1 ? "" : "Введите пароль."; }
+  };
+  Object.keys(validators).forEach(function (id) {
+    var input = byId(id);
+    input.addEventListener("input", function () {
+      if (input.getAttribute("aria-invalid") === "true") checkField(id, validators[id]());
+    });
+  });
+  byId("regConsent").addEventListener("change", function () {
+    if (this.checked) {
+      byId("regConsent-error").hidden = true;
+      this.removeAttribute("aria-invalid");
+    }
+  });
+
+  byId("registerForm").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var errors = 0;
+    Object.keys(validators).forEach(function (id) {
+      if (id.indexOf("reg") === 0 && checkField(id, validators[id]())) errors += 1;
+    });
+    var consent = byId("regConsent");
+    var consentError = byId("regConsent-error");
+    if (!consent.checked) {
+      consent.setAttribute("aria-invalid", "true");
+      consentError.textContent = "Подтвердите согласие, чтобы создать аккаунт.";
+      consentError.hidden = false;
+      errors += 1;
+    } else {
+      consentError.hidden = true;
+      consent.removeAttribute("aria-invalid");
+    }
+    if (errors) {
+      setAuthStatus("Проверьте отмеченные поля.", true);
+      (document.querySelector("#panelReg .is-invalid") || consent).focus();
+      return;
+    }
+    setAuthStatus("", false);
+    user = {
+      name: byId("regName").value.trim(),
+      email: byId("regEmail").value.trim(),
+      org: byId("regOrg").value.trim(),
+      role: "Исследователь",
+      since: "ноября 2026",
+      bio: "Заполните описание в профиле, чтобы коллеги понимали, с какими данными вы работаете.",
+      guest: false,
+      demo: false,
+      stats: Object.assign({}, EMPTY_STATS)
+    };
+    enterApp("Аккаунт создан. Добро пожаловать в каталог.", "siteTitle");
+  });
+
+  byId("loginForm").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var errors = 0;
+    if (checkField("loginEmail", validators.loginEmail())) errors += 1;
+    if (checkField("loginPassword", validators.loginPassword())) errors += 1;
+    if (errors) {
+      setAuthStatus("Проверьте email и пароль.", true);
+      (document.querySelector("#panelLogin .is-invalid") || byId("loginEmail")).focus();
+      return;
+    }
+    setAuthStatus("", false);
+    var email = byId("loginEmail").value.trim();
+    var name = email.split("@")[0].replace(/[._-]+/g, " ").split(" ").filter(Boolean).map(function (part) {
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    }).join(" ");
+    user = {
+      name: name || "Исследователь",
+      email: email,
+      org: "ВИНИТИ РАН",
+      role: "Исследователь",
+      since: "ноября 2026",
+      bio: "Профиль создан при входе в прототип. Заполните описание в настройках.",
+      guest: false,
+      demo: false,
+      stats: Object.assign({}, EMPTY_STATS)
+    };
+    enterApp("Вы вошли в каталог.", "siteTitle");
+  });
+
+  byId("forgotBtn").addEventListener("click", function () {
+    showToast("В прототипе восстановление пароля не подключено.");
+  });
+  byId("guestBtn").addEventListener("click", function () {
+    user = {
+      name: "Гость",
+      email: "guest@prototype.local",
+      org: "Без организации",
+      role: "Гостевой доступ",
+      since: "ноября 2026",
+      bio: "Гостевой режим: можно смотреть каталог, но нельзя сохранять профили извлечения.",
+      guest: true,
+      demo: true,
+      stats: Object.assign({}, EMPTY_STATS)
+    };
+    enterApp("Вы вошли как гость.", "siteTitle");
+  });
+
+  byId("menuLogout").addEventListener("click", function () { closeProfileMenu(false); logout(); });
+  byId("sideLogout").addEventListener("click", logout);
+  byId("settingsLogout").addEventListener("click", logout);
+
+  document.querySelectorAll("[data-toggle-pass]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var input = byId(button.getAttribute("data-toggle-pass"));
+      var show = input.type === "password";
+      input.type = show ? "text" : "password";
+      button.setAttribute("aria-pressed", String(show));
+      button.setAttribute("aria-label", show ? "Скрыть пароль" : "Показать пароль");
+      button.textContent = show ? "Скрыть" : "Показать";
+    });
+  });
+
+  byId("menuProfile").addEventListener("click", function (event) {
+    event.preventDefault();
+    closeProfileMenu(false);
+    go("#/profile", "profileTitle");
+  });
+  byId("menuSettings").addEventListener("click", function () {
+    closeProfileMenu(false);
+    go("#/profile", "settingsTitle");
+  });
+  byId("sideSettings").addEventListener("click", function () { go("#/profile", "settingsTitle"); });
+  byId("navCatalog").addEventListener("click", function (event) {
+    event.preventDefault();
+    go("#/", "siteTitle");
+  });
+  byId("navProfile").addEventListener("click", function (event) {
+    event.preventDefault();
+    go("#/profile", "profileTitle");
+  });
+  var brandLink = document.querySelector("#appScreen .brand");
+  if (brandLink) {
+    brandLink.addEventListener("click", function (event) {
+      event.preventDefault();
+      go("#/", "siteTitle");
+    });
+  }
+
+  var demoPanel = byId("demoPanel");
+  var demoToggle = byId("demoToggle");
+  var demoOpen = false;
+  function setDemoOpen(open) {
+    demoPanel.hidden = !open;
+    demoOpen = open;
+    demoToggle.setAttribute("aria-expanded", String(open));
+  }
+  demoToggle.addEventListener("click", function (event) {
+    event.stopPropagation();
+    closeProfileMenu(false);
+    setDemoOpen(!demoOpen);
+  });
+  document.addEventListener("click", function (event) {
+    if (demoOpen && !demoPanel.contains(event.target) && !demoToggle.contains(event.target)) setDemoOpen(false);
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && demoOpen) { setDemoOpen(false); demoToggle.focus(); }
+  });
+  document.querySelectorAll("[data-demo]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      setDemoOpen(false);
+      var mode = button.getAttribute("data-demo");
+      if (mode === "auth") {
+        user = null;
+        dropUser();
+        resetAuthForms();
+        setAuthStatus("Экран регистрации. Заполните поля или продолжите без аккаунта.", false);
+        if (location.hash !== "#/") location.hash = "#/";
+        render();
+        byId("regName").focus();
+        return;
+      }
+      if (mode === "reset") {
+        user = null;
+        dropUser();
+        resetAuthForms();
+        setAuthStatus("Состояние сброшено. localStorage очищен.", false);
+        if (location.hash !== "#/") location.hash = "#/";
+        render();
+        showToast("Состояние сброшено. localStorage очищен.");
+        byId("regName").focus();
+        return;
+      }
+      if (!user) useSample();
+      if (mode === "profile") go("#/profile", "profileTitle");
+      else go("#/", "siteTitle");
+    });
+  });
+
+  document.addEventListener("click", function (event) {
+    var stub = event.target.closest("[data-stub]");
+    if (!stub) return;
+    event.preventDefault();
+    showToast("В прототипе действие «" + stub.getAttribute("data-stub") + "» не подключено.");
+  });
+  document.querySelectorAll("[data-stub-select]").forEach(function (select) {
+    select.addEventListener("change", function () {
+      showToast("Настройка «" + select.getAttribute("data-stub-select") + "» сохранена только на экране.");
+    });
+  });
+
+  user = readUser();
+  if (!user) byId("regName").focus({preventScroll: true});
+  render();
+})();
+</script>
+</body>
+</html>

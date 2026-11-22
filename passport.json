@@ -1,0 +1,943 @@
+{
+ "version": 1,
+ "generated_from": "area1 tools/check_submission.py + rag submission_template/schema.json",
+ "areas": {
+  "solar": {
+   "bom": true,
+   "newline": "\r\n",
+   "tables": {
+    "publications": {
+     "key": "publication_id",
+     "columns": [
+      "publication_id",
+      "title",
+      "year",
+      "DOI",
+      "authors",
+      "in_scope",
+      "exclusion_reason"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "title": {
+       "type": "text"
+      },
+      "year": {
+       "type": "text"
+      },
+      "DOI": {
+       "type": "text"
+      },
+      "authors": {
+       "type": "text"
+      },
+      "in_scope": {
+       "type": "enum",
+       "allowed": [
+        "false",
+        "true"
+       ]
+      },
+      "exclusion_reason": {
+       "type": "text"
+      }
+     }
+    },
+    "materials": {
+     "key": "material_id",
+     "columns": [
+      "publication_id",
+      "material_id",
+      "material_name_raw",
+      "formula_normalized",
+      "material_class",
+      "dimensionality",
+      "additives",
+      "bandgap_value",
+      "bandgap_unit",
+      "bandgap_method",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "material_id": {
+       "type": "text"
+      },
+      "material_name_raw": {
+       "type": "text"
+      },
+      "formula_normalized": {
+       "type": "text"
+      },
+      "material_class": {
+       "type": "enum",
+       "allowed": [
+        "CIGS",
+        "CdTe",
+        "Sb2Se3",
+        "kesterite",
+        "other",
+        "perovskite",
+        "thin-film Si"
+       ]
+      },
+      "dimensionality": {
+       "type": "enum",
+       "allowed": [
+        "2D",
+        "2D-3D",
+        "3D"
+       ]
+      },
+      "additives": {
+       "type": "text"
+      },
+      "bandgap_value": {
+       "type": "number"
+      },
+      "bandgap_unit": {
+       "type": "text"
+      },
+      "bandgap_method": {
+       "type": "enum",
+       "allowed": [
+        "EQE",
+        "PL",
+        "Tauc",
+        "cited"
+       ]
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "devices": {
+     "key": "device_id",
+     "columns": [
+      "publication_id",
+      "device_id",
+      "absorber_material_id",
+      "device_label",
+      "device_role",
+      "device_type",
+      "architecture",
+      "substrate_type",
+      "active_area",
+      "area_unit",
+      "area_definition",
+      "encapsulation",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "device_id": {
+       "type": "text"
+      },
+      "absorber_material_id": {
+       "type": "text"
+      },
+      "device_label": {
+       "type": "text"
+      },
+      "device_role": {
+       "type": "enum",
+       "allowed": [
+        "control",
+        "record",
+        "target"
+       ]
+      },
+      "device_type": {
+       "type": "enum",
+       "allowed": [
+        "cell",
+        "minimodule",
+        "module"
+       ]
+      },
+      "architecture": {
+       "type": "enum",
+       "allowed": [
+        "n-i-p",
+        "p-i-n",
+        "substrate",
+        "superstrate"
+       ]
+      },
+      "substrate_type": {
+       "type": "enum",
+       "allowed": [
+        "flexible",
+        "rigid"
+       ]
+      },
+      "active_area": {
+       "type": "number"
+      },
+      "area_unit": {
+       "type": "text"
+      },
+      "area_definition": {
+       "type": "enum",
+       "allowed": [
+        "aperture",
+        "designated illumination",
+        "total"
+       ]
+      },
+      "encapsulation": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "layers": {
+     "key": "layer_id",
+     "columns": [
+      "publication_id",
+      "layer_id",
+      "device_id",
+      "layer_order",
+      "layer_function",
+      "layer_material",
+      "layer_thickness",
+      "thickness_unit",
+      "deposition_method",
+      "annealing_temperature",
+      "annealing_time",
+      "atmosphere",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "layer_id": {
+       "type": "text"
+      },
+      "device_id": {
+       "type": "text"
+      },
+      "layer_order": {
+       "type": "number"
+      },
+      "layer_function": {
+       "type": "enum",
+       "allowed": [
+        "ETL",
+        "HTL",
+        "absorber",
+        "back_contact",
+        "front_contact",
+        "interlayer",
+        "passivation",
+        "recombination"
+       ]
+      },
+      "layer_material": {
+       "type": "text"
+      },
+      "layer_thickness": {
+       "type": "text"
+      },
+      "thickness_unit": {
+       "type": "text"
+      },
+      "deposition_method": {
+       "type": "text"
+      },
+      "annealing_temperature": {
+       "type": "text"
+      },
+      "annealing_time": {
+       "type": "text"
+      },
+      "atmosphere": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "measurements": {
+     "key": "measurement_id",
+     "columns": [
+      "publication_id",
+      "measurement_id",
+      "device_id",
+      "measurement_type",
+      "spectrum",
+      "light_intensity",
+      "intensity_unit",
+      "scan_direction",
+      "scan_rate",
+      "mask_used",
+      "certified",
+      "certification_lab",
+      "temperature",
+      "stability_protocol",
+      "stress_conditions",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "measurement_id": {
+       "type": "text"
+      },
+      "device_id": {
+       "type": "text"
+      },
+      "measurement_type": {
+       "type": "enum",
+       "allowed": [
+        "EQE",
+        "J-V",
+        "MPP tracking",
+        "stability"
+       ]
+      },
+      "spectrum": {
+       "type": "text"
+      },
+      "light_intensity": {
+       "type": "text"
+      },
+      "intensity_unit": {
+       "type": "text"
+      },
+      "scan_direction": {
+       "type": "enum",
+       "allowed": [
+        "average",
+        "forward",
+        "reverse"
+       ]
+      },
+      "scan_rate": {
+       "type": "text"
+      },
+      "mask_used": {
+       "type": "enum",
+       "allowed": [
+        "false",
+        "true"
+       ]
+      },
+      "certified": {
+       "type": "enum",
+       "allowed": [
+        "false",
+        "true"
+       ]
+      },
+      "certification_lab": {
+       "type": "text"
+      },
+      "temperature": {
+       "type": "text"
+      },
+      "stability_protocol": {
+       "type": "enum",
+       "allowed": [
+        "ISOS-D",
+        "ISOS-L",
+        "ISOS-T",
+        "other"
+       ]
+      },
+      "stress_conditions": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "results": {
+     "key": "result_id",
+     "columns": [
+      "publication_id",
+      "result_id",
+      "device_id",
+      "measurement_id",
+      "material_id",
+      "metric_name",
+      "metric_value",
+      "metric_unit",
+      "aggregation",
+      "spread_value",
+      "n_devices",
+      "time_point",
+      "time_unit",
+      "raw_value",
+      "raw_unit",
+      "normalized_value",
+      "normalized_unit",
+      "result_origin",
+      "cited_publication_id",
+      "source_page",
+      "source_section",
+      "source_table",
+      "source_figure",
+      "source_fragment",
+      "extraction_status",
+      "duplicate_of",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "result_id": {
+       "type": "text"
+      },
+      "device_id": {
+       "type": "text"
+      },
+      "measurement_id": {
+       "type": "text"
+      },
+      "material_id": {
+       "type": "text"
+      },
+      "metric_name": {
+       "type": "text"
+      },
+      "metric_value": {
+       "type": "number"
+      },
+      "metric_unit": {
+       "type": "text"
+      },
+      "aggregation": {
+       "type": "enum",
+       "allowed": [
+        "champion",
+        "mean",
+        "median"
+       ]
+      },
+      "spread_value": {
+       "type": "text"
+      },
+      "n_devices": {
+       "type": "text"
+      },
+      "time_point": {
+       "type": "text"
+      },
+      "time_unit": {
+       "type": "text"
+      },
+      "raw_value": {
+       "type": "text"
+      },
+      "raw_unit": {
+       "type": "text"
+      },
+      "normalized_value": {
+       "type": "number"
+      },
+      "normalized_unit": {
+       "type": "text"
+      },
+      "result_origin": {
+       "type": "enum",
+       "allowed": [
+        "cited",
+        "primary"
+       ]
+      },
+      "cited_publication_id": {
+       "type": "text"
+      },
+      "source_page": {
+       "type": "number"
+      },
+      "source_section": {
+       "type": "text"
+      },
+      "source_table": {
+       "type": "text"
+      },
+      "source_figure": {
+       "type": "text"
+      },
+      "source_fragment": {
+       "type": "text"
+      },
+      "extraction_status": {
+       "type": "enum",
+       "allowed": [
+        "absent",
+        "extracted",
+        "present_not_extractable"
+       ]
+      },
+      "duplicate_of": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "issues": {
+     "key": "issue_id",
+     "columns": [
+      "publication_id",
+      "issue_id",
+      "record_ids",
+      "check_name",
+      "description",
+      "source_page",
+      "source_fragment"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "issue_id": {
+       "type": "text"
+      },
+      "record_ids": {
+       "type": "text"
+      },
+      "check_name": {
+       "type": "text"
+      },
+      "description": {
+       "type": "text"
+      },
+      "source_page": {
+       "type": "text"
+      },
+      "source_fragment": {
+       "type": "text"
+      }
+     }
+    }
+   }
+  },
+  "rag": {
+   "bom": false,
+   "newline": "\r\n",
+   "tables": {
+    "publications": {
+     "key": "publication_id",
+     "columns": [
+      "publication_id",
+      "title",
+      "year",
+      "DOI",
+      "authors",
+      "in_scope",
+      "exclusion_reason"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "title": {
+       "type": "text"
+      },
+      "year": {
+       "type": "number"
+      },
+      "DOI": {
+       "type": "text"
+      },
+      "authors": {
+       "type": "text"
+      },
+      "in_scope": {
+       "type": "enum",
+       "allowed": [
+        "true",
+        "false"
+       ]
+      },
+      "exclusion_reason": {
+       "type": "text"
+      }
+     }
+    },
+    "configurations": {
+     "key": "config_id",
+     "columns": [
+      "publication_id",
+      "config_id",
+      "rag_variant",
+      "retrieval_method",
+      "retriever_model",
+      "embedding_model",
+      "embedding_version",
+      "chunking_method",
+      "chunk_size",
+      "chunk_overlap",
+      "chunk_unit",
+      "index_type",
+      "vector_store",
+      "top_k",
+      "reranker_model",
+      "generator_model",
+      "generator_version",
+      "prompt_strategy",
+      "context_strategy",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "config_id": {
+       "type": "text"
+      },
+      "rag_variant": {
+       "type": "text"
+      },
+      "retrieval_method": {
+       "type": "text"
+      },
+      "retriever_model": {
+       "type": "text"
+      },
+      "embedding_model": {
+       "type": "text"
+      },
+      "embedding_version": {
+       "type": "text"
+      },
+      "chunking_method": {
+       "type": "text"
+      },
+      "chunk_size": {
+       "type": "number"
+      },
+      "chunk_overlap": {
+       "type": "number"
+      },
+      "chunk_unit": {
+       "type": "text"
+      },
+      "index_type": {
+       "type": "text"
+      },
+      "vector_store": {
+       "type": "text"
+      },
+      "top_k": {
+       "type": "number"
+      },
+      "reranker_model": {
+       "type": "text"
+      },
+      "generator_model": {
+       "type": "text"
+      },
+      "generator_version": {
+       "type": "text"
+      },
+      "prompt_strategy": {
+       "type": "text"
+      },
+      "context_strategy": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "datasets": {
+     "key": "dataset_id",
+     "columns": [
+      "publication_id",
+      "dataset_id",
+      "dataset_name",
+      "dataset_version",
+      "language",
+      "data_split",
+      "scientific_domain",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "dataset_id": {
+       "type": "text"
+      },
+      "dataset_name": {
+       "type": "text"
+      },
+      "dataset_version": {
+       "type": "text"
+      },
+      "language": {
+       "type": "text"
+      },
+      "data_split": {
+       "type": "text"
+      },
+      "scientific_domain": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "tasks": {
+     "key": "task_id",
+     "columns": [
+      "publication_id",
+      "task_id",
+      "task_type",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "task_id": {
+       "type": "text"
+      },
+      "task_type": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "experiments": {
+     "key": "experiment_id",
+     "columns": [
+      "publication_id",
+      "experiment_id",
+      "evaluation_protocol",
+      "baseline_name",
+      "hardware",
+      "latency_ms",
+      "tokens_per_query",
+      "sample_size",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "experiment_id": {
+       "type": "text"
+      },
+      "evaluation_protocol": {
+       "type": "text"
+      },
+      "baseline_name": {
+       "type": "text"
+      },
+      "hardware": {
+       "type": "text"
+      },
+      "latency_ms": {
+       "type": "number"
+      },
+      "tokens_per_query": {
+       "type": "number"
+      },
+      "sample_size": {
+       "type": "number"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "results": {
+     "key": "result_id",
+     "columns": [
+      "publication_id",
+      "result_id",
+      "experiment_id",
+      "config_id",
+      "dataset_id",
+      "task_id",
+      "metric_group",
+      "metric_name",
+      "metric_variant",
+      "metric_direction",
+      "metric_k",
+      "metric_value",
+      "metric_unit",
+      "baseline_value",
+      "aggregation",
+      "sample_size",
+      "raw_value",
+      "raw_unit",
+      "normalized_value",
+      "normalized_unit",
+      "result_origin",
+      "cited_publication_id",
+      "source_page",
+      "source_section",
+      "source_table",
+      "source_figure",
+      "source_fragment",
+      "extraction_status",
+      "duplicate_of",
+      "note"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "result_id": {
+       "type": "text"
+      },
+      "experiment_id": {
+       "type": "text"
+      },
+      "config_id": {
+       "type": "text"
+      },
+      "dataset_id": {
+       "type": "text"
+      },
+      "task_id": {
+       "type": "text"
+      },
+      "metric_group": {
+       "type": "text"
+      },
+      "metric_name": {
+       "type": "text"
+      },
+      "metric_variant": {
+       "type": "text"
+      },
+      "metric_direction": {
+       "type": "text"
+      },
+      "metric_k": {
+       "type": "number"
+      },
+      "metric_value": {
+       "type": "number"
+      },
+      "metric_unit": {
+       "type": "text"
+      },
+      "baseline_value": {
+       "type": "number"
+      },
+      "aggregation": {
+       "type": "text"
+      },
+      "sample_size": {
+       "type": "number"
+      },
+      "raw_value": {
+       "type": "text"
+      },
+      "raw_unit": {
+       "type": "text"
+      },
+      "normalized_value": {
+       "type": "number"
+      },
+      "normalized_unit": {
+       "type": "text"
+      },
+      "result_origin": {
+       "type": "enum",
+       "allowed": [
+        "primary",
+        "cited"
+       ]
+      },
+      "cited_publication_id": {
+       "type": "text"
+      },
+      "source_page": {
+       "type": "number"
+      },
+      "source_section": {
+       "type": "text"
+      },
+      "source_table": {
+       "type": "text"
+      },
+      "source_figure": {
+       "type": "text"
+      },
+      "source_fragment": {
+       "type": "text"
+      },
+      "extraction_status": {
+       "type": "enum",
+       "allowed": [
+        "extracted",
+        "present_not_extractable",
+        "absent"
+       ]
+      },
+      "duplicate_of": {
+       "type": "text"
+      },
+      "note": {
+       "type": "text"
+      }
+     }
+    },
+    "issues": {
+     "key": "issue_id",
+     "columns": [
+      "publication_id",
+      "issue_id",
+      "record_ids",
+      "check_name",
+      "description",
+      "source_page",
+      "source_fragment"
+     ],
+     "fields": {
+      "publication_id": {
+       "type": "text"
+      },
+      "issue_id": {
+       "type": "text"
+      },
+      "record_ids": {
+       "type": "text"
+      },
+      "check_name": {
+       "type": "text"
+      },
+      "description": {
+       "type": "text"
+      },
+      "source_page": {
+       "type": "number"
+      },
+      "source_fragment": {
+       "type": "text"
+      }
+     }
+    }
+   }
+  }
+ }
+}
