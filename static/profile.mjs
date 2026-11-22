@@ -1053,7 +1053,7 @@ async function awaitJob(job) {
 async function startJob(file) {
   const job = await parseResponse(await authorized(await apiFetch("/api/parse", {
     method: "POST",
-    headers: {"Content-Type": "application/pdf", "X-Parser": "pdfplumber", "X-Profile": "solar",
+    headers: {"Content-Type": "application/pdf", "X-Parser": "auto", "X-OCR": "auto", "X-Profile": "solar",
       "X-Filename": encodeURIComponent(file.name)},
     body: file,
   })));
