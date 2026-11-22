@@ -24,7 +24,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Iterable
 
 from rag.extract import extract_document
-from rag.pdf import Document, load_document
+from rag.pdf import Document, load_document, pymupdf_module
 from rag.text import norm
 from csv_safe import safe_csv_value
 
@@ -221,7 +221,7 @@ def _anchor(
 def render_anchor_png(pdf: bytes, page: int, bbox: list[float] | None = None,
                       dpi: int = 150, bboxes: list[list[float]] | None = None) -> bytes:
     """Отрендерить страницу и подсветить найденный прямоугольник."""
-    import pymupdf
+    pymupdf = pymupdf_module()
 
     with pymupdf.open(stream=pdf, filetype="pdf") as document:
         if not 1 <= page <= len(document):

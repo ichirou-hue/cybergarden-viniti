@@ -10,6 +10,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -83,19 +84,40 @@ class Document:
         return [p.number for p in self.pages if target in norm(p.text)]
 
 
-def _page_lines(page) -> tuple[Line, ...]:
-    """Строки с координатами: слова группируются по вертикали, затем по x."""
-    words = [
-        (float(x0), float(y0), float(x1), float(y1), text)
-        for x0, y0, x1, y1, text, _block_no, _line_no, _word_no in page.get_text("words")
-        if text.strip()
+def pymupdf_module():
+    """PyMuPDF под любым из двух имён пакета.
+
+    Новые версии публикуют модуль как ``pymupdf``, старые как ``fitz``.
+    Оба имени дают один и тот же API. Если нет ни одного, ``ImportError``
+    пробрасывается наружу: вызывающий код решает, чем заменить PyMuPDF.
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        import fitz as pymupdf
+    return pymupdf
+
+
+def _lines_from_words(
+    words: Iterable[tuple[float, float, float, float, str]],
+) -> tuple[Line, ...]:
+    """Строки с координатами: слова группируются по вертикали, затем по x.
+
+    Координаты у обоих источников в одном пространстве: начало сверху,
+    ``y`` растёт вниз. ``PyMuPDF`` отдаёт ``get_text("words")``, ``pdfplumber``
+    ``extract_words()``; после приведения к кортежу разбор общий.
+    """
+    tokens = [
+        (float(x0), float(y0), float(x1), float(y1), str(text))
+        for x0, y0, x1, y1, text in words
+        if str(text).strip()
     ]
-    if not words:
+    if not tokens:
         return ()
-    words.sort(key=lambda item: ((item[1] + item[3]) / 2, item[0]))
+    tokens.sort(key=lambda item: ((item[1] + item[3]) / 2, item[0]))
 
     rows: list[dict] = []
-    for x0, y0, x1, y1, text in words:
+    for x0, y0, x1, y1, text in tokens:
         center = (y0 + y1) / 2
         height = max(y1 - y0, 1.0)
         if rows and abs(center - rows[-1]["center"]) <= max(2.5, 0.45 * height):
@@ -107,26 +129,48 @@ def _page_lines(page) -> tuple[Line, ...]:
 
     lines: list[Line] = []
     for row in rows:
-        items = tuple(
+        row_words = tuple(
             Word(text=text, x0=x0, y0=y0, x1=x1, y1=y1)
             for x0, y0, x1, y1, text in sorted(row["words"], key=lambda item: item[0])
         )
         lines.append(
             Line(
-                text=" ".join(item.text for item in items),
-                x0=min(item.x0 for item in items),
-                y0=min(item.y0 for item in items),
-                x1=max(item.x1 for item in items),
-                y1=max(item.y1 for item in items),
-                words=items,
+                text=" ".join(word.text for word in row_words),
+                x0=min(word.x0 for word in row_words),
+                y0=min(word.y0 for word in row_words),
+                x1=max(word.x1 for word in row_words),
+                y1=max(word.y1 for word in row_words),
+                words=row_words,
             )
         )
     lines.sort(key=lambda line: (round(line.y0, 1), line.x0))
     return tuple(lines)
 
 
+def _page_lines(page) -> tuple[Line, ...]:
+    """Строки страницы PyMuPDF с координатами."""
+    return _lines_from_words(
+        (x0, y0, x1, y1, text)
+        for x0, y0, x1, y1, text, _block_no, _line_no, _word_no in page.get_text("words")
+    )
+
+
+def _pdfplumber_lines(page) -> tuple[Line, ...]:
+    """Строки страницы pdfplumber с координатами.
+
+    ``extract_words()`` отдаёт слова в том же пространстве координат, что и
+    PyMuPDF (``top``/``bottom`` от верхнего края), поэтому дальше идёт общий
+    разбор. Без этого таблицы pdfplumber не находились: у ``Page`` не было
+    ``lines``, и координатное извлечение давало ноль результатов.
+    """
+    return _lines_from_words(
+        (word["x0"], word["top"], word["x1"], word["bottom"], word["text"])
+        for word in page.extract_words()
+    )
+
+
 def _load_pymupdf(path: Path) -> Document:
-    import pymupdf  # PyMuPDF
+    pymupdf = pymupdf_module()
 
     with pymupdf.open(path) as document:
         pages = tuple(
@@ -145,7 +189,11 @@ def _load_pdfplumber(path: Path) -> Document:
 
     with pdfplumber.open(path) as pdf:
         pages = tuple(
-            Page(number=i + 1, text=page.extract_text() or "")
+            Page(
+                number=i + 1,
+                text=page.extract_text() or "",
+                lines=_pdfplumber_lines(page),
+            )
             for i, page in enumerate(pdf.pages)
         )
     return Document(path=path, pages=pages, parser="pdfplumber")
@@ -165,7 +213,7 @@ def load_document(path: str | Path, parser: str = "auto") -> Document:
 
 def render_page_png(path: str | Path, page_number: int, dpi: int = 200) -> bytes:
     """Отрендерить страницу в PNG — для evidence и для OCR."""
-    import pymupdf
+    pymupdf = pymupdf_module()
 
     with pymupdf.open(path) as document:
         page = document[page_number - 1]

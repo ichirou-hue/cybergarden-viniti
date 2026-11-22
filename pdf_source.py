@@ -1,8 +1,13 @@
 from collections import defaultdict
 from io import BytesIO
 import re
+import time
 
 import pdfplumber
+
+from viniti import diagnostics
+
+logger = diagnostics.get_logger("pdf_source")
 
 
 MAX_PAGES = 250
@@ -180,22 +185,29 @@ def page_texts(data):
     try:
         from pypdf import PdfReader
     except ImportError:
+        diagnostics.warning(logger, "pdf.text.fallback", parser="pdfplumber",
+                            reason="pypdf_missing")
         with pdfplumber.open(BytesIO(data)) as pdf:
             return {page.page_number: page.extract_text() or "" for page in pdf.pages}
     try:
         reader = PdfReader(BytesIO(data))
         return {number: page.extract_text() or ""
                 for number, page in enumerate(reader.pages, 1)}
-    except Exception:
+    except Exception as exc:
+        diagnostics.warning(logger, "pdf.text.fallback", parser="pdfplumber",
+                            reason=type(exc).__name__)
         with pdfplumber.open(BytesIO(data)) as pdf:
             return {page.page_number: page.extract_text() or "" for page in pdf.pages}
 
 
 def extract(data):
+    started = time.perf_counter()
     sources, warnings, fallback_pages = [], [], []
     with pdfplumber.open(BytesIO(data)) as pdf:
         if not 1 <= len(pdf.pages) <= MAX_PAGES:
             raise ValueError(f"Поддерживаются PDF от 1 до {MAX_PAGES} страниц.")
+        diagnostics.debug(logger, "pdf.parse.start", parser="pdfplumber",
+                          pages=len(pdf.pages), bytes=len(data))
         # After the page-count check, so an oversized PDF is refused before pypdf
         # spends minutes extracting text nobody will read.
         texts = page_texts(data)
@@ -208,9 +220,14 @@ def extract(data):
                 fallback_sources = _pymupdf_line_sources(fallback_words, page.page_number)
                 if fallback_sources:
                     fallback_pages.append(page.page_number)
+                    diagnostics.warning(logger, "pdf.parse.fallback", parser="pymupdf",
+                                        page=page.page_number,
+                                        sources=len(fallback_sources))
                     sources.extend(fallback_sources)
                 else:
                     warnings.append(f"Страница {page.page_number}: текстовый слой пуст или отсутствует.")
+                    diagnostics.warning(logger, "pdf.parse.empty_page",
+                                        page=page.page_number)
                 page.close()
                 continue
             tables = find_tables(deduped)
@@ -234,6 +251,10 @@ def extract(data):
         sources.sort(key=lambda source: (source["page"], source["bbox"][1], source["bbox"][0]))
         for index, source in enumerate(sources, 1):
             source["id"] = index
+        diagnostics.debug(logger, "pdf.parse.done", parser="pdfplumber",
+                          duration_ms=int((time.perf_counter() - started) * 1000),
+                          pages=len(pdf.pages), sources=len(sources),
+                          warnings=len(warnings), fallback_pages=len(fallback_pages))
         return {
             "title": metadata.get("title", ""), "author": metadata.get("author", ""),
             "pages": len(pdf.pages), "sources": sources, "warnings": warnings,

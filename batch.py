@@ -16,6 +16,7 @@ Run:  python batch.py --area rag --split test --resume
       python batch.py --area solar --split dev --dry-run
 """
 import argparse
+import contextvars
 import importlib
 import os
 import pathlib
@@ -27,7 +28,9 @@ import traceback
 from datetime import datetime, timezone
 
 import db
-from viniti import paths
+from viniti import diagnostics, paths
+
+logger = diagnostics.get_logger("batch")
 
 ROOT = paths.REPO_ROOT
 
@@ -154,7 +157,8 @@ def _call_with_timeout(processor, args, timeout):
         except BaseException as exc:  # re-raised in the caller below
             box["error"] = exc
 
-    thread = threading.Thread(target=target, daemon=True)
+    thread = threading.Thread(target=contextvars.copy_context().run, args=(target,),
+                              daemon=True)
     thread.start()
     thread.join(timeout if timeout and timeout > 0 else None)
     if thread.is_alive():
@@ -208,6 +212,10 @@ def run(area, split, *, db_path=db.DEFAULT_DB, resume=False, limit=None,
         "area": area, "split": split, "discovered": len(files),
         "selected": 0, "ok": 0, "error": 0, "skipped": 0, "failed": [],
     }
+    diagnostics.event(logger, "batch.start", area=area, split=split,
+                      discovered=len(files), resume=bool(resume), limit=limit,
+                      timeout=timeout, dry_run=bool(dry_run), revision=revision,
+                      processor=getattr(process, "__name__", type(process).__name__))
 
     if dry_run:
         existing = _existing_jobs(db_path, area) if resume else {}
@@ -221,6 +229,9 @@ def run(area, split, *, db_path=db.DEFAULT_DB, resume=False, limit=None,
         if limit is not None:
             planned = planned[:limit]
         summary["selected"] = len(planned)
+        diagnostics.event(logger, "batch.plan", area=area, split=split,
+                          discovered=len(files), planned=len(planned),
+                          skipped=summary["skipped"])
         log(f"[dry-run] {area}/{split}: {len(files)} файлов, "
             f"к запуску {len(planned)}, пропущено {summary['skipped']}")
         for path in planned:
@@ -260,29 +271,50 @@ def run(area, split, *, db_path=db.DEFAULT_DB, resume=False, limit=None,
                        duration_ms=0, revision=revision, error="")
             started = time.perf_counter()
             status, error = "ok", ""
-            try:
-                value = _call_with_timeout(
-                    process, (area, publication_id, str(path)), timeout)
-                if value is SKIP:
-                    status = "skipped"
-            except KeyboardInterrupt:
-                _write_job(conn, area, publication_id, status="error",
+            # The context also reaches the processor thread: _call_with_timeout
+            # copies it, so an extractor event carries the same job fields.
+            with diagnostics.context(area=area, publication_id=publication_id,
+                                     job_id=f"{area}:{publication_id}",
+                                     attempt=attempts, position=index,
+                                     total=len(queue)):
+                # No file name here: the publication id is already in the
+                # context, and a file name can repeat the article title.
+                diagnostics.debug(logger, "job.start")
+                try:
+                    value = _call_with_timeout(
+                        process, (area, publication_id, str(path)), timeout)
+                    if value is SKIP:
+                        status = "skipped"
+                except KeyboardInterrupt:
+                    _write_job(conn, area, publication_id, status="error",
+                               attempts=attempts, started_at=started_at,
+                               duration_ms=int((time.perf_counter() - started) * 1000),
+                               revision=revision, error="прервано пользователем")
+                    diagnostics.warning(logger, "job.interrupted")
+                    raise
+                except TimeoutError as exc:
+                    status, error = "error", str(exc)
+                    diagnostics.error(logger, "job.timeout", timeout_s=timeout)
+                except NotImplementedError as exc:
+                    status, error = "error", f"NotImplementedError: {exc}"
+                    diagnostics.exception(logger, "job.failed", kind="NotImplementedError")
+                except Exception as exc:
+                    status, error = "error", f"{type(exc).__name__}: {exc}"
+                    diagnostics.exception(logger, "job.failed",
+                                          kind=type(exc).__name__)
+                    if tracebacks:
+                        traceback.print_exc()
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                _write_job(conn, area, publication_id, status=status,
                            attempts=attempts, started_at=started_at,
-                           duration_ms=int((time.perf_counter() - started) * 1000),
-                           revision=revision, error="прервано пользователем")
-                raise
-            except TimeoutError as exc:
-                status, error = "error", str(exc)
-            except NotImplementedError as exc:
-                status, error = "error", f"NotImplementedError: {exc}"
-            except Exception as exc:
-                status, error = "error", f"{type(exc).__name__}: {exc}"
-                if tracebacks:
-                    traceback.print_exc()
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            _write_job(conn, area, publication_id, status=status,
-                       attempts=attempts, started_at=started_at,
-                       duration_ms=duration_ms, revision=revision, error=error)
+                           duration_ms=duration_ms, revision=revision, error=error)
+                # No error text here: the same string goes to jobs.error, and an
+                # extractor exception may quote document text. The failure itself
+                # was already logged above with its traceback.
+                if status == "ok":
+                    diagnostics.event(logger, "job.ok", duration_ms=duration_ms)
+                elif status == "skipped":
+                    diagnostics.event(logger, "job.skipped", duration_ms=duration_ms)
 
             if status == "ok":
                 summary["ok"] += 1
@@ -297,12 +329,17 @@ def run(area, split, *, db_path=db.DEFAULT_DB, resume=False, limit=None,
     finally:
         conn.close()
 
+    diagnostics.event(logger, "batch.summary", area=area, split=split,
+                      discovered=summary["discovered"], selected=summary["selected"],
+                      ok=summary["ok"], error=summary["error"],
+                      skipped=summary["skipped"], failed=len(summary["failed"]))
     log(f"[batch] итог: ok {summary['ok']}, ошибок {summary['error']}, "
         f"пропущено {summary['skipped']}")
     return summary
 
 
 def main(argv):
+    diagnostics.configure()
     parser = argparse.ArgumentParser(
         description="Пакетная обработка одного раздела корпуса с журналом jobs")
     parser.add_argument("--area", required=True, choices=AREAS)
